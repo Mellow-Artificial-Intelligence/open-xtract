@@ -69,25 +69,6 @@ Every chunk is embedded into a vector DB, reranked, and served via RAG with inli
 pip install open-xtract
 ```
 
-### Command Line Interface
-```bash
-open-xtract
-```
-
-### Python API
-```python
-from open_xtract import main
-
-# Basic usage
-main()
-
-# More examples coming soon...
-```
-
-## Trusted by Industry Leaders
-
-Open-xtract is designed for production use by teams who need reliable, scalable document extraction.
-
 ## Contributing
 
 We welcome contributions! Please see our [Contributing Guidelines](CONTRIBUTING.md) for details.
