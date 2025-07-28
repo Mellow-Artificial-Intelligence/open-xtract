@@ -28,21 +28,44 @@
         header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 3rem 0;
+            padding: 4rem 0;
             text-align: center;
         }
         
         .hero h1 {
-            font-size: 3rem;
+            font-size: 3.5rem;
             font-weight: 700;
             margin-bottom: 1rem;
             letter-spacing: -0.02em;
         }
         
-        .hero p {
+        .hero .tagline {
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+        }
+        
+        .hero .description {
             font-size: 1.25rem;
             opacity: 0.9;
             margin-bottom: 2rem;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
+        }
+        
+        .badges {
+            display: flex;
+            justify-content: center;
+            gap: 0.5rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
+        }
+        
+        .badges img {
+            height: 20px;
         }
         
         .cta-buttons {
@@ -54,10 +77,11 @@
         
         .btn {
             display: inline-block;
-            padding: 12px 24px;
+            padding: 15px 30px;
             border-radius: 8px;
             text-decoration: none;
             font-weight: 600;
+            font-size: 1.1rem;
             transition: all 0.3s ease;
         }
         
@@ -74,7 +98,7 @@
         
         .btn:hover {
             transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.1);
+            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
         }
         
         nav {
@@ -97,10 +121,13 @@
             text-decoration: none;
             color: #667eea;
             font-weight: 500;
-            transition: color 0.3s ease;
+            padding: 0.5rem 1rem;
+            border-radius: 4px;
+            transition: all 0.3s ease;
         }
         
         .nav-links a:hover {
+            background: #f0f4ff;
             color: #764ba2;
         }
         
@@ -113,24 +140,36 @@
         }
         
         .section h2 {
-            font-size: 2rem;
-            margin-bottom: 1rem;
+            font-size: 2.5rem;
+            margin-bottom: 1.5rem;
             color: #2d3748;
+            text-align: center;
+        }
+        
+        .section > p {
+            font-size: 1.2rem;
+            text-align: center;
+            margin-bottom: 2rem;
+            color: #666;
+            max-width: 800px;
+            margin-left: auto;
+            margin-right: auto;
         }
         
         .features {
             display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
             gap: 2rem;
-            margin-top: 2rem;
+            margin-top: 3rem;
         }
         
         .feature-card {
             background: white;
-            padding: 2rem;
+            padding: 2.5rem;
             border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.1);
             transition: transform 0.3s ease;
+            text-align: center;
         }
         
         .feature-card:hover {
@@ -140,7 +179,13 @@
         .feature-card h3 {
             color: #667eea;
             margin-bottom: 1rem;
-            font-size: 1.25rem;
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        
+        .feature-card p {
+            color: #666;
+            line-height: 1.6;
         }
         
         .code-block {
@@ -148,34 +193,87 @@
             color: #e2e8f0;
             padding: 1.5rem;
             border-radius: 8px;
-            margin: 1rem 0;
+            margin: 1.5rem 0;
             overflow-x: auto;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+        }
+        
+        .code-block code {
+            font-size: 0.9rem;
         }
         
         .installation {
             background: white;
-            padding: 2rem;
+            padding: 3rem;
             border-radius: 12px;
             box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        
+        .installation h3 {
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+            color: #667eea;
+            font-size: 1.3rem;
+        }
+        
+        .installation ul {
+            text-align: left;
+            max-width: 400px;
+            margin: 0 auto;
+        }
+        
+        .installation ul li {
+            margin-bottom: 0.5rem;
+            color: #666;
+        }
+        
+        .value-props {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1rem;
+            margin: 2rem 0;
+            text-align: center;
+        }
+        
+        .value-prop {
+            padding: 1.5rem;
+            background: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .value-prop h4 {
+            font-weight: 700;
+            color: #667eea;
+            margin-bottom: 0.5rem;
+        }
+        
+        .value-prop p {
+            font-size: 0.9rem;
+            color: #666;
         }
         
         footer {
             background: #2d3748;
             color: white;
             text-align: center;
-            padding: 2rem 0;
+            padding: 3rem 0;
         }
         
         .footer-links {
             display: flex;
             justify-content: center;
             gap: 2rem;
-            margin-bottom: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
         }
         
         .footer-links a {
             color: #a0aec0;
             text-decoration: none;
+            font-weight: 500;
+            transition: color 0.3s ease;
         }
         
         .footer-links a:hover {
@@ -184,7 +282,11 @@
         
         @media (max-width: 768px) {
             .hero h1 {
-                font-size: 2rem;
+                font-size: 2.5rem;
+            }
+            
+            .hero .tagline {
+                font-size: 1.2rem;
             }
             
             .cta-buttons {
@@ -193,6 +295,19 @@
             }
             
             .nav-links {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+            
+            .features {
+                grid-template-columns: 1fr;
+            }
+            
+            .badges {
+                justify-content: center;
+            }
+            
+            .footer-links {
                 flex-direction: column;
                 gap: 1rem;
             }
@@ -204,7 +319,18 @@
         <div class="container">
             <div class="hero">
                 <h1>OPEN-XTRACT</h1>
-                <p>From raw PDFs to clean, queryable text</p>
+                <div class="tagline">From Raw PDFs to Clean, Queryable Text</div>
+                <div class="description">
+                    Open-source framework that extracts structured data from PDFs. Bring your own models and extend to any file type.
+                </div>
+                
+                <div class="badges">
+                    <a href="https://github.com/colesmcintosh/open-xtract"><img src="https://img.shields.io/github/stars/colesmcintosh/open-xtract?style=social" alt="GitHub stars"></a>
+                    <a href="https://pypi.org/project/open-xtract/"><img src="https://badge.fury.io/py/open-xtract.svg" alt="PyPI version"></a>
+                    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+                    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
+                </div>
+                
                 <div class="cta-buttons">
                     <a href="#installation" class="btn btn-primary">Get Started</a>
                     <a href="https://github.com/colesmcintosh/open-xtract" class="btn btn-secondary">View on GitHub</a>
@@ -264,19 +390,39 @@
             </section>
 
             <section id="features" class="section">
-                <h2>Key Features</h2>
+                <h2>Why Open-Xtract?</h2>
+                
+                <div class="value-props">
+                    <div class="value-prop">
+                        <h4>MIT OPEN SOURCE</h4>
+                        <p>Complete freedom to modify and distribute</p>
+                    </div>
+                    <div class="value-prop">
+                        <h4>PDF FIRST FORMAT</h4>
+                        <p>Purpose-built for document processing</p>
+                    </div>
+                    <div class="value-prop">
+                        <h4>FAST EXTRACTION</h4>
+                        <p>Optimized for speed and efficiency</p>
+                    </div>
+                    <div class="value-prop">
+                        <h4>OPEN EXTENSIBLE</h4>
+                        <p>Plugin architecture for any file type</p>
+                    </div>
+                </div>
+                
                 <div class="features">
                     <div class="feature-card">
-                        <h3>Open Source MIT</h3>
-                        <p>Complete freedom to modify and distribute under the MIT license.</p>
+                        <h3>Works With Any Model</h3>
+                        <p>Seamlessly integrate your preferred AI models through our simple adapter API.</p>
                     </div>
                     <div class="feature-card">
-                        <h3>Fast Extraction</h3>
-                        <p>Optimized for speed and efficiency with production-ready performance.</p>
+                        <h3>Layout-Aware Parsing</h3>
+                        <p>Preserves document structure and formatting for better text extraction quality.</p>
                     </div>
                     <div class="feature-card">
-                        <h3>Extensible Architecture</h3>
-                        <p>Plugin architecture allows extension to any file type beyond PDFs.</p>
+                        <h3>Vector Search Ready</h3>
+                        <p>Built-in embedding support with reranked results and transparent citations.</p>
                     </div>
                 </div>
             </section>
@@ -284,29 +430,31 @@
             <section id="examples" class="section">
                 <h2>Quick Start Examples</h2>
                 
-                <h3>Basic Usage</h3>
-                <div class="code-block">
-                    <pre><code class="language-python">from open_xtract import main
+                <div style="max-width: 800px; margin: 0 auto;">
+                    <h3 style="text-align: left; margin-bottom: 1rem; color: #667eea;">Python API</h3>
+                    <div class="code-block">
+                        <pre><code class="language-python">from open_xtract import main
 
 # Basic extraction
 main()  # Get started with open-xtract</code></pre>
-                </div>
+                    </div>
 
-                <h3>Command Line Interface</h3>
-                <div class="code-block">
-                    <code>open-xtract</code>
-                </div>
+                    <h3 style="text-align: left; margin-bottom: 1rem; margin-top: 2rem; color: #667eea;">Command Line Interface</h3>
+                    <div class="code-block">
+                        <code>open-xtract</code>
+                    </div>
 
-                <p><strong>More comprehensive examples and tutorials coming soon!</strong></p>
+                    <p style="text-align: center; margin-top: 2rem;"><strong>More comprehensive examples and tutorials coming soon!</strong></p>
+                </div>
             </section>
 
             <section id="api" class="section">
                 <h2>API Reference</h2>
                 <p>Detailed API documentation is currently being developed. For now, explore the codebase and examples to understand the available functionality.</p>
                 
-                <div class="feature-card">
+                <div class="feature-card" style="max-width: 600px; margin: 2rem auto;">
                     <h3>Core Modules</h3>
-                    <ul>
+                    <ul style="text-align: left;">
                         <li><strong>Extraction Engine</strong> - PDF processing and text extraction</li>
                         <li><strong>Model Adapters</strong> - Interface for OCR and LLM integration</li>
                         <li><strong>Vector Search</strong> - Embedding and retrieval system</li>
