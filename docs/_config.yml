@@ -1,0 +1,18 @@
+title: Open-Xtract Documentation
+description: Open-source framework that extracts structured data from PDFs
+baseurl: "/open-xtract"
+url: "https://colesmcintosh.github.io"
+
+markdown: kramdown
+highlighter: rouge
+theme: minima
+
+plugins:
+  - jekyll-feed
+  - jekyll-sitemap
+
+exclude:
+  - Gemfile
+  - Gemfile.lock
+  - node_modules
+  - vendor 
