@@ -5,401 +5,129 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Open-Xtract Documentation</title>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-        
         body {
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Courier New', monospace;
-            line-height: 1.6;
-            color: #000;
-            background: #fff;
-        }
-        
-        .container {
             max-width: 800px;
             margin: 0 auto;
-            padding: 0 20px;
-        }
-        
-        header {
-            background: #000;
-            color: #fff;
-            padding: 4rem 0;
-            text-align: center;
-        }
-        
-        .hero h1 {
-            font-size: 3rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-        }
-        
-        .hero .tagline {
-            font-size: 1.2rem;
-            font-weight: 600;
-            margin-bottom: 1rem;
-            text-transform: uppercase;
-        }
-        
-        .hero .description {
-            font-size: 1rem;
-            margin-bottom: 2rem;
-            font-style: italic;
-        }
-        
-        .badges {
-            margin-bottom: 2rem;
-        }
-        
-        .badges img {
-            height: 20px;
-            margin: 0 0.25rem;
-        }
-        
-        .cta-buttons {
-            margin-top: 2rem;
-        }
-        
-        .btn {
-            display: inline-block;
-            padding: 12px 24px;
-            margin: 0 0.5rem;
-            border: 2px solid #fff;
-            text-decoration: none;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        
-        .btn-primary {
-            background: #fff;
-            color: #000;
-        }
-        
-        .btn-secondary {
-            background: #000;
-            color: #fff;
-        }
-        
-        .btn:hover {
-            background: #000;
-            color: #fff;
-        }
-        
-        .btn-primary:hover {
-            background: #000;
-            color: #fff;
-        }
-        
-        main {
-            padding: 4rem 0;
-        }
-        
-        .section {
-            margin-bottom: 4rem;
-        }
-        
-        .section h2 {
-            font-size: 2rem;
-            margin-bottom: 2rem;
-            color: #000;
-            text-align: center;
-        }
-        
-        .code-block {
-            background: #000;
-            color: #fff;
-            padding: 1.5rem;
-            margin: 1.5rem 0;
-            border: 2px solid #000;
-            text-align: center;
-        }
-        
-        .capability {
-            background: #fff;
-            padding: 2rem;
-            margin-bottom: 2rem;
-            border: 2px solid #000;
-        }
-        
-        .capability h3 {
-            color: #000;
-            font-size: 1.2rem;
-            font-weight: 700;
-            margin-bottom: 1rem;
-        }
-        
-        .capability p {
-            color: #000;
-            margin-bottom: 1rem;
-        }
-        
-        .capability ul {
-            list-style: none;
-            padding: 0;
-        }
-        
-        .capability ul li {
-            color: #000;
-            margin-bottom: 0.5rem;
-            padding-left: 1rem;
-            position: relative;
-        }
-        
-        .capability ul li::before {
-            content: '•';
-            color: #000;
-            font-weight: bold;
-            position: absolute;
-            left: 0;
-        }
-        
-        .value-prop {
-            padding: 1.5rem;
-            margin-bottom: 1rem;
-            background: #fff;
-            border: 2px solid #000;
-            text-align: center;
-        }
-        
-        .value-prop h4 {
-            font-weight: 700;
-            color: #000;
-            margin-bottom: 0.5rem;
-        }
-        
-        .value-prop p {
-            color: #000;
-        }
-        
-        .roadmap {
-            background: #fff;
-            padding: 2rem;
-            border: 2px solid #000;
-        }
-        
-        .roadmap ul {
-            list-style: none;
-            padding: 0;
-        }
-        
-        .roadmap ul li {
-            padding: 0.5rem 0;
-            border-bottom: 1px solid #000;
-            color: #000;
-        }
-        
-        .roadmap ul li::before {
-            content: '☐ ';
-            color: #000;
-            font-weight: bold;
-            margin-right: 0.5rem;
-        }
-        
-        .support {
-            background: #fff;
-            padding: 2rem;
-            border: 2px solid #000;
-            text-align: center;
-        }
-        
-        .support-links {
-            margin-bottom: 0;
-        }
-        
-        .support-links a {
-            color: #000;
-            text-decoration: none;
-            font-weight: 500;
-            margin: 0 1rem;
-        }
-        
-        .support-links a:hover {
-            text-decoration: underline;
-        }
-        
-        footer {
-            background: #000;
-            color: #fff;
-            text-align: center;
-            padding: 3rem 0;
-        }
-        
-        .footer-links a {
-            color: #fff;
-            text-decoration: none;
-            font-weight: 500;
-            margin: 0 1rem;
-        }
-        
-        .footer-links a:hover {
-            color: #ccc;
-        }
-        
-        @media (max-width: 768px) {
-            .hero h1 {
-                font-size: 2rem;
-            }
-            
-            .hero .tagline {
-                font-size: 1rem;
-            }
-            
-            .btn {
-                display: block;
-                margin: 0.5rem 0;
-            }
-            
-            .support-links a {
-                display: block;
-                margin: 0.5rem 0;
-            }
-            
-            .footer-links a {
-                display: block;
-                margin: 0.5rem 0;
-            }
+            padding: 20px;
         }
     </style>
 </head>
 <body>
-    <header>
-        <div class="container">
-            <div class="hero">
-                <h1>OPEN-XTRACT</h1>
-                <div class="tagline">From Raw PDFs to Clean, Queryable Text</div>
-                <div class="description">
-                    Open-source framework that extracts structured data from PDFs.<br>
-                    Bring your own models and extend to any file type.
-                </div>
-                
-                <div class="badges">
-                    <a href="https://github.com/colesmcintosh/open-xtract"><img src="https://img.shields.io/github/stars/colesmcintosh/open-xtract?style=social" alt="GitHub stars"></a>
-                    <a href="https://pypi.org/project/open-xtract/"><img src="https://badge.fury.io/py/open-xtract.svg" alt="PyPI version"></a>
-                    <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
-                    <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
-                </div>
-                
-                <div class="cta-buttons">
-                    <a href="https://github.com/colesmcintosh/open-xtract" class="btn btn-primary">Star on GitHub</a>
-                    <a href="https://pypi.org/project/open-xtract/" class="btn btn-secondary">Install from PyPI</a>
-                </div>
-            </div>
-        </div>
-    </header>
+    <center>
+        <h1>OPEN-XTRACT</h1>
+        <h2>FROM RAW PDFS TO CLEAN, QUERYABLE TEXT</h2>
+        <p><i>Open-source framework that extracts structured data from PDFs.<br>
+        Bring your own models and extend to any file type.</i></p>
+        
+        <p>
+            <a href="https://github.com/colesmcintosh/open-xtract"><img src="https://img.shields.io/github/stars/colesmcintosh/open-xtract?style=social" alt="GitHub stars"></a>
+            <a href="https://pypi.org/project/open-xtract/"><img src="https://badge.fury.io/py/open-xtract.svg" alt="PyPI version"></a>
+            <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-yellow.svg" alt="License: MIT"></a>
+            <a href="https://www.python.org/downloads/"><img src="https://img.shields.io/badge/python-3.12+-blue.svg" alt="Python 3.12+"></a>
+        </p>
+        
+        <p>
+            <a href="https://github.com/colesmcintosh/open-xtract"><b>[Star on GitHub]</b></a>
+            <a href="https://pypi.org/project/open-xtract/"><b>[Install from PyPI]</b></a>
+        </p>
+    </center>
 
-    <main>
-        <div class="container">
-            <section class="section">
-                <h2>Quick Start</h2>
-                <div class="code-block">
-                    <code>pip install open-xtract</code>
-                </div>
-            </section>
+    <hr>
 
-            <section class="section">
-                <h2>Capabilities</h2>
-                
-                <div class="capability">
-                    <h3>MODEL AGNOSTIC</h3>
-                    <p>Bring your own OCR or LLM. open-xtract abstracts the extraction layer so you can swap engines at will.</p>
-                    <ul>
-                        <li><strong>WORKS WITH ANY MODEL</strong> - Seamlessly integrate your preferred AI models</li>
-                        <li><strong>SIMPLE ADAPTER API</strong> - Clean, intuitive interface for model integration</li>
-                        <li><strong>OPEN SOURCE MIT</strong> - Complete freedom to modify and distribute</li>
-                    </ul>
-                </div>
-                
-                <div class="capability">
-                    <h3>PDF-FIRST INGESTION</h3>
-                    <p>Drop in a PDF and receive clean, layout-aware text that's ready for embeddings.</p>
-                    <ul>
-                        <li><strong>LAYOUT-AWARE PARSING</strong> - Preserves document structure and formatting</li>
-                        <li><strong>TOKENIZATION INCLUDED</strong> - Ready-to-use text preprocessing</li>
-                        <li><strong>IMAGES & VIDEO SOON</strong> - Expanding to multimedia content</li>
-                    </ul>
-                </div>
-                
-                <div class="capability">
-                    <h3>CITED RETRIEVAL</h3>
-                    <p>Every chunk is embedded into a vector DB, reranked, and served via RAG with inline citations.</p>
-                    <ul>
-                        <li><strong>VECTOR SEARCH</strong> - Semantic similarity matching</li>
-                        <li><strong>RERANKED ANSWERS</strong> - Improved relevance scoring</li>
-                        <li><strong>INLINE CITATIONS</strong> - Transparent source attribution</li>
-                    </ul>
-                </div>
-            </section>
+    <h2>Quick Start</h2>
+    <pre><code>pip install open-xtract</code></pre>
 
-            <section class="section">
-                <h2>Why Open-Xtract?</h2>
-                
-                <div class="value-prop">
-                    <h4>MIT OPEN SOURCE</h4>
-                    <p>Complete freedom to modify and distribute</p>
-                </div>
-                
-                <div class="value-prop">
-                    <h4>PDF FIRST FORMAT</h4>
-                    <p>Purpose-built for document processing</p>
-                </div>
-                
-                <div class="value-prop">
-                    <h4>FAST EXTRACTION</h4>
-                    <p>Optimized for speed and efficiency</p>
-                </div>
-                
-                <div class="value-prop">
-                    <h4>OPEN EXTENSIBLE</h4>
-                    <p>Plugin architecture for any file type</p>
-                </div>
-            </section>
+    <hr>
 
-            <section class="section">
-                <h2>Roadmap</h2>
-                
-                <div class="roadmap">
-                    <ul>
-                        <li>Core PDF extraction framework</li>
-                        <li>Model-agnostic adapter API</li>
-                        <li>Vector search with citations</li>
-                        <li>Image extraction support</li>
-                        <li>Video content processing</li>
-                        <li>Advanced OCR integrations</li>
-                        <li>Cloud deployment templates</li>
-                    </ul>
-                </div>
-            </section>
+    <h2>Capabilities</h2>
+    
+    <h3>MODEL AGNOSTIC</h3>
+    <p>Bring your own OCR or LLM. open-xtract abstracts the extraction layer so you can swap engines at will.</p>
+    <ul>
+        <li><b>WORKS WITH ANY MODEL</b> - Seamlessly integrate your preferred AI models</li>
+        <li><b>SIMPLE ADAPTER API</b> - Clean, intuitive interface for model integration</li>
+        <li><b>OPEN SOURCE MIT</b> - Complete freedom to modify and distribute</li>
+    </ul>
+    
+    <h3>PDF-FIRST INGESTION</h3>
+    <p>Drop in a PDF and receive clean, layout-aware text that's ready for embeddings.</p>
+    <ul>
+        <li><b>LAYOUT-AWARE PARSING</b> - Preserves document structure and formatting</li>
+        <li><b>TOKENIZATION INCLUDED</b> - Ready-to-use text preprocessing</li>
+        <li><b>IMAGES & VIDEO SOON</b> - Expanding to multimedia content</li>
+    </ul>
+    
+    <h3>CITED RETRIEVAL</h3>
+    <p>Every chunk is embedded into a vector DB, reranked, and served via RAG with inline citations.</p>
+    <ul>
+        <li><b>VECTOR SEARCH</b> - Semantic similarity matching</li>
+        <li><b>RERANKED ANSWERS</b> - Improved relevance scoring</li>
+        <li><b>INLINE CITATIONS</b> - Transparent source attribution</li>
+    </ul>
 
-            <section class="section">
-                <h2>Support & Community</h2>
-                
-                <div class="support">
-                    <div class="support-links">
-                        <a href="https://www.open-xtract.com/">Website</a>
-                        <a href="https://github.com/colesmcintosh/open-xtract/issues">GitHub Issues</a>
-                        <a href="https://github.com/colesmcintosh/open-xtract/discussions">Discussions</a>
-                        <a href="https://www.open-xtract.com/privacy">Privacy</a>
-                        <a href="https://www.open-xtract.com/security">Security</a>
-                    </div>
-                </div>
-            </section>
-        </div>
-    </main>
+    <hr>
+
+    <h2>Why Open-Xtract?</h2>
+    
+    <blockquote>
+        <h4>MIT OPEN SOURCE</h4>
+        <p>Complete freedom to modify and distribute</p>
+    </blockquote>
+    
+    <blockquote>
+        <h4>PDF FIRST FORMAT</h4>
+        <p>Purpose-built for document processing</p>
+    </blockquote>
+    
+    <blockquote>
+        <h4>FAST EXTRACTION</h4>
+        <p>Optimized for speed and efficiency</p>
+    </blockquote>
+    
+    <blockquote>
+        <h4>OPEN EXTENSIBLE</h4>
+        <p>Plugin architecture for any file type</p>
+    </blockquote>
+
+    <hr>
+
+    <h2>Roadmap</h2>
+    
+    <ul>
+        <li>☐ Core PDF extraction framework</li>
+        <li>☐ Model-agnostic adapter API</li>
+        <li>☐ Vector search with citations</li>
+        <li>☐ Image extraction support</li>
+        <li>☐ Video content processing</li>
+        <li>☐ Advanced OCR integrations</li>
+        <li>☐ Cloud deployment templates</li>
+    </ul>
+
+    <hr>
+
+    <h2>Support & Community</h2>
+    
+    <p>
+        <a href="https://www.open-xtract.com/">Website</a> |
+        <a href="https://github.com/colesmcintosh/open-xtract/issues">GitHub Issues</a> |
+        <a href="https://github.com/colesmcintosh/open-xtract/discussions">Discussions</a> |
+        <a href="https://www.open-xtract.com/privacy">Privacy</a> |
+        <a href="https://www.open-xtract.com/security">Security</a>
+    </p>
+
+    <hr>
 
     <footer>
-        <div class="container">
-            <div class="footer-links">
-                <a href="https://www.open-xtract.com/">Website</a>
-                <a href="https://github.com/colesmcintosh/open-xtract">GitHub</a>
-                <a href="https://pypi.org/project/open-xtract/">PyPI</a>
+        <center>
+            <p>
+                <a href="https://www.open-xtract.com/">Website</a> |
+                <a href="https://github.com/colesmcintosh/open-xtract">GitHub</a> |
+                <a href="https://pypi.org/project/open-xtract/">PyPI</a> |
                 <a href="https://github.com/colesmcintosh/open-xtract/issues">Issues</a>
-            </div>
-            <p><strong>© 2025 OPEN-XTRACT. ALL RIGHTS RESERVED.</strong></p>
-            <p style="margin-top: 0.5rem; font-style: italic; color: #ccc;">Made with love for the open source community</p>
-        </div>
+            </p>
+            <p><b>© 2025 OPEN-XTRACT. ALL RIGHTS RESERVED.</b></p>
+            <p><i>Made with love for the open source community</i></p>
+        </center>
     </footer>
 </body>
 </html> 
