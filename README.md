@@ -23,12 +23,6 @@
 pip install open-xtract
 ```
 
-```python
-from open_xtract import main
-
-main()  # Get started with open-xtract
-```
-
 ## Capabilities
 
 ### **MODEL AGNOSTIC**
