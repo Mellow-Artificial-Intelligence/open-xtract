@@ -4,7 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Open-Xtract Documentation</title>
-    <link href="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/themes/prism-tomorrow.min.css" rel="stylesheet">
     <style>
         * {
             margin: 0;
@@ -13,122 +12,85 @@
         }
         
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', 'Courier New', monospace;
             line-height: 1.6;
-            color: #333;
-            background: #f8f9fa;
+            color: #000;
+            background: #fff;
         }
         
         .container {
-            max-width: 1200px;
+            max-width: 800px;
             margin: 0 auto;
             padding: 0 20px;
         }
         
         header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
+            background: #000;
+            color: #fff;
             padding: 4rem 0;
             text-align: center;
         }
         
         .hero h1 {
-            font-size: 3.5rem;
+            font-size: 3rem;
             font-weight: 700;
             margin-bottom: 1rem;
-            letter-spacing: -0.02em;
         }
         
         .hero .tagline {
-            font-size: 1.5rem;
+            font-size: 1.2rem;
             font-weight: 600;
             margin-bottom: 1rem;
             text-transform: uppercase;
-            letter-spacing: 0.1em;
         }
         
         .hero .description {
-            font-size: 1.25rem;
-            opacity: 0.9;
+            font-size: 1rem;
             margin-bottom: 2rem;
-            max-width: 800px;
-            margin-left: auto;
-            margin-right: auto;
+            font-style: italic;
         }
         
         .badges {
-            display: flex;
-            justify-content: center;
-            gap: 0.5rem;
             margin-bottom: 2rem;
-            flex-wrap: wrap;
         }
         
         .badges img {
             height: 20px;
+            margin: 0 0.25rem;
         }
         
         .cta-buttons {
-            display: flex;
-            gap: 1rem;
-            justify-content: center;
-            flex-wrap: wrap;
+            margin-top: 2rem;
         }
         
         .btn {
             display: inline-block;
-            padding: 15px 30px;
-            border-radius: 8px;
+            padding: 12px 24px;
+            margin: 0 0.5rem;
+            border: 2px solid #fff;
             text-decoration: none;
             font-weight: 600;
-            font-size: 1.1rem;
             transition: all 0.3s ease;
         }
         
         .btn-primary {
-            background: white;
-            color: #667eea;
+            background: #fff;
+            color: #000;
         }
         
         .btn-secondary {
-            background: rgba(255,255,255,0.2);
-            color: white;
-            border: 2px solid white;
+            background: #000;
+            color: #fff;
         }
         
         .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 8px 20px rgba(0,0,0,0.2);
+            background: #000;
+            color: #fff;
         }
         
-        nav {
-            background: white;
-            padding: 1rem 0;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-        
-        .nav-links {
-            display: flex;
-            list-style: none;
-            gap: 2rem;
-            justify-content: center;
-        }
-        
-        .nav-links a {
-            text-decoration: none;
-            color: #667eea;
-            font-weight: 500;
-            padding: 0.5rem 1rem;
-            border-radius: 4px;
-            transition: all 0.3s ease;
-        }
-        
-        .nav-links a:hover {
-            background: #f0f4ff;
-            color: #764ba2;
+        .btn-primary:hover {
+            background: #000;
+            color: #fff;
         }
         
         main {
@@ -140,176 +102,164 @@
         }
         
         .section h2 {
-            font-size: 2.5rem;
-            margin-bottom: 1.5rem;
-            color: #2d3748;
-            text-align: center;
-        }
-        
-        .section > p {
-            font-size: 1.2rem;
-            text-align: center;
+            font-size: 2rem;
             margin-bottom: 2rem;
-            color: #666;
-            max-width: 800px;
-            margin-left: auto;
-            margin-right: auto;
-        }
-        
-        .features {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-            gap: 2rem;
-            margin-top: 3rem;
-        }
-        
-        .feature-card {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-            transition: transform 0.3s ease;
+            color: #000;
             text-align: center;
-        }
-        
-        .feature-card:hover {
-            transform: translateY(-5px);
-        }
-        
-        .feature-card h3 {
-            color: #667eea;
-            margin-bottom: 1rem;
-            font-size: 1.5rem;
-            font-weight: 700;
-        }
-        
-        .feature-card p {
-            color: #666;
-            line-height: 1.6;
         }
         
         .code-block {
-            background: #2d3748;
-            color: #e2e8f0;
+            background: #000;
+            color: #fff;
             padding: 1.5rem;
-            border-radius: 8px;
             margin: 1.5rem 0;
-            overflow-x: auto;
-            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-        }
-        
-        .code-block code {
-            font-size: 0.9rem;
-        }
-        
-        .installation {
-            background: white;
-            padding: 3rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+            border: 2px solid #000;
             text-align: center;
         }
         
-        .installation h3 {
-            margin-top: 2rem;
+        .capability {
+            background: #fff;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            border: 2px solid #000;
+        }
+        
+        .capability h3 {
+            color: #000;
+            font-size: 1.2rem;
+            font-weight: 700;
             margin-bottom: 1rem;
-            color: #667eea;
-            font-size: 1.3rem;
         }
         
-        .installation ul {
-            text-align: left;
-            max-width: 400px;
-            margin: 0 auto;
+        .capability p {
+            color: #000;
+            margin-bottom: 1rem;
         }
         
-        .installation ul li {
+        .capability ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .capability ul li {
+            color: #000;
             margin-bottom: 0.5rem;
-            color: #666;
+            padding-left: 1rem;
+            position: relative;
         }
         
-        .value-props {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
-            gap: 1rem;
-            margin: 2rem 0;
-            text-align: center;
+        .capability ul li::before {
+            content: '•';
+            color: #000;
+            font-weight: bold;
+            position: absolute;
+            left: 0;
         }
         
         .value-prop {
             padding: 1.5rem;
-            background: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            margin-bottom: 1rem;
+            background: #fff;
+            border: 2px solid #000;
+            text-align: center;
         }
         
         .value-prop h4 {
             font-weight: 700;
-            color: #667eea;
+            color: #000;
             margin-bottom: 0.5rem;
         }
         
         .value-prop p {
-            font-size: 0.9rem;
-            color: #666;
+            color: #000;
+        }
+        
+        .roadmap {
+            background: #fff;
+            padding: 2rem;
+            border: 2px solid #000;
+        }
+        
+        .roadmap ul {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .roadmap ul li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid #000;
+            color: #000;
+        }
+        
+        .roadmap ul li::before {
+            content: '☐ ';
+            color: #000;
+            font-weight: bold;
+            margin-right: 0.5rem;
+        }
+        
+        .support {
+            background: #fff;
+            padding: 2rem;
+            border: 2px solid #000;
+            text-align: center;
+        }
+        
+        .support-links {
+            margin-bottom: 0;
+        }
+        
+        .support-links a {
+            color: #000;
+            text-decoration: none;
+            font-weight: 500;
+            margin: 0 1rem;
+        }
+        
+        .support-links a:hover {
+            text-decoration: underline;
         }
         
         footer {
-            background: #2d3748;
-            color: white;
+            background: #000;
+            color: #fff;
             text-align: center;
             padding: 3rem 0;
         }
         
-        .footer-links {
-            display: flex;
-            justify-content: center;
-            gap: 2rem;
-            margin-bottom: 1.5rem;
-            flex-wrap: wrap;
-        }
-        
         .footer-links a {
-            color: #a0aec0;
+            color: #fff;
             text-decoration: none;
             font-weight: 500;
-            transition: color 0.3s ease;
+            margin: 0 1rem;
         }
         
         .footer-links a:hover {
-            color: white;
+            color: #ccc;
         }
         
         @media (max-width: 768px) {
             .hero h1 {
-                font-size: 2.5rem;
+                font-size: 2rem;
             }
             
             .hero .tagline {
-                font-size: 1.2rem;
+                font-size: 1rem;
             }
             
-            .cta-buttons {
-                flex-direction: column;
-                align-items: center;
+            .btn {
+                display: block;
+                margin: 0.5rem 0;
             }
             
-            .nav-links {
-                flex-direction: column;
-                gap: 0.5rem;
+            .support-links a {
+                display: block;
+                margin: 0.5rem 0;
             }
             
-            .features {
-                grid-template-columns: 1fr;
-            }
-            
-            .badges {
-                justify-content: center;
-            }
-            
-            .footer-links {
-                flex-direction: column;
-                gap: 1rem;
+            .footer-links a {
+                display: block;
+                margin: 0.5rem 0;
             }
         }
     </style>
@@ -321,7 +271,8 @@
                 <h1>OPEN-XTRACT</h1>
                 <div class="tagline">From Raw PDFs to Clean, Queryable Text</div>
                 <div class="description">
-                    Open-source framework that extracts structured data from PDFs. Bring your own models and extend to any file type.
+                    Open-source framework that extracts structured data from PDFs.<br>
+                    Bring your own models and extend to any file type.
                 </div>
                 
                 <div class="badges">
@@ -332,134 +283,107 @@
                 </div>
                 
                 <div class="cta-buttons">
-                    <a href="#installation" class="btn btn-primary">Get Started</a>
-                    <a href="https://github.com/colesmcintosh/open-xtract" class="btn btn-secondary">View on GitHub</a>
+                    <a href="https://github.com/colesmcintosh/open-xtract" class="btn btn-primary">Star on GitHub</a>
+                    <a href="https://pypi.org/project/open-xtract/" class="btn btn-secondary">Install from PyPI</a>
                 </div>
             </div>
         </div>
     </header>
 
-    <nav>
-        <div class="container">
-            <ul class="nav-links">
-                <li><a href="#overview">Overview</a></li>
-                <li><a href="#installation">Installation</a></li>
-                <li><a href="#features">Features</a></li>
-                <li><a href="#examples">Examples</a></li>
-                <li><a href="#api">API Reference</a></li>
-            </ul>
-        </div>
-    </nav>
-
     <main>
         <div class="container">
-            <section id="overview" class="section">
-                <h2>Overview</h2>
-                <p>Open-xtract is an open-source framework that extracts structured data from PDFs. Designed with modularity in mind, it allows you to bring your own OCR or LLM models and extend to any file type.</p>
-                
-                <div class="features">
-                    <div class="feature-card">
-                        <h3>Model Agnostic</h3>
-                        <p>Simple adapter API works with any OCR engine or large language model. Swap models at will without changing your code.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>PDF-First Ingestion</h3>
-                        <p>Layout-aware parsing produces clean, tokenized text that preserves document structure and formatting.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>Cited Retrieval</h3>
-                        <p>Vector search with reranked answers and inline citations. Every chunk is embedded and served via RAG.</p>
-                    </div>
+            <section class="section">
+                <h2>Quick Start</h2>
+                <div class="code-block">
+                    <code>pip install open-xtract</code>
                 </div>
             </section>
 
-            <section id="installation" class="section">
-                <div class="installation">
-                    <h2>Installation</h2>
-                    <p>Install open-xtract using pip:</p>
-                    <div class="code-block">
-                        <code>pip install open-xtract</code>
-                    </div>
-                    
-                    <h3>Requirements</h3>
+            <section class="section">
+                <h2>Capabilities</h2>
+                
+                <div class="capability">
+                    <h3>MODEL AGNOSTIC</h3>
+                    <p>Bring your own OCR or LLM. open-xtract abstracts the extraction layer so you can swap engines at will.</p>
                     <ul>
-                        <li>Python 3.12 or higher</li>
-                        <li>Compatible with all major operating systems</li>
+                        <li><strong>WORKS WITH ANY MODEL</strong> - Seamlessly integrate your preferred AI models</li>
+                        <li><strong>SIMPLE ADAPTER API</strong> - Clean, intuitive interface for model integration</li>
+                        <li><strong>OPEN SOURCE MIT</strong> - Complete freedom to modify and distribute</li>
+                    </ul>
+                </div>
+                
+                <div class="capability">
+                    <h3>PDF-FIRST INGESTION</h3>
+                    <p>Drop in a PDF and receive clean, layout-aware text that's ready for embeddings.</p>
+                    <ul>
+                        <li><strong>LAYOUT-AWARE PARSING</strong> - Preserves document structure and formatting</li>
+                        <li><strong>TOKENIZATION INCLUDED</strong> - Ready-to-use text preprocessing</li>
+                        <li><strong>IMAGES & VIDEO SOON</strong> - Expanding to multimedia content</li>
+                    </ul>
+                </div>
+                
+                <div class="capability">
+                    <h3>CITED RETRIEVAL</h3>
+                    <p>Every chunk is embedded into a vector DB, reranked, and served via RAG with inline citations.</p>
+                    <ul>
+                        <li><strong>VECTOR SEARCH</strong> - Semantic similarity matching</li>
+                        <li><strong>RERANKED ANSWERS</strong> - Improved relevance scoring</li>
+                        <li><strong>INLINE CITATIONS</strong> - Transparent source attribution</li>
                     </ul>
                 </div>
             </section>
 
-            <section id="features" class="section">
+            <section class="section">
                 <h2>Why Open-Xtract?</h2>
                 
-                <div class="value-props">
-                    <div class="value-prop">
-                        <h4>MIT OPEN SOURCE</h4>
-                        <p>Complete freedom to modify and distribute</p>
-                    </div>
-                    <div class="value-prop">
-                        <h4>PDF FIRST FORMAT</h4>
-                        <p>Purpose-built for document processing</p>
-                    </div>
-                    <div class="value-prop">
-                        <h4>FAST EXTRACTION</h4>
-                        <p>Optimized for speed and efficiency</p>
-                    </div>
-                    <div class="value-prop">
-                        <h4>OPEN EXTENSIBLE</h4>
-                        <p>Plugin architecture for any file type</p>
-                    </div>
+                <div class="value-prop">
+                    <h4>MIT OPEN SOURCE</h4>
+                    <p>Complete freedom to modify and distribute</p>
                 </div>
                 
-                <div class="features">
-                    <div class="feature-card">
-                        <h3>Works With Any Model</h3>
-                        <p>Seamlessly integrate your preferred AI models through our simple adapter API.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>Layout-Aware Parsing</h3>
-                        <p>Preserves document structure and formatting for better text extraction quality.</p>
-                    </div>
-                    <div class="feature-card">
-                        <h3>Vector Search Ready</h3>
-                        <p>Built-in embedding support with reranked results and transparent citations.</p>
-                    </div>
+                <div class="value-prop">
+                    <h4>PDF FIRST FORMAT</h4>
+                    <p>Purpose-built for document processing</p>
+                </div>
+                
+                <div class="value-prop">
+                    <h4>FAST EXTRACTION</h4>
+                    <p>Optimized for speed and efficiency</p>
+                </div>
+                
+                <div class="value-prop">
+                    <h4>OPEN EXTENSIBLE</h4>
+                    <p>Plugin architecture for any file type</p>
                 </div>
             </section>
 
-            <section id="examples" class="section">
-                <h2>Quick Start Examples</h2>
+            <section class="section">
+                <h2>Roadmap</h2>
                 
-                <div style="max-width: 800px; margin: 0 auto;">
-                    <h3 style="text-align: left; margin-bottom: 1rem; color: #667eea;">Python API</h3>
-                    <div class="code-block">
-                        <pre><code class="language-python">from open_xtract import main
-
-# Basic extraction
-main()  # Get started with open-xtract</code></pre>
-                    </div>
-
-                    <h3 style="text-align: left; margin-bottom: 1rem; margin-top: 2rem; color: #667eea;">Command Line Interface</h3>
-                    <div class="code-block">
-                        <code>open-xtract</code>
-                    </div>
-
-                    <p style="text-align: center; margin-top: 2rem;"><strong>More comprehensive examples and tutorials coming soon!</strong></p>
-                </div>
-            </section>
-
-            <section id="api" class="section">
-                <h2>API Reference</h2>
-                <p>Detailed API documentation is currently being developed. For now, explore the codebase and examples to understand the available functionality.</p>
-                
-                <div class="feature-card" style="max-width: 600px; margin: 2rem auto;">
-                    <h3>Core Modules</h3>
-                    <ul style="text-align: left;">
-                        <li><strong>Extraction Engine</strong> - PDF processing and text extraction</li>
-                        <li><strong>Model Adapters</strong> - Interface for OCR and LLM integration</li>
-                        <li><strong>Vector Search</strong> - Embedding and retrieval system</li>
-                        <li><strong>Citation System</strong> - Source tracking and attribution</li>
+                <div class="roadmap">
+                    <ul>
+                        <li>Core PDF extraction framework</li>
+                        <li>Model-agnostic adapter API</li>
+                        <li>Vector search with citations</li>
+                        <li>Image extraction support</li>
+                        <li>Video content processing</li>
+                        <li>Advanced OCR integrations</li>
+                        <li>Cloud deployment templates</li>
                     </ul>
+                </div>
+            </section>
+
+            <section class="section">
+                <h2>Support & Community</h2>
+                
+                <div class="support">
+                    <div class="support-links">
+                        <a href="https://www.open-xtract.com/">Website</a>
+                        <a href="https://github.com/colesmcintosh/open-xtract/issues">GitHub Issues</a>
+                        <a href="https://github.com/colesmcintosh/open-xtract/discussions">Discussions</a>
+                        <a href="https://www.open-xtract.com/privacy">Privacy</a>
+                        <a href="https://www.open-xtract.com/security">Security</a>
+                    </div>
                 </div>
             </section>
         </div>
@@ -473,11 +397,9 @@ main()  # Get started with open-xtract</code></pre>
                 <a href="https://pypi.org/project/open-xtract/">PyPI</a>
                 <a href="https://github.com/colesmcintosh/open-xtract/issues">Issues</a>
             </div>
-            <p>&copy; 2025 Open-Xtract. All rights reserved.</p>
+            <p><strong>© 2025 OPEN-XTRACT. ALL RIGHTS RESERVED.</strong></p>
+            <p style="margin-top: 0.5rem; font-style: italic; color: #ccc;">Made with love for the open source community</p>
         </div>
     </footer>
-
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/components/prism-core.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/prism/1.29.0/plugins/autoloader/prism-autoloader.min.js"></script>
 </body>
 </html> 
