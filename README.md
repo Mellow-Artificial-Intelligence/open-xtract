@@ -21,6 +21,52 @@
 
 ```bash
 pip install open-xtract
+
+# With vision support for multimodal models
+pip install "open-xtract[vision]"
+```
+
+### Basic Usage
+
+```python
+from open_xtract import PDFProcessor
+from pydantic import BaseModel
+
+# Define your schema
+class InvoiceData(BaseModel):
+    invoice_number: str
+    date: str
+    total_amount: float
+    vendor: str
+
+# Initialize processor
+processor = PDFProcessor(
+    llm_provider="openai",
+    model="gpt-4o-mini"
+)
+
+# Extract data
+result = processor.process_pdf(
+    pdf_path="invoice.pdf",
+    schema=InvoiceData
+)
+
+if result.success:
+    print(f"Invoice #: {result.data.invoice_number}")
+    print(f"Total: ${result.data.total_amount}")
+```
+
+### CLI Usage
+
+```bash
+# Extract with JSON schema
+open-xtract invoice.pdf --schema invoice_schema.json
+
+# Extract with inline schema
+open-xtract document.pdf --schema '{"properties": {"title": {"type": "string"}}}'
+
+# Use custom provider
+open-xtract paper.pdf --schema schema.json --provider azure --base-url https://your-resource.openai.azure.com
 ```
 
 ## Capabilities
@@ -35,9 +81,9 @@ Bring your own OCR or LLM. open-xtract abstracts the extraction layer so you can
 ### **PDF-FIRST INGESTION**
 Drop in a PDF and receive clean, layout-aware text that's ready for embeddings.
 
-- **LAYOUT-AWARE PARSING** - Preserves document structure and formatting
-- **TOKENIZATION INCLUDED** - Ready-to-use text preprocessing
-- **IMAGES & VIDEO SOON** - Expanding to multimedia content
+- **LAYOUT-AWARE PARSING** - Preserves document structure and formatting using LangChain's PyPDFLoader
+- **VISION-ENHANCED EXTRACTION** - Automatically uses multimodal models for better accuracy with complex layouts
+- **HANDLES SCANNED PDFS** - Extract text from images and scanned documents with vision models
 
 ### **CITED RETRIEVAL**
 Every chunk is embedded into a vector DB, reranked, and served via RAG with inline citations.
