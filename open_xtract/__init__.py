@@ -1,12 +1,16 @@
-"""Open Xtract - simple package entry point."""
+"""Open Xtract - PDF extraction framework with LangGraph."""
 
-__all__ = ["main"]
+from .processor import PDFProcessor
+from .schemas.types import ExtractionResult
+
+__all__ = ["PDFProcessor", "ExtractionResult", "main"]
 __version__ = "0.1.0"
 
 
 def main() -> None:
-    """Command line entry point that prints a greeting."""
-    print("Hello from open-xtract!")
+    """Command line entry point."""
+    from .cli import cli_main
+    cli_main()
 
 
 if __name__ == "__main__":
