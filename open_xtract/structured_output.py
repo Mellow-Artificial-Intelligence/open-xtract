@@ -46,7 +46,9 @@ class StructuredOutputGenerator:
     - llm: LangChain chat model instance
     - schema: Pydantic model class, JSON schema dict, or JSON schema string
     - name: Optional human-friendly name for the schema/tool (passed through)
-    - method: One of {"auto", "json_mode", "function_calling"}
+    - method: Optional. When provided, should be one of {"json_mode", "function_calling"}.
+              If "auto" is passed, it will be ignored for compatibility with providers
+              that don't accept it.
     - strict: Whether validation should be strict (passed through)
     - kwargs: Forwarded to `with_structured_output`
     """
@@ -57,15 +59,19 @@ class StructuredOutputGenerator:
         schema: SchemaLike,
         *,
         name: Optional[str] = None,
-        method: str = "auto",
+        method: Optional[str] = None,
         strict: bool = True,
         **kwargs: Any,
     ) -> None:
         self._llm: Any = llm
         self._schema: SchemaLike = self._normalize_schema(schema)
-        self._structured = self._llm.with_structured_output(
-            self._schema, name=name, method=method, strict=strict, **kwargs
-        )
+        call_kwargs: Dict[str, Any] = {"name": name, "strict": strict, **kwargs}
+        # Some providers (e.g., langchain-openai>=0.3.x) only accept "json_mode" or
+        # "function_calling" and will raise on "auto". Skip passing method when it's
+        # None or explicitly "auto" to let the provider choose sensible defaults.
+        if method and method != "auto":
+            call_kwargs["method"] = method
+        self._structured = self._llm.with_structured_output(self._schema, **call_kwargs)
 
     # ---- Public API -----------------------------------------------------
     def invoke(
