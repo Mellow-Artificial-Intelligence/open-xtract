@@ -34,3 +34,5 @@ Thumbs.db
 # Output files
 *_pages/
 extracted/
+
+test_docs/

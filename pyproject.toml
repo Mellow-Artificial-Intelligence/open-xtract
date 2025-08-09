@@ -4,6 +4,8 @@ version = "0.1.0"
 description = "Open-source framework that extracts structured data from PDFs. Bring your own OCR or LLM and extend to any file type."
 readme = "README.md"
 requires-python = ">=3.12"
+authors = [{ name = "Cole McIntosh", email = "colemcintosh6@gmail.com" }]
+license = { text = "MIT" }
 dependencies = [
     "langgraph>=0.2.0",
     "langchain>=0.3.0",
@@ -15,13 +17,16 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "tiktoken>=0.8.0",
+    "langchain-openai>=0.3.29",
+    "langchain-google-genai>=2.1.9",
+    "pillow>=11.3.0",
+    "langchain-chroma>=0.1.4",
+    "chromadb>=0.5.5",
 ]
 
 [project.optional-dependencies]
 vision = ["PyMuPDF>=1.24.0"]
 dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "pytest-mock>=3.14.0"]
-authors = [{ name = "Cole McIntosh", email = "colemcintosh6@gmail.com" }]
-license = { text = "MIT" }
 
 [project.scripts]
 open-xtract = "open_xtract:main"
