@@ -1,17 +1,17 @@
-"""Open Xtract - PDF extraction framework with LangGraph."""
-
-from .processor import PDFProcessor
-from .schemas.types import ExtractionResult
-
-__all__ = ["PDFProcessor", "ExtractionResult", "main"]
-__version__ = "0.1.0"
+from .structured_output import StructuredOutputGenerator
 
 
-def main() -> None:
-    """Command line entry point."""
-    from .cli import cli_main
-    cli_main()
+def main() -> None:  # Console entrypoint defined in pyproject.toml
+    try:
+        from .main import main as _main
+    except Exception:
+        # Fallback no-op if a richer CLI isn't present
+        def _main() -> None:
+            print("open-xtract: CLI not configured.")
+
+    _main()
 
 
-if __name__ == "__main__":
-    main() 
+__all__ = ["StructuredOutputGenerator", "main"]
+
+
