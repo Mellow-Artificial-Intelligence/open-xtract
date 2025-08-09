@@ -17,6 +17,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "httpx>=0.27.0",
     "tiktoken>=0.8.0",
+    "langchain-openai>=0.3.29",
+    "langchain-google-genai>=2.1.9",
+    "pillow>=11.3.0",
+    "langchain-chroma>=0.1.4",
+    "chromadb>=0.5.5",
 ]
 
 [project.optional-dependencies]
