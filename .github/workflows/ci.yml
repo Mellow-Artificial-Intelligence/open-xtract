@@ -28,6 +28,10 @@ jobs:
         with:
           enable-cache: true
 
+      - name: Create virtual environment
+        run: |
+          uv venv
+
       - name: Install dependencies with uv
         run: |
           uv pip install -e .[dev]
