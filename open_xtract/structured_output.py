@@ -65,12 +65,15 @@ class StructuredOutputGenerator:
     ) -> None:
         self._llm: Any = llm
         self._schema: SchemaLike = self._normalize_schema(schema)
-        call_kwargs: Dict[str, Any] = {"name": name, "strict": strict, **kwargs}
+        call_kwargs: Dict[str, Any] = {"strict": strict, **kwargs}
         # Some providers (e.g., langchain-openai>=0.3.x) only accept "json_mode" or
         # "function_calling" and will raise on "auto". Skip passing method when it's
         # None or explicitly "auto" to let the provider choose sensible defaults.
         if method and method != "auto":
             call_kwargs["method"] = method
+        # Only pass a name when using function_calling where it may label the tool
+        if (method == "function_calling") and name:
+            call_kwargs["name"] = name
         self._structured = self._llm.with_structured_output(self._schema, **call_kwargs)
 
     # ---- Public API -----------------------------------------------------
