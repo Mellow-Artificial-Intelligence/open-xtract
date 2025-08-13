@@ -6,12 +6,12 @@
 
 *Open‑source toolkit for extracting clean, structured data from PDFs, images, and text. Minimal setup.*
 
-[![GitHub stars](https://img.shields.io/github/stars/colesmcintosh/open-xtract?style=social)](https://github.com/colesmcintosh/open-xtract)
+[![GitHub stars](https://img.shields.io/github/stars/Mellow-Artificial-Intelligence/open-xtract?style=social)](https://github.com/Mellow-Artificial-Intelligence/open-xtract)
 [![PyPI version](https://badge.fury.io/py/open-xtract.svg)](https://badge.fury.io/py/open-xtract)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 
-[**Star on GitHub**](https://github.com/colesmcintosh/open-xtract) • [**Install from PyPI**](https://pypi.org/project/open-xtract/)
+[**Star on GitHub**](https://github.com/Mellow-Artificial-Intelligence/open-xtract) • [**Install from PyPI**](https://pypi.org/project/open-xtract/)
 
 </div>
 
@@ -44,18 +44,19 @@ class InvoiceData(BaseModel):
     total_amount: float
     vendor: str
 
-ox = OpenXtract(model="gpt-5")
+ox = OpenXtract(model="claude-opus-4-1-20250805")
 
-# PDF
-result = ox.extract_pdf("invoice.pdf", InvoiceData)
+# Auto-routes based on input type
+result = ox.extract("invoice.pdf", InvoiceData)  # PDF file
 print(result)
 
-# Image (file path or URL)
-result = ox.extract_image("https://example.com/receipt.png", InvoiceData)
+result = ox.extract("https://example.com/receipt.png", InvoiceData)  # Image URL
 print(result)
 
-# Text
-result = ox.extract_text("Total: $123.45 on 2025-03-01 from ACME", InvoiceData)
+result = ox.extract("receipt.jpg", InvoiceData)  # Image file
+print(result)
+
+result = ox.extract("Total: $123.45 on 2025-03-01 from ACME", InvoiceData)  # Raw text
 print(result)
 ```
 
@@ -75,7 +76,7 @@ class SpeedAnswer(BaseModel):
     speed_kmh: float
     text: str
 
-ox = OpenXtract(model="gpt-5")
+ox = OpenXtract(model="claude-opus-4-1-20250805")
 
 texts = [
     "The cheetah is capable of running at 93 to 104 km/h (58 to 65 mph).",
@@ -96,11 +97,14 @@ print(res.data)  # <-- conforms to SpeedAnswer
 ### Model configuration
 
 ```python
-OpenXtract(
-    model="gpt-5",
-    base_url="https://api.openai.com/v1",
-    api_key="...",
-)
+# Anthropic Claude
+OpenXtract(model="claude-opus-4-1-20250805", api_key="...")
+
+# OpenAI GPT
+OpenXtract(model="gpt-5", api_key="...")
+
+# Custom endpoint
+OpenXtract(model="gpt-5", base_url="https://api.openai.com/v1", api_key="...")
 ```
 
 ## Capabilities
@@ -128,7 +132,7 @@ MIT — see [LICENSE](LICENSE).
 
 - [Homepage](https://www.open-xtract.com/)
 - [PyPI Package](https://pypi.org/project/open-xtract/)
-- [Issues](https://github.com/colesmcintosh/open-xtract/issues)
+- [Issues](https://github.com/Mellow-Artificial-Intelligence/open-xtract/issues)
 
 ---
 
