@@ -20,15 +20,18 @@ def main() -> None:
         )
         return
 
-    if not (os.getenv("OPENAI_API_KEY") or os.getenv("OPENAI_API_KEY_PATH")):
-        print("Set OPENAI_API_KEY to run the demo. Skipping network call.")
+    api_key = os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        print("Set ANTHROPIC_API_KEY or OPENAI_API_KEY to run the demo. Skipping network call.")
         return
 
     class Answer(BaseModel):
         text: str
 
-    ox = OpenXtract(model="gpt-5-mini")
-    result = ox.extract_text("Summarize cheetah top speed in one sentence.", Answer)
+    # Use Claude if Anthropic key is available, otherwise OpenAI
+    model = "claude-opus-4-1-20250805" if os.getenv("ANTHROPIC_API_KEY") else "gpt-5-mini"
+    ox = OpenXtract(model=model)
+    result = ox.extract("Summarize cheetah top speed in one sentence.", Answer)
     print(result)
 
 

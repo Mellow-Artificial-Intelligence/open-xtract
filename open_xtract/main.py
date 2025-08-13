@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import base64
 import io
+import os
+from pathlib import Path
 from typing import Iterable, Type
+from urllib.parse import urlparse
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_community.document_loaders.parsers import LLMImageBlobParser
 from langchain_core.messages import HumanMessage
-from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 from .retrieval import CitationRAG, CitationResult
 
@@ -18,7 +20,7 @@ class OpenXtract:
     def __init__(
         self,
         model: str = "gpt-5-nano",
-        base_url: str = "https://api.openai.com/v1",
+        base_url: str | None = None,
         api_key: str | None = None,
         *,
         max_tokens_image_description: int = 1024,
@@ -27,31 +29,103 @@ class OpenXtract:
         self._model_name = model
         self._base_url = base_url
         self._api_key = api_key
-        self._llm = ChatOpenAI(model=model, base_url=base_url, api_key=api_key, **llm_kwargs)
+        self._llm = self._create_llm(model, base_url, api_key, **llm_kwargs)
         self._max_tokens_image_description = max_tokens_image_description
         self._citation_rag: CitationRAG | None = None
+        
+        # File type mappings
+        self._pdf_extensions = {".pdf"}
+        self._image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
+    
+    def _create_llm(self, model: str, base_url: str | None, api_key: str | None, **llm_kwargs):
+        """Create the appropriate LLM instance based on the model name."""
+        model_lower = model.lower()
+        
+        if "claude" in model_lower or "anthropic" in model_lower:
+            try:
+                from langchain_anthropic import ChatAnthropic
+                return ChatAnthropic(model=model, api_key=api_key, **llm_kwargs)
+            except ImportError:
+                raise ImportError("langchain-anthropic is required for Claude models. Install with: pip install langchain-anthropic")
+        
+        elif "gemini" in model_lower or "google" in model_lower:
+            try:
+                from langchain_google_genai import ChatGoogleGenerativeAI
+                return ChatGoogleGenerativeAI(model=model, google_api_key=api_key, **llm_kwargs)
+            except ImportError:
+                raise ImportError("langchain-google-genai is required for Google models. Install with: pip install langchain-google-genai")
+        
+        else:
+            # Default to OpenAI (includes OpenAI-compatible endpoints)
+            try:
+                from langchain_openai import ChatOpenAI
+                base_url = base_url or "https://api.openai.com/v1"
+                return ChatOpenAI(model=model, base_url=base_url, api_key=api_key, **llm_kwargs)
+            except ImportError:
+                raise ImportError("langchain-openai is required for OpenAI models. Install with: pip install langchain-openai")
 
-    # PDF
-    def extract_pdf(
+    def _detect_input_type(self, input_data: str) -> str:
+        """Detect the type of input data (pdf, image, url, or text)."""
+        # Check if it's a URL
+        if input_data.startswith(("http://", "https://")):
+            parsed = urlparse(input_data)
+            if parsed.path:
+                ext = Path(parsed.path).suffix.lower()
+                if ext in self._pdf_extensions:
+                    return "pdf_url"
+                elif ext in self._image_extensions:
+                    return "image_url"
+            return "image_url"  # Default URLs to image handling
+        
+        # Check for file extensions
+        ext = Path(input_data).suffix.lower()
+        if ext in self._pdf_extensions or ext in self._image_extensions:
+            # If it has a recognized extension, it should be a valid file
+            if not os.path.isfile(input_data):
+                raise FileNotFoundError(f"File not found: {input_data}")
+            return "pdf" if ext in self._pdf_extensions else "image"
+        
+        # If no extension and not a URL, treat as raw text
+        return "text"
+    
+    def extract(
         self,
-        pdf_path: str,
+        input_data: str,
         schema: Type[BaseModel],
-        instruction: str = "Extract the relevant information from the PDF",
+        instruction: str = "Extract the relevant information",
         *,
         stream: bool = False,
     ) -> BaseModel | Iterable[BaseModel]:
+        """Auto-route extraction based on input type (file extension, URL, or raw text)."""
+        input_type = self._detect_input_type(input_data)
+        
+        if input_type == "pdf":
+            return self._extract_pdf(input_data, schema, instruction, stream=stream)
+        elif input_type in ["image", "image_url", "pdf_url"]:
+            return self._extract_image(input_data, schema, instruction, stream=stream)
+        else:  # text
+            return self._extract_text(input_data, schema, stream=stream)
+    
+    def _extract_pdf(
+        self,
+        pdf_path: str,
+        schema: Type[BaseModel],
+        instruction: str,
+        *,
+        stream: bool = False,
+    ) -> BaseModel | Iterable[BaseModel]:
+        # Create a separate LLM instance for image parsing with max_tokens
+        image_llm = self._create_llm(
+            self._model_name, 
+            self._base_url, 
+            self._api_key, 
+            max_tokens=self._max_tokens_image_description
+        )
         loader = PyPDFLoader(
             pdf_path,
             mode="page",
             images_inner_format="markdown-img",
-            images_parser=LLMImageBlobParser(
-                model=ChatOpenAI(
-                    model=self._model_name,
-                    base_url=self._base_url,
-                    api_key=self._api_key,
-                    max_tokens=self._max_tokens_image_description,
-                )
-            ),
+            images_parser=LLMImageBlobParser(model=image_llm),
         )
         docs = loader.load()
         structured_llm = self._llm.with_structured_output(schema)
@@ -63,12 +137,11 @@ class OpenXtract:
             return structured_llm.stream([HumanMessage(content=prompt)])
         return structured_llm.invoke([HumanMessage(content=prompt)])
 
-    # Image
-    def extract_image(
+    def _extract_image(
         self,
         image_path_or_url: str,
         schema: Type[BaseModel],
-        instruction: str = "Extract the relevant information from the image",
+        instruction: str,
         *,
         stream: bool = False,
     ) -> BaseModel | Iterable[BaseModel]:
@@ -89,8 +162,7 @@ class OpenXtract:
             return structured_llm.stream([HumanMessage(content=message_content)])
         return structured_llm.invoke([HumanMessage(content=message_content)])
 
-    # Text
-    def extract_text(
+    def _extract_text(
         self,
         text: str,
         schema: Type[BaseModel],
@@ -101,6 +173,7 @@ class OpenXtract:
         if stream:
             return structured_llm.stream([HumanMessage(content=text)])
         return structured_llm.invoke([HumanMessage(content=text)])
+    
 
     # Retrieval with optional reranking and citations
     def retrieve(

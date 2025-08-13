@@ -35,4 +35,7 @@ Thumbs.db
 *_pages/
 extracted/
 
+# Claude Code instructions
+CLAUDE.md
+
 test_docs/
