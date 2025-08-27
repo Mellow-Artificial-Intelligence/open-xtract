@@ -1,7 +1,8 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Iterable, List, Sequence, Type
+from typing import Any
 
 from langchain_core.documents import Document
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -9,12 +10,16 @@ from pydantic import BaseModel, Field
 
 
 class Citation(BaseModel):
-    source_id: int = Field(..., description="The integer ID of a SPECIFIC source which justifies the answer.")
-    quote: str = Field(..., description="The VERBATIM quote from the specified source that justifies the answer.")
+    source_id: int = Field(
+        ..., description="The integer ID of a SPECIFIC source which justifies the answer."
+    )
+    quote: str = Field(
+        ..., description="The VERBATIM quote from the specified source that justifies the answer."
+    )
 
 
 class AnnotatedAnswer(BaseModel):
-    citations: List[Citation] = Field(
+    citations: list[Citation] = Field(
         ..., description="Citations from the given sources that justify the answer."
     )
 
@@ -52,18 +57,26 @@ class CitationRAG:
         persist_directory: str | None = None,
         collection_name: str = "open-xtract",
         embedding: Any | None = None,
-    ) -> "CitationRAG":
+    ) -> CitationRAG:
         # Import locally to keep optional deps optional at import time
-        from langchain_chroma import Chroma  # type: ignore
-        from langchain_openai import OpenAIEmbeddings  # type: ignore
-        from langchain_openai import ChatOpenAI  # type: ignore
+        from langchain_chroma import Chroma
+        from langchain_openai import ChatOpenAI, OpenAIEmbeddings
 
         embeddings = embedding or OpenAIEmbeddings()
-        vs = Chroma(collection_name=collection_name, embedding_function=embeddings, persist_directory=persist_directory)
+        vs = Chroma(
+            collection_name=collection_name,
+            embedding_function=embeddings,
+            persist_directory=persist_directory,
+        )
         llm = ChatOpenAI()
         return cls(llm=llm, vectorstore=vs)
 
-    def add_texts(self, texts: Sequence[str], metadatas: Sequence[dict] | None = None, ids: Sequence[str] | None = None) -> None:
+    def add_texts(
+        self,
+        texts: Sequence[str],
+        metadatas: Sequence[dict] | None = None,
+        ids: Sequence[str] | None = None,
+    ) -> None:
         self._vectorstore.add_texts(list(texts), metadatas=metadatas, ids=ids)
 
     def add_documents(self, docs: Sequence[Document], ids: Sequence[str] | None = None) -> None:
@@ -74,7 +87,7 @@ class CitationRAG:
     def answer(
         self,
         question: str,
-        schema: Type[BaseModel],
+        schema: type[BaseModel],
         k: int = 4,
         *,
         rerank: bool = False,
@@ -90,12 +103,14 @@ class CitationRAG:
             HumanMessage(content=f"Question: {question}\nContext:\n{docs_content}"),
         ]
         structured_data_llm = self._llm.with_structured_output(schema)
-        data: BaseModel = structured_data_llm.invoke(messages)  # type: ignore
+        data: BaseModel = structured_data_llm.invoke(messages)
 
         formatted_docs = _format_docs_with_id(docs)
         structured_llm = self._llm.with_structured_output(AnnotatedAnswer)
         annotate_messages: list[Any] = [
-            SystemMessage(content=f"You are given numbered sources. Use them for citations.\n\n{formatted_docs}"),
+            SystemMessage(
+                content=f"You are given numbered sources. Use them for citations.\n\n{formatted_docs}"
+            ),
             HumanMessage(content=question),
             AIMessage(content=data.model_dump_json()),
             HumanMessage(content="Annotate your answer with citations."),
@@ -119,14 +134,21 @@ def _wrap_with_flashrank(retriever: Any) -> Any:
     if Flashrank integration is requested but unavailable.
     """
     try:
-        from langchain.retrievers import ContextualCompressionRetriever  # type: ignore
-        from langchain_community.document_compressors import FlashrankRerank  # type: ignore
+        from langchain.retrievers import ContextualCompressionRetriever
+        from langchain_community.document_compressors import FlashrankRerank
     except Exception as exc:  # pragma: no cover - exercised via tests by monkeypatching
         raise RuntimeError(
             "Flashrank reranking requested, but required packages are not available."
         ) from exc
 
-    compressor = FlashrankRerank()
+    # Instantiate FlashrankRerank in a version-agnostic way. Some versions
+    # require a `client` kwarg; others accept no args. Use a dynamic call via Any
+    # to avoid type mismatches across versions.
+    from typing import Any, cast
+
+    FR = cast(Any, FlashrankRerank)
+    try:
+        compressor = FR(client=None)
+    except TypeError:
+        compressor = FR()
     return ContextualCompressionRetriever(base_compressor=compressor, base_retriever=retriever)
-
-

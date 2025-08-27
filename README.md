@@ -124,6 +124,8 @@ We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
+See also our [Code of Conduct](CODE_OF_CONDUCT.md) and [Security Policy](SECURITY.md).
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

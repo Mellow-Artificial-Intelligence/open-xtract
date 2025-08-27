@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 import open_xtract.main as ox_module
 from open_xtract import OpenXtract
-from pydantic import BaseModel
 from open_xtract.retrieval import AnnotatedAnswer
+from pydantic import BaseModel
 
 
 class _FakeStructured:
@@ -17,7 +18,10 @@ class _FakeStructured:
         if self.schema is AnnotatedAnswer:
             return AnnotatedAnswer(citations=[])
         return self.schema.model_validate(
-            {k: 0 if v.annotation in (int, float) else "ok" for k, v in self.schema.model_fields.items()}
+            {
+                k: 0 if v.annotation in (int, float) else "ok"
+                for k, v in self.schema.model_fields.items()
+            }
         )
 
     def stream(self, messages: list[Any]) -> Iterable[BaseModel]:
@@ -26,7 +30,10 @@ class _FakeStructured:
             yield AnnotatedAnswer(citations=[])
         else:
             yield self.schema.model_validate(
-                {k: 0 if v.annotation in (int, float) else "ok" for k, v in self.schema.model_fields.items()}
+                {
+                    k: 0 if v.annotation in (int, float) else "ok"
+                    for k, v in self.schema.model_fields.items()
+                }
             )
 
 
@@ -95,11 +102,11 @@ def test_extract_pdf_stream(monkeypatch: Any, tmp_path: Any) -> None:
     monkeypatch.setattr(OpenXtract, "_create_llm", lambda *args, **kwargs: fake_llm)
     monkeypatch.setattr(ox_module, "PyPDFLoader", _FakePDFLoader)
     monkeypatch.setattr(ox_module, "LLMImageBlobParser", _FakeLLMImageBlobParser)
-    
+
     # Create a real PDF file for testing
     pdf_file = tmp_path / "doc.pdf"
     pdf_file.write_text("dummy pdf content")
-    
+
     ox = OpenXtract()
     chunks = list(ox.extract(str(pdf_file), _Schema, stream=True))
     assert len(chunks) == 1 and isinstance(chunks[0], _Schema)
@@ -120,7 +127,12 @@ def test_retrieve_with_texts(monkeypatch: Any) -> None:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._texts: list[str] = []
 
-        def add_texts(self, texts: list[str], metadatas: list[dict] | None = None, ids: list[str] | None = None) -> None:
+        def add_texts(
+            self,
+            texts: list[str],
+            metadatas: list[dict] | None = None,
+            ids: list[str] | None = None,
+        ) -> None:
             self._texts.extend(texts)
 
         def as_retriever(self, search_kwargs: dict | None = None) -> _FakeRetriever:
@@ -130,7 +142,9 @@ def test_retrieve_with_texts(monkeypatch: Any) -> None:
     fake_llm = _FakeChatOpenAI()
     monkeypatch.setattr(OpenXtract, "_create_llm", lambda *args, **kwargs: fake_llm)
     # Inject fake modules so inner imports resolve
-    import types, sys
+    import sys
+    import types
+
     fake_openai_mod = types.SimpleNamespace(OpenAIEmbeddings=_FakeEmbeddings)
     fake_chroma_mod = types.SimpleNamespace(Chroma=_FakeChroma)
     monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai_mod)
@@ -164,7 +178,12 @@ def test_retrieve_with_docs(monkeypatch: Any) -> None:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
             self._texts: list[str] = []
 
-        def add_texts(self, texts: list[str], metadatas: list[dict] | None = None, ids: list[str] | None = None) -> None:
+        def add_texts(
+            self,
+            texts: list[str],
+            metadatas: list[dict] | None = None,
+            ids: list[str] | None = None,
+        ) -> None:
             self._texts.extend(texts)
 
         def as_retriever(self, search_kwargs: dict | None = None) -> _FakeRetriever:
@@ -179,7 +198,9 @@ def test_retrieve_with_docs(monkeypatch: Any) -> None:
 
     fake_llm = _FakeChatOpenAI()
     monkeypatch.setattr(OpenXtract, "_create_llm", lambda *args, **kwargs: fake_llm)
-    import types, sys
+    import sys
+    import types
+
     fake_openai_mod = types.SimpleNamespace(OpenAIEmbeddings=_FakeEmbeddings)
     fake_chroma_mod = types.SimpleNamespace(Chroma=_FakeChroma)
     monkeypatch.setitem(sys.modules, "langchain_openai", fake_openai_mod)
@@ -222,11 +243,11 @@ def test_extract_pdf_invoke(monkeypatch: Any, tmp_path: Any) -> None:
     monkeypatch.setattr(OpenXtract, "_create_llm", lambda *args, **kwargs: fake_llm)
     monkeypatch.setattr(ox_module, "PyPDFLoader", _FakePDFLoader)
     monkeypatch.setattr(ox_module, "LLMImageBlobParser", _FakeLLMImageBlobParser)
-    
+
     # Create a real PDF file for testing
     pdf_file = tmp_path / "doc.pdf"
     pdf_file.write_text("dummy pdf content")
-    
+
     ox = OpenXtract()
     res = ox.extract(str(pdf_file), _Schema)
     assert isinstance(res, _Schema)
@@ -241,28 +262,29 @@ def test_auto_routing_detection(monkeypatch: Any, tmp_path: Any) -> None:
     monkeypatch.setattr(OpenXtract, "_create_llm", lambda *args, **kwargs: fake_llm)
     monkeypatch.setattr(ox_module, "PyPDFLoader", _FakePDFLoader)
     monkeypatch.setattr(ox_module, "LLMImageBlobParser", _FakeLLMImageBlobParser)
-    
+
     ox = OpenXtract()
-    
+
     # Test URL detection
     assert ox._detect_input_type("https://example.com/doc.pdf") == "pdf_url"
     assert ox._detect_input_type("https://example.com/img.png") == "image_url"
     assert ox._detect_input_type("https://example.com/unknown") == "image_url"  # default for URLs
-    
+
     # Test text detection
     assert ox._detect_input_type("This is just plain text") == "text"
-    
+
     # Test with actual files
     pdf_file = tmp_path / "test.pdf"
     pdf_file.write_text("dummy")
     assert ox._detect_input_type(str(pdf_file)) == "pdf"
-    
+
     img_file = tmp_path / "test.jpg"
     img_file.write_text("dummy")
     assert ox._detect_input_type(str(img_file)) == "image"
-    
+
     # Test error for non-existent files with extensions
     import pytest
+
     with pytest.raises(FileNotFoundError):
         ox._detect_input_type("/path/to/nonexistent.pdf")
 
@@ -270,12 +292,12 @@ def test_auto_routing_detection(monkeypatch: Any, tmp_path: Any) -> None:
 def test_model_provider_detection(monkeypatch: Any) -> None:
     """Test that different model providers are detected correctly."""
     from unittest.mock import Mock
-    
+
     # Mock the provider imports to avoid actual dependencies in tests
     mock_anthropic = Mock()
-    mock_google = Mock()  
+    mock_google = Mock()
     mock_openai = Mock()
-    
+
     def mock_create_llm(self, model: str, base_url: str | None, api_key: str | None, **kwargs):
         model_lower = model.lower()
         if "claude" in model_lower:
@@ -284,19 +306,17 @@ def test_model_provider_detection(monkeypatch: Any) -> None:
             return mock_google
         else:
             return mock_openai
-    
+
     monkeypatch.setattr(OpenXtract, "_create_llm", mock_create_llm)
-    
+
     # Test Claude model
     ox_claude = OpenXtract(model="claude-opus-4-1-20250805")
     assert ox_claude._llm == mock_anthropic
-    
+
     # Test Gemini model
     ox_gemini = OpenXtract(model="gemini-pro")
     assert ox_gemini._llm == mock_google
-    
+
     # Test OpenAI model (default)
     ox_openai = OpenXtract(model="gpt-5")
     assert ox_openai._llm == mock_openai
-
-

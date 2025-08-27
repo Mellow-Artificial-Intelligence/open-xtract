@@ -19,7 +19,9 @@ class _FakeVectorStore:
     def __init__(self) -> None:
         self._texts: list[str] = []
 
-    def add_texts(self, texts: list[str], metadatas: list[dict] | None = None, ids: list[str] | None = None) -> None:
+    def add_texts(
+        self, texts: list[str], metadatas: list[dict] | None = None, ids: list[str] | None = None
+    ) -> None:
         self._texts.extend(texts)
 
     def as_retriever(self, search_kwargs: dict | None = None) -> _FakeRetriever:
@@ -35,7 +37,10 @@ class _FakeStructured:
         if self._schema is AnnotatedAnswer:
             return AnnotatedAnswer(citations=[])
         return self._schema.model_validate(
-            {k: 0 if v.annotation in (int, float) else "ok" for k, v in self._schema.model_fields.items()}
+            {
+                k: 0 if v.annotation in (int, float) else "ok"
+                for k, v in self._schema.model_fields.items()
+            }
         )
 
 
@@ -75,5 +80,3 @@ def test_citation_rag_rerank_branch(monkeypatch: Any) -> None:
 
     res = rag.answer("q", schema=Out, k=1, rerank=True)
     assert isinstance(res.data, Out)
-
-
