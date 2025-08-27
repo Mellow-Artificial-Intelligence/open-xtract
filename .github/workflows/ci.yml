@@ -36,6 +36,14 @@ jobs:
         run: |
           uv pip install -e .[dev]
 
+      - name: Run pre-commit (lint & format checks)
+        run: |
+          uv run pre-commit run --all-files --show-diff-on-failure --color always | cat
+
+      - name: Type check with mypy
+        run: |
+          uv run mypy open_xtract | cat
+
       - name: Run tests
         env:
           PYTHONWARNINGS: error::DeprecationWarning

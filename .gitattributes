@@ -1,0 +1,8 @@
+* text=auto eol=lf
+
+# Treat documentation as documentation in GitHub linguist
+docs/* linguist-documentation
+
+# Normalize line endings for shell scripts
+*.sh text eol=lf
+

@@ -27,7 +27,15 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = ["PyMuPDF>=1.24.0"]
-dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "pytest-mock>=3.14.0"]
+dev = [
+    "pytest>=8.0.0",
+    "pytest-asyncio>=0.24.0",
+    "pytest-mock>=3.14.0",
+    "ruff>=0.6.8",
+    "black>=24.8.0",
+    "mypy>=1.11.0",
+    "pre-commit>=3.7.0",
+]
 
 [project.scripts]
 open-xtract = "open_xtract:main"
@@ -42,3 +50,41 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 # Silence pytest-asyncio deprecation by setting explicit loop scope
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["open_xtract", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E",  # pycodestyle
+    "F",  # pyflakes
+    "I",  # isort
+    "UP", # pyupgrade
+    "B",  # flake8-bugbear
+    "SIM",# flake8-simplify
+    "PL", # pylint (subset)
+]
+ignore = [
+    "E501",  # line length handled by formatter
+    "PLR0913",  # too many arguments; acceptable for public APIs
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.black]
+line-length = 100
+target-version = ["py312"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+no_implicit_optional = true
+strict_optional = true
+ignore_missing_imports = true

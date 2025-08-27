@@ -10,8 +10,8 @@ import os
 
 def main() -> None:
     try:
-        from pydantic import BaseModel
         from open_xtract import OpenXtract
+        from pydantic import BaseModel
     except Exception:
         print(
             "Demo prerequisites missing. Install optional deps and try again:\n"
