@@ -23,6 +23,7 @@ dependencies = [
     "pillow>=11.3.0",
     "langchain-chroma>=0.1.4",
     "chromadb>=0.5.5",
+    "fastapi>=0.116.1",
 ]
 
 [project.optional-dependencies]

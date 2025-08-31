@@ -1,214 +1,298 @@
-from __future__ import annotations
-
+import requests
+import json
 import base64
-import io
+from dotenv import load_dotenv
 import os
-from pathlib import Path
-from typing import Iterable, Type
-from urllib.parse import urlparse
+from typing import Optional, Dict, Any, List
+load_dotenv()
 
-from langchain_community.document_loaders import PyPDFLoader
-from langchain_community.document_loaders.parsers import LLMImageBlobParser
-from langchain_core.messages import HumanMessage
-from pydantic import BaseModel
-from .retrieval import CitationRAG, CitationResult
+def encode_image_to_base64(image_path: str) -> str:
+    """Encode a local image file to base64 data URL format."""
+    with open(image_path, "rb") as image_file:
+        encoded = base64.b64encode(image_file.read()).decode('utf-8')
+        # Determine MIME type based on file extension
+        if image_path.lower().endswith('.png'):
+            mime_type = 'image/png'
+        elif image_path.lower().endswith('.webp'):
+            mime_type = 'image/webp'
+        elif image_path.lower().endswith('.gif'):
+            mime_type = 'image/gif'
+        else:
+            mime_type = 'image/jpeg'  # default
+        return f"data:{mime_type};base64,{encoded}"
 
+def fetch_image_url_as_data_url(image_url: str) -> str:
+    """Fetch a remote image by URL and return a base64 data URL."""
+    resp = requests.get(image_url, timeout=30)
+    resp.raise_for_status()
+    content_type = resp.headers.get('Content-Type', '').lower()
+    if content_type.startswith('image/'):
+        mime_type = content_type.split(';')[0]
+    else:
+        # best-effort fallback based on URL
+        if image_url.lower().endswith('.png'):
+            mime_type = 'image/png'
+        elif image_url.lower().endswith('.webp'):
+            mime_type = 'image/webp'
+        elif image_url.lower().endswith('.gif'):
+            mime_type = 'image/gif'
+        else:
+            mime_type = 'image/jpeg'
+    encoded = base64.b64encode(resp.content).decode('utf-8')
+    return f"data:{mime_type};base64,{encoded}"
 
-class OpenXtract:
-    """Concise facade for extracting structured data from PDFs, images, and text."""
+def detect_content_kind(content_url: str) -> str:
+    """Return 'image' or 'document' based on URL/path/data URL; defaults to 'document'."""
+    lower = content_url.lower()
+    # Data URLs
+    if lower.startswith('data:image/'):
+        return 'image'
+    if lower.startswith('data:application/pdf') or lower.startswith('data:text/'):
+        return 'document'
+    # Local path
+    if os.path.exists(content_url):
+        if any(lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']):
+            return 'image'
+        if any(lower.endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt', '.md']):
+            return 'document'
+        return 'document'
+    # URL/path by extension
+    if any(lower.endswith(ext) for ext in ['.jpg', '.jpeg', '.png', '.webp', '.gif', '.bmp']):
+        return 'image'
+    if any(lower.endswith(ext) for ext in ['.pdf', '.doc', '.docx', '.txt', '.md']):
+        return 'document'
+    return 'document'
 
+url = "https://openrouter.ai/api/v1/chat/completions"
+headers = {
+    "Authorization": f"Bearer {os.getenv('OPENROUTER_API_KEY')}",
+    "Content-Type": "application/json"
+}
+
+class Extract:
     def __init__(
         self,
-        model: str = "gpt-5-nano",
-        base_url: str | None = None,
-        api_key: str | None = None,
-        *,
-        max_tokens_image_description: int = 1024,
-        **llm_kwargs,
+        model: str,
+        api_key: Optional[str] = None,
+        base_url: str = url,
+        default_transforms: Optional[List[str]] = None
     ) -> None:
-        self._model_name = model
-        self._base_url = base_url
-        self._api_key = api_key
-        self._llm = self._create_llm(model, base_url, api_key, **llm_kwargs)
-        self._max_tokens_image_description = max_tokens_image_description
-        self._citation_rag: CitationRAG | None = None
-        
-        # File type mappings
-        self._pdf_extensions = {".pdf"}
-        self._image_extensions = {".png", ".jpg", ".jpeg", ".gif", ".bmp", ".tiff", ".webp"}
-    
-    def _create_llm(self, model: str, base_url: str | None, api_key: str | None, **llm_kwargs):
-        """Create the appropriate LLM instance based on the model name."""
-        model_lower = model.lower()
-        
-        if "claude" in model_lower or "anthropic" in model_lower:
-            try:
-                from langchain_anthropic import ChatAnthropic
-                return ChatAnthropic(model=model, api_key=api_key, **llm_kwargs)
-            except ImportError:
-                raise ImportError("langchain-anthropic is required for Claude models. Install with: pip install langchain-anthropic")
-        
-        elif "gemini" in model_lower or "google" in model_lower:
-            try:
-                from langchain_google_genai import ChatGoogleGenerativeAI
-                return ChatGoogleGenerativeAI(model=model, google_api_key=api_key, **llm_kwargs)
-            except ImportError:
-                raise ImportError("langchain-google-genai is required for Google models. Install with: pip install langchain-google-genai")
-        
-        else:
-            # Default to OpenAI (includes OpenAI-compatible endpoints)
-            try:
-                from langchain_openai import ChatOpenAI
-                base_url = base_url or "https://api.openai.com/v1"
-                return ChatOpenAI(model=model, base_url=base_url, api_key=api_key, **llm_kwargs)
-            except ImportError:
-                raise ImportError("langchain-openai is required for OpenAI models. Install with: pip install langchain-openai")
+        self.base_url = base_url
+        self.model = model
+        if not self.model:
+            raise ValueError("Model name is required. Pass model to Extract(model=...).")
+        self.api_key = api_key or os.getenv('OPENROUTER_API_KEY')
+        if not self.api_key:
+            raise ValueError("OPENROUTER_API_KEY is required. Set env var or pass api_key.")
+        # Defaults to middle-out unless explicitly disabled at call site with []
+        self.default_transforms = ["middle-out"] if default_transforms is None else default_transforms
+        self.headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Content-Type": "application/json"
+        }
 
-    def _detect_input_type(self, input_data: str) -> str:
-        """Detect the type of input data (pdf, image, url, or text)."""
-        # Check if it's a URL
-        if input_data.startswith(("http://", "https://")):
-            parsed = urlparse(input_data)
-            if parsed.path:
-                ext = Path(parsed.path).suffix.lower()
-                if ext in self._pdf_extensions:
-                    return "pdf_url"
-                elif ext in self._image_extensions:
-                    return "image_url"
-            return "image_url"  # Default URLs to image handling
-        
-        # Check for file extensions
-        ext = Path(input_data).suffix.lower()
-        if ext in self._pdf_extensions or ext in self._image_extensions:
-            # If it has a recognized extension, it should be a valid file
-            if not os.path.isfile(input_data):
-                raise FileNotFoundError(f"File not found: {input_data}")
-            return "pdf" if ext in self._pdf_extensions else "image"
-        
-        # If no extension and not a URL, treat as raw text
-        return "text"
-    
     def extract(
         self,
-        input_data: str,
-        schema: Type[BaseModel],
-        instruction: str = "Extract the relevant information",
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        """Auto-route extraction based on input type (file extension, URL, or raw text)."""
-        input_type = self._detect_input_type(input_data)
-        
-        if input_type == "pdf":
-            return self._extract_pdf(input_data, schema, instruction, stream=stream)
-        elif input_type in ["image", "image_url", "pdf_url"]:
-            return self._extract_image(input_data, schema, instruction, stream=stream)
-        else:  # text
-            return self._extract_text(input_data, schema, stream=stream)
-    
-    def _extract_pdf(
-        self,
-        pdf_path: str,
-        schema: Type[BaseModel],
-        instruction: str,
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        # Create a separate LLM instance for image parsing with max_tokens
-        image_llm = self._create_llm(
-            self._model_name, 
-            self._base_url, 
-            self._api_key, 
-            max_tokens=self._max_tokens_image_description
-        )
-        loader = PyPDFLoader(
-            pdf_path,
-            mode="page",
-            images_inner_format="markdown-img",
-            images_parser=LLMImageBlobParser(model=image_llm),
-        )
-        docs = loader.load()
-        structured_llm = self._llm.with_structured_output(schema)
-        prompt = (
-            "Please follow the instructions below to extract the relevant information from the PDF.\n"
-            f"{instruction}\n\nThe PDF is as follows:\n{docs}\n"
-        )
-        if stream:
-            return structured_llm.stream([HumanMessage(content=prompt)])
-        return structured_llm.invoke([HumanMessage(content=prompt)])
+        content_url: str,
+        filename: str = "content.pdf",
+        schema: Optional[Dict[str, Any]] = None,
+        prompt: str = "Analyze this content",
+        use_base64: bool = False,
+        transforms: Optional[List[str]] = None
+    ) -> Any:
+        # Normalize transforms
+        if transforms is None:
+            transforms = self.default_transforms
 
-    def _extract_image(
-        self,
-        image_path_or_url: str,
-        schema: Type[BaseModel],
-        instruction: str,
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        message_content = [
-            {"type": "text", "text": instruction},
+        # Auto-detect content type
+        content_type = detect_content_kind(content_url)
+
+        # Build content array and plugins
+        content_array: List[Dict[str, Any]] = [
+            {"type": "text", "text": prompt}
         ]
-        if image_path_or_url.startswith(("http://", "https://")):
-            message_content.append({"type": "image_url", "image_url": {"url": image_path_or_url}})
+
+        if content_type == 'image':
+            image_url_to_send = content_url
+            if content_url.startswith('data:image/'):
+                use_base64 = True
+            elif use_base64:
+                if os.path.exists(content_url):
+                    image_url_to_send = encode_image_to_base64(content_url)
+                else:
+                    image_url_to_send = fetch_image_url_as_data_url(content_url)
+            content_array.append({
+                "type": "image_url",
+                "image_url": {"url": image_url_to_send}
+            })
+            plugins: List[Dict[str, Any]] = []
         else:
-            image_bytes = io.BytesIO()
-            with open(image_path_or_url, "rb") as img_file:
-                image_bytes.write(img_file.read())
-            img_base64 = base64.b64encode(image_bytes.getvalue()).decode("utf-8")
-            message_content.append({"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}})
+            content_array.append({
+                "type": "file",
+                "file": {"filename": filename, "file_data": content_url}
+            })
+            plugins = [{
+                "id": "file-parser",
+                "pdf": {"engine": "mistral-ocr"}
+            }]
 
-        structured_llm = self._llm.with_structured_output(schema)
-        if stream:
-            return structured_llm.stream([HumanMessage(content=message_content)])
-        return structured_llm.invoke([HumanMessage(content=message_content)])
+        messages = [{"role": "user", "content": content_array}]
 
-    def _extract_text(
-        self,
-        text: str,
-        schema: Type[BaseModel],
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        structured_llm = self._llm.with_structured_output(schema)
-        if stream:
-            return structured_llm.stream([HumanMessage(content=text)])
-        return structured_llm.invoke([HumanMessage(content=text)])
-    
+        payload: Dict[str, Any] = {
+            "model": self.model,
+            "messages": messages,
+            "plugins": plugins
+        }
+        if transforms is not None:
+            payload["transforms"] = transforms
+        if schema:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": schema.get("name", "extraction"),
+                    "strict": schema.get("strict", True),
+                    "schema": schema.get("schema", schema)
+                }
+            }
 
-    # Retrieval with optional reranking and citations
-    def retrieve(
-        self,
-        question: str,
-        *,
-        texts: list[str] | None = None,
-        docs: list | None = None,
-        schema: Type[BaseModel],
-        k: int = 4,
-        rerank: bool = False,
-    ) -> CitationResult:
-        """Retrieve, answer, and annotate with citations.
+        response = requests.post(self.base_url, headers=self.headers, json=payload)
+        if response.status_code == 200:
+            result = response.json()
+            if schema and "choices" in result and result["choices"]:
+                content = result["choices"][0]["message"]["content"]
+                try:
+                    return json.loads(content)
+                except json.JSONDecodeError:
+                    return content
+            return result
+        # If image failed to fetch remotely, retry with base64
+        if content_type == 'image' and not use_base64 and response.status_code == 400 and 'Failed to extract' in response.text:
+            retry_image_url = encode_image_to_base64(content_url) if os.path.exists(content_url) else fetch_image_url_as_data_url(content_url)
+            messages[0]["content"][1]["image_url"]["url"] = retry_image_url
+            retry_payload: Dict[str, Any] = {"model": self.model, "messages": messages}
+            if transforms is not None:
+                retry_payload["transforms"] = transforms
+            if schema:
+                retry_payload["response_format"] = payload.get("response_format")
+            retry_resp = requests.post(self.base_url, headers=self.headers, json=retry_payload)
+            if retry_resp.status_code == 200:
+                return retry_resp.json()
+            raise Exception(f"API image base64 retry failed with status {retry_resp.status_code}: {retry_resp.text}")
 
-        Provide either raw `texts` or pre-built `docs` (LangChain Documents). Data will
-        be embedded into an in-memory vector store for this call.
-        """
-        from langchain_chroma import Chroma  # type: ignore
-        from langchain_openai import OpenAIEmbeddings  # type: ignore
-        from langchain_core.documents import Document  # type: ignore
+        raise Exception(f"API request failed with status {response.status_code}: {response.text}")
 
-        embeddings = OpenAIEmbeddings()
-        vectorstore = Chroma(collection_name="open-xtract-semantic", embedding_function=embeddings)
-        rag = CitationRAG(llm=self._llm, vectorstore=vectorstore)
-        if texts:
-            rag.add_texts(texts)
-        if docs:
-            # type: ignore[arg-type]
-            rag.add_documents(docs)  # expects Sequence[Document]
-        return rag.answer(question, schema=schema, k=k, rerank=rerank)
+def extract_content_info(
+    content_url: str,
+    model: str,
+    filename: str = "content.pdf",
+    schema: Optional[Dict[str, Any]] = None,
+    prompt: str = "Analyze this content",
+    use_base64: bool = False,
+    transforms: Optional[List[str]] = None
+):
+    """Backward-compatible wrapper that delegates to the Extract class."""
+    extractor = Extract(model=model)
+    return extractor.extract(
+        content_url=content_url,
+        filename=filename,
+        schema=schema,
+        prompt=prompt,
+        use_base64=use_base64,
+        transforms=transforms,
+    )
 
+# Example usage
+if __name__ == "__main__":
+    # Structured output schemas
+    document_schema = {
+        "name": "document_summary",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "title": {"type": "string", "description": "Document title"},
+                "main_points": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of main points from the document"
+                },
+                "key_concepts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Key concepts discussed"
+                }
+            },
+            "required": ["title", "main_points"],
+            "additionalProperties": False
+        }
+    }
 
-def main() -> None:
-    # Minimal CLI placeholder to keep the entrypoint intact.
-    print("open-xtract: CLI not configured. Import and use `OpenXtract` programmatically.")
+    image_schema = {
+        "name": "image_description",
+        "strict": True,
+        "schema": {
+            "type": "object",
+            "properties": {
+                "description": {"type": "string", "description": "Overall description of the image"},
+                "objects": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Key objects or entities present"
+                },
+                "dominant_colors": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Dominant colors observed"
+                }
+            },
+            "required": ["description", "objects"],
+            "additionalProperties": False
+        }
+    }
 
+    # Example 1: Document processing (Structured Outputs)
+    print("=== Document Processing (Structured Outputs) ===")
+    extractor = Extract(model="google/gemini-2.5-flash-lite")
+    doc_result = extractor.extract(
+        content_url="https://bitcoin.org/bitcoin.pdf",
+        schema=document_schema,
+        prompt="Extract the title, main points, and key concepts."
+    )
+    print("Document result:", json.dumps(doc_result, indent=2))
 
-__all__ = ["OpenXtract", "main"]
+    # Example 2: Document processing (Structured Outputs, alternate prompt)
+    print("\n=== Document Processing (Structured Outputs, alternate prompt) ===")
+    structured_doc_result = extractor.extract(
+        content_url="https://bitcoin.org/bitcoin.pdf",
+        schema=document_schema,
+        prompt="Summarize the document and list the key concepts."
+    )
+    print("Structured document result:", json.dumps(structured_doc_result, indent=2))
+
+    # Example 3: Image processing with URL (Structured Outputs)
+    print("\n=== Image Processing (Structured Outputs) ===")
+    image_result = extractor.extract(
+        content_url="https://fastapi.tiangolo.com/img/index/index-01-swagger-ui-simple.png",
+        schema=image_schema,
+        prompt="Describe this image, list objects and dominant colors."
+    )
+    print("Image result:", json.dumps(image_result, indent=2))
+
+    # Example 4: Image processing with base64 (Structured Outputs) (uncomment and provide local image path)
+    # print("\n=== Base64 Image Processing (Structured Outputs) ===")
+    # base64_data_url = encode_image_to_base64("path/to/your/image.jpg")
+    # base64_image_result = extractor.extract(
+    #     content_url=base64_data_url,
+    #     schema=image_schema,
+    #     prompt="Describe this image, list objects and dominant colors."
+    # )
+    # print("Base64 image result:", json.dumps(base64_image_result, indent=2))
+
+    # Example 5: Auto-detection of content type (Structured Outputs)
+    print("\n=== Auto-detection (Structured Outputs) ===")
+    auto_result = extractor.extract(
+        content_url="https://fastapi.tiangolo.com/img/index/index-01-swagger-ui-simple.png",
+        schema=image_schema,
+        prompt="Analyze this content"
+    )
+    print("Auto-detected result:", json.dumps(auto_result, indent=2))

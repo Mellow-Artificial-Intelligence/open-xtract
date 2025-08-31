@@ -1,145 +1,163 @@
 # OPEN-XTRACT
 
-<div align="center">
+Turn documents and images into structured JSON. Minimal setup. Fast.
 
-**Turn documents into structured data**
+Built on OpenRouter structured outputs and multimodal support.
 
-*Open‑source toolkit for extracting clean, structured data from PDFs, images, and text. Minimal setup.*
-
-[![GitHub stars](https://img.shields.io/github/stars/Mellow-Artificial-Intelligence/open-xtract?style=social)](https://github.com/Mellow-Artificial-Intelligence/open-xtract)
-[![PyPI version](https://badge.fury.io/py/open-xtract.svg)](https://badge.fury.io/py/open-xtract)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-
-[**Star on GitHub**](https://github.com/Mellow-Artificial-Intelligence/open-xtract) • [**Install from PyPI**](https://pypi.org/project/open-xtract/)
-
-</div>
+- Structured outputs: [docs](https://openrouter.ai/docs/features/structured-outputs)
+- Multimodal images: [docs](https://openrouter.ai/docs/features/multimodal/images)
+- Message transforms (middle-out): [docs](https://openrouter.ai/docs/features/message-transforms)
 
 ---
 
 ## Quick Start
 
-```bash
-uv add open-xtract
+Prereqs: Python 3.12+, [uv](https://docs.astral.sh/uv/) installed.
 
-# With vision support for multimodal models
-uv add 'open-xtract[vision]'
-```
-
-Set your model credentials (example for OpenAI):
+1) Clone and setup
 
 ```bash
-export OPENAI_API_KEY=your_key
+git clone https://github.com/Mellow-Artificial-Intelligence/open-xtract
+cd open-xtract
+make setup
 ```
 
-### Basic Programmatic Usage
+2) Configure API key
 
-```python
-from pydantic import BaseModel
-from open_xtract import OpenXtract
+We use OpenRouter; put your key in `.env` as `OPENROUTER_API_KEY=...` (or export it).
 
-class InvoiceData(BaseModel):
-    invoice_number: str
-    date: str
-    total_amount: float
-    vendor: str
-
-ox = OpenXtract(model="claude-opus-4-1-20250805")
-
-# Auto-routes based on input type
-result = ox.extract("invoice.pdf", InvoiceData)  # PDF file
-print(result)
-
-result = ox.extract("https://example.com/receipt.png", InvoiceData)  # Image URL
-print(result)
-
-result = ox.extract("receipt.jpg", InvoiceData)  # Image file
-print(result)
-
-result = ox.extract("Total: $123.45 on 2025-03-01 from ACME", InvoiceData)  # Raw text
-print(result)
+```bash
+echo "OPENROUTER_API_KEY=sk-or-..." > .env
 ```
 
-### Retrieval with Citations (Optional Reranking)
+3) Doctor check
 
-Use built-in retrieval to embed your texts, answer a question, and return inline citations. This mirrors the LangChain QA citation pattern and supports FlashRank reranking.
+```bash
+make doctor
+```
 
-References:
-- QA with citations: [LangChain how-to](https://python.langchain.com/docs/how_to/qa_citations)
-- FlashRank reranker: [LangChain integration](https://python.langchain.com/docs/integrations/retrievers/flashrank-reranker/)
+4) Run the API server
+
+```bash
+make run    # or: make run-dev for autoreload
+```
+
+Server runs at `http://0.0.0.0:8000`.
+
+---
+
+## API
+
+POST `/extract` — extract structured data from a document or image. Auto-routes based on file type.
+
+Request body:
+
+```json
+{
+  "content_url": "https://bitcoin.org/bitcoin.pdf",
+  "model": "google/gemini-2.5-flash-lite",
+  "schema": {
+    "name": "document_summary",
+    "strict": true,
+    "schema": {
+      "type": "object",
+      "properties": {
+        "title": {"type": "string"},
+        "main_points": {"type": "array", "items": {"type": "string"}}
+      },
+      "required": ["title", "main_points"],
+      "additionalProperties": false
+    }
+  },
+  "prompt": "Extract the title and main points"
+}
+```
+
+Notes
+- `schema` is required and follows OpenRouter’s JSON Schema format (`name`, `strict`, `schema`).
+- We default message transforms to `["middle-out"]` unless you pass `"transforms": []`.
+- For image URLs that a provider cannot fetch, we auto-retry by inlining as base64.
+
+Example curl
+
+```bash
+curl -X POST http://0.0.0.0:8000/extract \
+  -H "Content-Type: application/json" \
+  -d '{
+    "content_url": "https://bitcoin.org/bitcoin.pdf",
+    "model": "google/gemini-2.5-flash-lite",
+    "schema": {
+      "name": "document_summary",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+        "additionalProperties": false
+      }
+    },
+    "prompt": "Extract the title"
+  }'
+```
+
+Try with an image too by changing `content_url` to any public image URL.
+
+---
+
+## Programmatic Usage
 
 ```python
-from pydantic import BaseModel
-from open_xtract import OpenXtract
+from open_xtract import Extract
 
-class SpeedAnswer(BaseModel):
-    speed_kmh: float
-    text: str
+document_schema = {
+    "name": "document_summary",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string"},
+            "main_points": {"type": "array", "items": {"type": "string"}}
+        },
+        "required": ["title", "main_points"],
+        "additionalProperties": False
+    }
+}
 
-ox = OpenXtract(model="claude-opus-4-1-20250805")
-
-texts = [
-    "The cheetah is capable of running at 93 to 104 km/h (58 to 65 mph).",
-    "Average adult cheetahs weigh between 21 and 72 kg (46 and 159 lb).",
-]
-
-res = ox.retrieve(
-    question="How fast are cheetahs?",
-    texts=texts,
-    schema=SpeedAnswer,   # REQUIRED schema for structured output
-    k=4,
-    rerank=True,          # set to False to disable FlashRank reranking
+extractor = Extract(model="google/gemini-2.5-flash-lite")
+result = extractor.extract(
+    content_url="https://bitcoin.org/bitcoin.pdf",
+    schema=document_schema,
+    prompt="Extract the title and main points"
 )
-
-print(res.data)  # <-- conforms to SpeedAnswer
+print(result)
 ```
 
-### Model configuration
+What happens
+- Auto-detects images vs documents and builds the right content payload
+- Adds OpenRouter `response_format` with your schema (strict mode)
+- Defaults `transforms` to `middle-out` for safer long inputs
+- Retries images with base64 if provider cannot fetch the URL
 
-```python
-# Anthropic Claude
-OpenXtract(model="claude-opus-4-1-20250805", api_key="...")
+---
 
-# OpenAI GPT
-OpenXtract(model="gpt-5", api_key="...")
+## Dev Commands
 
-# Custom endpoint
-OpenXtract(model="gpt-5", base_url="https://api.openai.com/v1", api_key="...")
-```
+Everything runs through `uv` via the Makefile:
 
-## Capabilities
+- Setup env: `make setup`
+- Doctor checks: `make doctor`
+- Run server: `make run` (or `make run-dev`)
+- Tests: `make test`
+- Hit demo requests locally: `make test-api`
 
-- **Model agnostic**: Bring your own OCR/LLM; clean adapter surface
-- **PDF-first ingestion**: Layout-aware via LangChain `PyPDFLoader`
-- **Vision-enhanced**: Multimodal image parsing when needed
-- **Cited retrieval**: Embed → retrieve → (optional) rerank → answer with citations
+All commands honor `.env` (loaded in-app). Ensure `OPENROUTER_API_KEY` is set.
 
-## Contributing
-
-We welcome contributions! See [CONTRIBUTING.md](CONTRIBUTING.md).
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+---
 
 ## License
 
 MIT — see [LICENSE](LICENSE).
 
-## Links
-
-- [Homepage](https://www.open-xtract.com/)
-- [PyPI Package](https://pypi.org/project/open-xtract/)
-- [Issues](https://github.com/Mellow-Artificial-Intelligence/open-xtract/issues)
-
 ---
 
-<div align="center">
-
-**© 2025 OPEN-XTRACT. ALL RIGHTS RESERVED.**
-
-*Made with love for the open source community*
-
-</div>
+If this project helps you, please ⭐ the repo.

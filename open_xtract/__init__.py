@@ -1,12 +1,7 @@
-from .main import OpenXtract
-from .retrieval import AnnotatedAnswer, Citation, CitationRAG, CitationResult
+from .main import Extract, extract_content_info as extract_content_info
 
+# Backwards compatibility: alias OpenXtract to the new Extract class
+OpenXtract = Extract
 
-__all__ = [
-    "OpenXtract",
-    "Citation",
-    "AnnotatedAnswer",
-    "CitationRAG",
-    "CitationResult",
-]
+__all__ = ["Extract", "OpenXtract", "extract_content_info"]
 
