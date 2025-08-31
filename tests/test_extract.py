@@ -1,7 +1,5 @@
 from typing import Any, Dict
 
-import pytest
-
 from open_xtract.main import Extract, detect_content_kind
 
 

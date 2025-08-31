@@ -1,8 +1,8 @@
-from fastapi.testclient import TestClient
 from typing import Any, Dict
 
-from api.main import app
+from fastapi.testclient import TestClient
 
+from api.main import app
 
 client = TestClient(app)
 
@@ -28,7 +28,16 @@ def test_extract_happy_path(monkeypatch):
     # Mock Extract.extract to avoid external network calls
     from open_xtract.main import Extract
 
-    def fake_extract(self, *, content_url: str, filename: str = "content.pdf", schema: Dict[str, Any] | None = None, prompt: str = "Analyze this content", use_base64: bool = False, transforms: list[str] | None = None):
+    def fake_extract(
+        self,
+        *,
+        content_url: str,
+        filename: str = "content.pdf",
+        schema: Dict[str, Any] | None = None,
+        prompt: str = "Analyze this content",
+        use_base64: bool = False,
+        transforms: list[str] | None = None,
+    ):
         return {"ok": True, "content_url": content_url, "prompt": prompt, "schema": schema}
 
     monkeypatch.setattr(Extract, "extract", fake_extract)

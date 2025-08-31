@@ -1,9 +1,11 @@
-import requests
-import json
 import base64
-from dotenv import load_dotenv
+import json
 import os
-from typing import Optional, Dict, Any, List
+from typing import Any, Dict, List, Optional
+
+import requests
+from dotenv import load_dotenv
+
 load_dotenv()
 
 def encode_image_to_base64(image_path: str) -> str:
@@ -166,8 +168,17 @@ class Extract:
                     return content
             return result
         # If image failed to fetch remotely, retry with base64
-        if content_type == 'image' and not use_base64 and response.status_code == 400 and 'Failed to extract' in response.text:
-            retry_image_url = encode_image_to_base64(content_url) if os.path.exists(content_url) else fetch_image_url_as_data_url(content_url)
+        if (
+            content_type == 'image'
+            and not use_base64
+            and response.status_code == 400
+            and 'Failed to extract' in response.text
+        ):
+            retry_image_url = (
+                encode_image_to_base64(content_url)
+                if os.path.exists(content_url)
+                else fetch_image_url_as_data_url(content_url)
+            )
             messages[0]["content"][1]["image_url"]["url"] = retry_image_url
             retry_payload: Dict[str, Any] = {"model": self.model, "messages": messages}
             if transforms is not None:

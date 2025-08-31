@@ -28,16 +28,13 @@ jobs:
         with:
           enable-cache: true
 
-      - name: Create virtual environment
+      - name: Setup project
         run: |
-          uv venv
-
-      - name: Install dependencies with uv
-        run: |
-          uv pip install -e .[dev]
+          make setup
 
       - name: Run tests
         env:
           PYTHONWARNINGS: error::DeprecationWarning
         run: |
-          uv run pytest -q
+          make lint
+          make test

@@ -1,5 +1,6 @@
 import json
 import sys
+
 import requests
 
 BASE = "http://0.0.0.0:8000"

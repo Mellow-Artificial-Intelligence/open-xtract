@@ -1,6 +1,6 @@
 # Minimal Makefile for uv-based workflows
 
-.PHONY: help setup run run-dev test test-api doctor clean
+.PHONY: help setup run run-dev test test-api lint fmt doctor clean
 
 HOST ?= 0.0.0.0
 PORT ?= 8000
@@ -11,6 +11,8 @@ help:
 	@echo "  run       - Start API server (uvicorn)"
 	@echo "  run-dev   - Start API server with reload"
 	@echo "  test      - Run pytest"
+	@echo "  lint      - Run ruff lint"
+	@echo "  fmt       - Run ruff format"
 	@echo "  test-api  - Hit local endpoints with example payloads"
 	@echo "  doctor    - Check environment and setup requirements"
 	@echo "  clean     - Remove .venv and __pycache__"
@@ -26,6 +28,12 @@ run-dev:
 
 test:
 	uv run pytest -q
+
+lint:
+	uv run ruff check .
+
+fmt:
+	uv run ruff format .
 
 test-api:
 	uv run python scripts/test_endpoints.py

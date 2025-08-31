@@ -28,7 +28,12 @@ dependencies = [
 
 [project.optional-dependencies]
 vision = ["PyMuPDF>=1.24.0"]
-dev = ["pytest>=8.0.0", "pytest-asyncio>=0.24.0", "pytest-mock>=3.14.0"]
+dev = [
+  "pytest>=8.0.0",
+  "pytest-asyncio>=0.24.0",
+  "pytest-mock>=3.14.0",
+  "ruff>=0.6.0"
+]
 
 [project.scripts]
 open-xtract = "open_xtract:main"
@@ -43,3 +48,16 @@ build-backend = "hatchling.build"
 [tool.pytest.ini_options]
 # Silence pytest-asyncio deprecation by setting explicit loop scope
 asyncio_default_fixture_loop_scope = "function"
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+line-ending = "auto"
