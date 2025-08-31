@@ -23,6 +23,8 @@ dependencies = [
     "pillow>=11.3.0",
     "langchain-chroma>=0.1.4",
     "chromadb>=0.5.5",
+    "mistralai>=1.9.9",
+    "openai-agents>=0.2.10",
 ]
 
 [project.optional-dependencies]

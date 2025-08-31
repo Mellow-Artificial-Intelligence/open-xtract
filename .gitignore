@@ -41,3 +41,5 @@ extracted/
 CLAUDE.md
 
 test_docs/
+
+.ruff_cache/
