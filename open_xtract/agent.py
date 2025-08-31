@@ -1,105 +1,120 @@
+import os
 import json
-import re
-from bisect import bisect_right
+from typing import Any, Dict, List
+import requests
+from dotenv import load_dotenv
 
-from typing_extensions import Any
+load_dotenv()
 
-from agents import Agent, FunctionTool, RunContextWrapper, function_tool
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_API_BASE = os.getenv("OPENAI_API_BASE", "https://api.openai.com/v1")
+MODEL_NAME = os.getenv("OPENAI_MODEL", "gpt-4.1")
 
-
-@function_tool
-def grep(
-    ctx: RunContextWrapper[Any],
-    pattern: str,
-    text: str,
-    ignore_case: bool = False,
-    multiline: bool = False,
-    dotall: bool = False,
-    context_lines: int = 0,
-    max_matches: int | None = None,
-    use_regex: bool = True,
-) -> str:
-    """Search text with an advanced grep-like matcher and return formatted results.
-
-    Args:
-        pattern: Regex (or literal) pattern to search for.
-        text: The input text to search.
-        ignore_case: Case-insensitive matching.
-        multiline: ^ and $ match start/end of each line.
-        dotall: Dot matches newline.
-        context_lines: Number of lines to show before/after each match.
-        max_matches: Max number of matches to return; unlimited if None.
-        use_regex: If False, treat the pattern as a literal string.
-    """
-    flags = 0
-    if ignore_case:
-        flags |= re.IGNORECASE
-    if multiline:
-        flags |= re.MULTILINE
-    if dotall:
-        flags |= re.DOTALL
-
-    compiled = re.compile(re.escape(pattern) if not use_regex else pattern, flags)
-
-    # Precompute line boundaries for fast line-number mapping
-    lines_with_endings = text.splitlines(True)
-    starts: list[int] = []
-    bounds: list[tuple[int, int]] = []
-    pos = 0
-    for chunk in lines_with_endings:
-        start = pos
-        end = start + len(chunk)
-        starts.append(start)
-        bounds.append((start, end))
-        pos = end
-
-    def line_index_for(position: int) -> int:
-        if not starts:
-            return 0
-        i = bisect_right(starts, position) - 1
-        return max(0, i)
-
-    output_lines: list[str] = []
-    match_count = 0
-
-    for m in compiled.finditer(text):
-        if max_matches is not None and match_count >= max_matches:
-            break
-        line_idx = line_index_for(m.start())
-        # Determine context range
-        start_ctx = max(0, line_idx - context_lines)
-        end_ctx = min(len(bounds) - 1, line_idx + context_lines)
-
-        # Emit before context
-        for i in range(start_ctx, line_idx):
-            line_text = text[bounds[i][0]:bounds[i][1]].rstrip("\n")
-            output_lines.append(f"- {i+1}:{line_text}")
-
-        # Emit match line
-        match_line = text[bounds[line_idx][0]:bounds[line_idx][1]].rstrip("\n")
-        output_lines.append(f": {line_idx+1}:{match_line}")
-
-        # Emit after context
-        for i in range(line_idx + 1, end_ctx + 1):
-            line_text = text[bounds[i][0]:bounds[i][1]].rstrip("\n")
-            output_lines.append(f"- {i+1}:{line_text}")
-
-        match_count += 1
-
-    if match_count == 0:
-        return ""
-
-    return "\n".join(output_lines)
+if not OPENAI_API_KEY:
+    raise RuntimeError("OPENAI_API_KEY is not set")
 
 
-agent = Agent(
-    name="GrepAgent",
-    tools=[grep],
-)
+# 1. Define a list of callable tools for the model (Chat Completions format)
+tools: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "grep",
+            "description": "Search text with an advanced grep-like matcher and return formatted results.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {
+                        "type": "string",
+                        "description": "A regex (or literal) pattern to search for.",
+                    }
+                },
+                "required": ["pattern"],
+            },
+        },
+    }
+]
 
-for tool in agent.tools:
-    if isinstance(tool, FunctionTool):
-        print(tool.name)
-        print(tool.description)
-        print(json.dumps(tool.params_json_schema, indent=2))
-        print()
+
+def grep(pattern: str) -> str:
+    return f"I will grep the text for the pattern {pattern}"
+
+
+def post_chat_completions(payload: Dict[str, Any]) -> Dict[str, Any]:
+    url = f"{OPENAI_API_BASE}/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENAI_API_KEY}",
+        "Content-Type": "application/json",
+    }
+    response = requests.post(url, headers=headers, json=payload, timeout=60)
+    response.raise_for_status()
+    return response.json()
+
+
+# Create a running message list we will add to over time
+messages: List[Dict[str, Any]] = [
+    {"role": "user", "content": "I will grep the text for the pattern 'software engineer'"}
+]
+
+# 2. Prompt the model with tools defined using raw HTTP request
+first_payload: Dict[str, Any] = {
+    "model": MODEL_NAME,
+    "messages": messages,
+    "tools": tools,
+    "tool_choice": "auto",
+}
+
+first_completion = post_chat_completions(first_payload)
+
+# 3. If the model requested tool calls, execute them and add results
+choice = first_completion.get("choices", [{}])[0]
+assistant_message: Dict[str, Any] = choice.get("message", {})
+tool_calls = assistant_message.get("tool_calls") or []
+
+if tool_calls:
+    messages.append(
+        {
+            "role": "assistant",
+            "content": assistant_message.get("content") or "",
+            "tool_calls": tool_calls,
+        }
+    )
+
+    for tc in tool_calls:
+        function = (tc or {}).get("function") or {}
+        name = function.get("name")
+        if name == "grep":
+            try:
+                args = json.loads(function.get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            pattern = args.get("pattern", "")
+            grep_result = grep(pattern)
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.get("id"),
+                    "content": grep_result,
+                }
+            )
+else:
+    messages.append({"role": "assistant", "content": assistant_message.get("content") or ""})
+
+print("Final input:")
+print(messages)
+
+# 4. Ask the model to produce the final answer
+messages.append({"role": "system", "content": "Respond only with a grep generated by a tool."})
+
+final_payload: Dict[str, Any] = {
+    "model": MODEL_NAME,
+    "messages": messages,
+    "tools": tools,
+}
+
+final_completion = post_chat_completions(final_payload)
+
+# 5. The model should be able to give a response!
+print("Final output:")
+final_message = (final_completion.get("choices", [{}])[0]).get("message", {})
+print(final_message.get("content") or "")
