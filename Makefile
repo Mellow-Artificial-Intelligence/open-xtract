@@ -25,7 +25,7 @@ run-dev:
 	uv run uvicorn api.main:app --host $(HOST) --port $(PORT) --reload
 
 test:
-	uv run pytest -q tests/test_api.py
+	uv run pytest -q
 
 test-api:
 	uv run python scripts/test_endpoints.py
