@@ -82,30 +82,6 @@ class OpenXtract:
                     "langchain-openai is required for OpenAI models. Install with: pip install langchain-openai"
                 ) from err
 
-    def _detect_input_type(self, input_data: str) -> str:
-        """Detect the type of input data (pdf, image, url, or text)."""
-        # Check if it's a URL
-        if input_data.startswith(("http://", "https://")):
-            parsed = urlparse(input_data)
-            if parsed.path:
-                ext = Path(parsed.path).suffix.lower()
-                if ext in self._pdf_extensions:
-                    return "pdf_url"
-                elif ext in self._image_extensions:
-                    return "image_url"
-            return "image_url"  # Default URLs to image handling
-
-        # Check for file extensions
-        ext = Path(input_data).suffix.lower()
-        if ext in self._pdf_extensions or ext in self._image_extensions:
-            # If it has a recognized extension, it should be a valid file
-            if not os.path.isfile(input_data):
-                raise FileNotFoundError(f"File not found: {input_data}")
-            return "pdf" if ext in self._pdf_extensions else "image"
-
-        # If no extension and not a URL, treat as raw text
-        return "text"
-
     def extract(
         self,
         input_data: str,
@@ -123,81 +99,6 @@ class OpenXtract:
             return self._extract_image(input_data, schema, instruction, stream=stream)
         else:  # text
             return self._extract_text(input_data, schema, stream=stream)
-
-    def _extract_pdf(
-        self,
-        pdf_path: str,
-        schema: type[BaseModel],
-        instruction: str,
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        # Create a separate LLM instance for image parsing with max_tokens
-        image_llm = self._create_llm(
-            self._model_name,
-            self._base_url,
-            self._api_key,
-            max_tokens=self._max_tokens_image_description,
-        )
-        loader = PyPDFLoader(
-            pdf_path,
-            mode="page",
-            images_inner_format="markdown-img",
-            images_parser=LLMImageBlobParser(model=image_llm),
-        )
-        docs = loader.load()
-        structured_llm: Any = self._llm.with_structured_output(schema)
-        prompt = (
-            "Please follow the instructions below to extract the relevant information from the PDF.\n"
-            f"{instruction}\n\nThe PDF is as follows:\n{docs}\n"
-        )
-        if stream:
-            return cast(Iterable[BaseModel], structured_llm.stream([HumanMessage(content=prompt)]))
-        return cast(BaseModel, structured_llm.invoke([HumanMessage(content=prompt)]))
-
-    def _extract_image(
-        self,
-        image_path_or_url: str,
-        schema: type[BaseModel],
-        instruction: str,
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        message_content: list[dict[str, Any] | str] = [
-            {"type": "text", "text": instruction},
-        ]
-        if image_path_or_url.startswith(("http://", "https://")):
-            message_content.append({"type": "image_url", "image_url": {"url": image_path_or_url}})
-        else:
-            image_bytes = io.BytesIO()
-            with open(image_path_or_url, "rb") as img_file:
-                image_bytes.write(img_file.read())
-            img_base64 = base64.b64encode(image_bytes.getvalue()).decode("utf-8")
-            message_content.append(
-                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
-            )
-
-        structured_llm: Any = self._llm.with_structured_output(schema)
-        # HumanMessage expects content as str or list of rich content items
-        content_list: list[str | dict[str, Any]] = [item for item in message_content]
-        if stream:
-            return cast(
-                Iterable[BaseModel],
-                structured_llm.stream([HumanMessage(content=content_list)]),
-            )
-        return cast(BaseModel, structured_llm.invoke([HumanMessage(content=content_list)]))
-
-    def _extract_text(
-        self,
-        text: str,
-        schema: type[BaseModel],
-        *,
-        stream: bool = False,
-    ) -> BaseModel | Iterable[BaseModel]:
-        structured_llm: Any = self._llm.with_structured_output(schema)
-        if stream:
-            return cast(Iterable[BaseModel], structured_llm.stream([HumanMessage(content=text)]))
-        return cast(BaseModel, structured_llm.invoke([HumanMessage(content=text)]))
 
     # Retrieval with optional reranking and citations
     def retrieve(
@@ -226,6 +127,116 @@ class OpenXtract:
         if docs:
             rag.add_documents(docs)
         return rag.answer(question, schema=schema, k=k, rerank=rerank)
+
+    def _detect_input_type(self, input_data: str) -> str:
+        """Detect the type of input data (pdf, image, url, or text)."""
+        # Check if it's a URL
+        if input_data.startswith(("http://", "https://")):
+            parsed = urlparse(input_data)
+            if parsed.path:
+                ext = Path(parsed.path).suffix.lower()
+                if ext in self._pdf_extensions:
+                    return "pdf_url"
+                elif ext in self._image_extensions:
+                    return "image_url"
+            return "image_url"  # Default URLs to image handling
+
+        # Check for file extensions
+        ext = Path(input_data).suffix.lower()
+        if ext in self._pdf_extensions or ext in self._image_extensions:
+            # If it has a recognized extension, it should be a valid file
+            if not os.path.isfile(input_data):
+                raise FileNotFoundError(f"File not found: {input_data}")
+            return "pdf" if ext in self._pdf_extensions else "image"
+
+        # If no extension and not a URL, treat as raw text
+        return "text"
+
+    # ---- Internal helpers -------------------------------------------------
+    def _run_structured(
+        self,
+        schema: type[BaseModel],
+        message: HumanMessage,
+        *,
+        stream: bool,
+    ) -> BaseModel | Iterable[BaseModel]:
+        """Invoke or stream a structured call uniformly."""
+        structured_llm: Any = self._llm.with_structured_output(schema)
+        if stream:
+            return cast(Iterable[BaseModel], structured_llm.stream([message]))
+        return cast(BaseModel, structured_llm.invoke([message]))
+
+    def _build_image_message_content(self, image_path_or_url: str, instruction: str) -> list[dict[str, Any] | str]:
+        """Build multi-modal message content for an image path or URL."""
+        message_content: list[dict[str, Any] | str] = [
+            {"type": "text", "text": instruction},
+        ]
+        if image_path_or_url.startswith(("http://", "https://")):
+            message_content.append({"type": "image_url", "image_url": {"url": image_path_or_url}})
+        else:
+            # Keep jpeg data URL prefix for compatibility with downstream providers/tests
+            with open(image_path_or_url, "rb") as img_file:
+                img_base64 = base64.b64encode(img_file.read()).decode("utf-8")
+            message_content.append(
+                {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{img_base64}"}}
+            )
+        return message_content
+
+    def _build_pdf_prompt(self, docs: Sequence[Any], instruction: str) -> str:
+        """Create the prompt string for PDF-based extraction."""
+        return (
+            "Please follow the instructions below to extract the relevant information from the PDF.\n"
+            f"{instruction}\n\nThe PDF is as follows:\n{docs}\n"
+        )
+
+    def _extract_pdf(
+        self,
+        pdf_path: str,
+        schema: type[BaseModel],
+        instruction: str,
+        *,
+        stream: bool = False,
+    ) -> BaseModel | Iterable[BaseModel]:
+        # Create a separate LLM instance for image parsing with max_tokens
+        image_llm = self._create_llm(
+            self._model_name,
+            self._base_url,
+            self._api_key,
+            max_tokens=self._max_tokens_image_description,
+        )
+        loader = PyPDFLoader(
+            pdf_path,
+            mode="page",
+            images_inner_format="markdown-img",
+            images_parser=LLMImageBlobParser(model=image_llm),
+        )
+        docs = loader.load()
+        prompt = self._build_pdf_prompt(docs, instruction)
+        return self._run_structured(schema, HumanMessage(content=prompt), stream=stream)
+
+    def _extract_image(
+        self,
+        image_path_or_url: str,
+        schema: type[BaseModel],
+        instruction: str,
+        *,
+        stream: bool = False,
+    ) -> BaseModel | Iterable[BaseModel]:
+        message_content = self._build_image_message_content(image_path_or_url, instruction)
+        # HumanMessage expects content as str or list of rich content items
+        content_list: list[str | dict[str, Any]] = [item for item in message_content]
+        return self._run_structured(schema, HumanMessage(content=content_list), stream=stream)
+
+    def _extract_text(
+        self,
+        text: str,
+        schema: type[BaseModel],
+        *,
+        stream: bool = False,
+    ) -> BaseModel | Iterable[BaseModel]:
+        return self._run_structured(schema, HumanMessage(content=text), stream=stream)
+
+    
 
 
 def main() -> None:
