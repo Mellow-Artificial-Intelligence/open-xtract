@@ -142,6 +142,4 @@ MIT — see [LICENSE](LICENSE).
 
 **© 2025 OPEN-XTRACT. ALL RIGHTS RESERVED.**
 
-*Made with love for the open source community*
-
 </div>
