@@ -44,7 +44,7 @@ class InvoiceData(BaseModel):
     total_amount: float
     vendor: str
 
-ox = OpenXtract(model="claude-opus-4-1-20250805")
+ox = OpenXtract(model="gpt-5")
 
 # Auto-routes based on input type
 result = ox.extract("invoice.pdf", InvoiceData)  # PDF file
@@ -76,7 +76,7 @@ class SpeedAnswer(BaseModel):
     speed_kmh: float
     text: str
 
-ox = OpenXtract(model="claude-opus-4-1-20250805")
+ox = OpenXtract(model="gpt-5")
 
 texts = [
     "The cheetah is capable of running at 93 to 104 km/h (58 to 65 mph).",
@@ -98,7 +98,7 @@ print(res.data)  # <-- conforms to SpeedAnswer
 
 ```python
 # Anthropic Claude
-OpenXtract(model="claude-opus-4-1-20250805", api_key="...")
+OpenXtract(model="gpt-5", api_key="...")
 
 # OpenAI GPT
 OpenXtract(model="gpt-5", api_key="...")
@@ -141,7 +141,5 @@ MIT — see [LICENSE](LICENSE).
 <div align="center">
 
 **© 2025 OPEN-XTRACT. ALL RIGHTS RESERVED.**
-
-*Made with love for the open source community*
 
 </div>
