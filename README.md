@@ -17,6 +17,10 @@ uv add open-xtract
 
 ## Usage
 
+The model string should look like: `<provider>:<model_string>`
+
+Ex. "openai:gpt-5-nano", "xai:grok-4"
+
 ```python
 from pydantic import BaseModel
 from open_xtract import OpenXtract
@@ -27,7 +31,7 @@ class InvoiceData(BaseModel):
     total_amount: float
     vendor: str
 
-ox = OpenXtract(model="gpt-4o")  # or any OpenAI model
+ox = OpenXtract(model="openai:gpt-5-nano")  # or any model
 
 # Extract from text
 result = ox.extract("Total: $123.45 on 2025-03-01 from ACME", InvoiceData)
@@ -40,8 +44,8 @@ print(result)
 
 ```python
 # Use any OpenAI-compatible model
-ox = OpenXtract(model="gpt-4o", api_key="your-key")
-ox = OpenXtract(model="grok-4", base_url="https://api.x.ai/v1", api_key="your-xai-key")
+ox = OpenXtract(model="openrouter:qwen/qwen3-max")
+ox = OpenXtract(model="xai:grok-4")
 ```
 
 ## Features
