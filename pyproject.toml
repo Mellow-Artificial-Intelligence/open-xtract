@@ -23,6 +23,8 @@ dependencies = [
     "pillow>=11.3.0",
     "langchain-chroma>=0.1.4",
     "chromadb>=0.5.5",
+    "pymupdf>=1.26.3",
+    "pytest>=8.4.1",
 ]
 
 [project.optional-dependencies]
