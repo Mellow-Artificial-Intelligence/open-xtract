@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.13'",
@@ -1517,7 +1517,9 @@ dependencies = [
     { name = "langgraph" },
     { name = "pillow" },
     { name = "pydantic" },
+    { name = "pymupdf" },
     { name = "pypdf" },
+    { name = "pytest" },
     { name = "python-dotenv" },
     { name = "tiktoken" },
     { name = "typing-extensions" },
@@ -1554,8 +1556,10 @@ requires-dist = [
     { name = "pillow", specifier = ">=11.3.0" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=3.7.0" },
     { name = "pydantic", specifier = ">=2.0.0" },
+    { name = "pymupdf", specifier = ">=1.26.3" },
     { name = "pymupdf", marker = "extra == 'vision'", specifier = ">=1.24.0" },
     { name = "pypdf", specifier = ">=5.0.0" },
+    { name = "pytest", specifier = ">=8.4.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.24.0" },
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.14.0" },
