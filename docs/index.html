@@ -126,9 +126,6 @@
               <button data-example="extract" class="ex-tab active px-4 py-1.5 text-xs font-medium transition-all">
                 AUTO-EXTRACT
               </button>
-              <button data-example="retrieve" class="ex-tab px-4 py-1.5 text-xs font-medium transition-all">
-                RETRIEVE & CITE
-              </button>
             </div>
           </div>
 
@@ -219,29 +216,16 @@
         extract: `from pydantic import BaseModel
 from open_xtract import OpenXtract
 
-class InvoiceData(BaseModel):
-    invoice_number: str
-    total_amount: float
+class Address(BaseModel):
+    address: str
+    city: str
+    state: str
+    zip: str
 
-ox = OpenXtract(model="claude-opus-4-1-20250805")
+ox = OpenXtract(model="openai:gpt-5-nano")
 
 # Auto-routes based on input type
-result = ox.extract("invoice.pdf", InvoiceData)
-result = ox.extract("receipt.jpg", InvoiceData)
-result = ox.extract("Raw text data", InvoiceData)`,
-        retrieve: `from pydantic import BaseModel
-from open_xtract import OpenXtract
-
-class SpeedAnswer(BaseModel):
-    speed_kmh: float
-
-ox = OpenXtract(model="claude-opus-4-1-20250805")
-
-res = ox.retrieve(
-    question="How fast are cheetahs?",
-    texts=["Cheetahs run at 93-104 km/h"],
-    schema=SpeedAnswer
-)`
+result = ox.extract("This is a test, I live at 123 Main St, Anytown, USA. 12345.", Address)`,
       };
 
       const codeBox = document.getElementById('exampleCode');
