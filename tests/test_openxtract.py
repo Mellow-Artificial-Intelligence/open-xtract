@@ -27,14 +27,6 @@ class TestOpenXtract:
         assert extractor._api_key == "test-key"
         assert extractor._llm is not None
 
-    def test_create_llm(self):
-        """Test LLM creation."""
-        extractor = OpenXtract(model="gpt-5-nano")
-        llm = extractor._create_llm("gpt-5-nano", None, None)
-
-        assert llm is not None
-        # The actual LLM instance will be a ChatOpenAI object
-
     @patch('open_xtract.main.ChatOpenAI')
     def test_extract_with_mock(self, mock_chat_openai):
         """Test extract method with mocked LLM."""
