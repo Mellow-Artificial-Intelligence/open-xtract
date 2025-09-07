@@ -41,7 +41,7 @@ print(result)
 ```python
 # Use any OpenAI-compatible model
 ox = OpenXtract(model="gpt-4o", api_key="your-key")
-ox = OpenXtract(model="claude-3", base_url="https://api.anthropic.com", api_key="your-key")
+ox = OpenXtract(model="grok-4", base_url="https://api.x.ai/v1", api_key="your-xai-key")
 ```
 
 ## Features
