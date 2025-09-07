@@ -1,13 +1,18 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
+
 from langchain_openai import ChatOpenAI
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+# Import provider_map - try relative import first, fall back to absolute
 try:
     from .provider_map import provider_map  # For when imported as a module
 except ImportError:
-    from provider_map import provider_map  # For when run directly
+    from provider_map import provider_map  # type: ignore[no-redef] # For when run directly
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -34,10 +39,12 @@ class OpenXtract:
         return self._provider, self._model, self._base_url, self._api_key
 
     def _create_llm(self):
-        return ChatOpenAI(model=self._llm_parts[1], base_url=self._llm_parts[2], api_key=self._llm_parts[3])
+        return ChatOpenAI(
+            model=self._llm_parts[1], base_url=self._llm_parts[2], api_key=self._llm_parts[3]
+        )
 
-    def extract(self, file_path: str | Path, schema: BaseModel):
+    def extract(self, file_path: str | Path, schema: type[BaseModel]) -> Any:
         return self._llm.with_structured_output(schema).invoke(file_path)
 
 
-__all__ = ["OpenXtract", "main"]
+__all__ = ["OpenXtract"]

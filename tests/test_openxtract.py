@@ -1,12 +1,13 @@
-import pytest
-from unittest.mock import Mock, patch
 from pathlib import Path
-from pydantic import BaseModel
+from unittest.mock import Mock, patch
+
 from open_xtract.main import OpenXtract
+from pydantic import BaseModel
 
 
 class MockSchema(BaseModel):
     """Mock Pydantic schema for testing."""
+
     name: str
     value: int
 
@@ -14,7 +15,7 @@ class MockSchema(BaseModel):
 class TestOpenXtract:
     """Test cases for OpenXtract class."""
 
-    @patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
     def test_init(self):
         """Test OpenXtract initialization."""
         extractor = OpenXtract(model="openai:gpt-4")
@@ -26,8 +27,8 @@ class TestOpenXtract:
         assert extractor._base_url == "https://api.openai.com/v1"
         assert extractor._llm is not None
 
-    @patch('open_xtract.main.ChatOpenAI')
-    @patch.dict('os.environ', {'OPENAI_API_KEY': 'test-key'})
+    @patch("open_xtract.main.ChatOpenAI")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
     def test_extract_with_mock(self, mock_chat_openai):
         """Test extract method with mocked LLM."""
         # Setup mock
@@ -45,7 +46,7 @@ class TestOpenXtract:
 
         # Verify the result
         assert result.name == "test"
-        assert result.value == 42
+        assert result.value == 42  # noqa: PLR2004
 
         # Verify the mock was called correctly
         mock_llm.with_structured_output.assert_called_once_with(MockSchema)
@@ -53,7 +54,5 @@ class TestOpenXtract:
 
         # Verify ChatOpenAI was created with correct parameters
         mock_chat_openai.assert_called_once_with(
-            model="gpt-4",
-            base_url="https://api.openai.com/v1",
-            api_key="test-key"
+            model="gpt-4", base_url="https://api.openai.com/v1", api_key="test-key"
         )
