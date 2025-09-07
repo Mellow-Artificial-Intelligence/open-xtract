@@ -19,8 +19,8 @@ def main() -> None:
     # Use xAI Grok
     #base_url = "https://api.x.ai/v1"
     #api_key = os.getenv("XAI_API_KEY")
-    #ox = OpenXtract(base_url=base_url, api_key=api_key, model="grok-4")
-    ox = OpenXtract(model="gpt-5-nano")
+    #ox = OpenXtract(base_url=base_url, api_key=api_key, model="xai:grok-4")
+    ox = OpenXtract(model="openai:gpt-5-nano")
     result = ox.extract("This is a test, I live at 123 Main St, Anytown, USA 12345. My email is test@test.com and my phone number is 123-456-7890.", Resume)
     print(result)
 
