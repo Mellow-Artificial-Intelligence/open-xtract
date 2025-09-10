@@ -12,7 +12,7 @@ cd open-xtract
 
 2. Install in development mode with all dependencies:
 ```bash
-pip install -e ".[vision,dev]"
+uv sync
 ```
 
 ## Running Tests

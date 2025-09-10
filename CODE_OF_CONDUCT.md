@@ -8,6 +8,4 @@ unacceptable behavior will not be tolerated.
 For the full text, see the Contributor Covenant v2.1 at
 `https://www.contributor-covenant.org/version/2/1/code_of_conduct/`.
 
-Enforcement: If you experience or witness unacceptable behavior, please
-contact the maintainers at `conduct@open-xtract.com`.
-
+Enforcement: If you experience or witness unacceptable behavior, please call it out.
