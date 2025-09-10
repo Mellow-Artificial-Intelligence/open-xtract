@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_openai import ChatOpenAI
+from langchain_anthropic import ChatAnthropic
 from pydantic import BaseModel
 
 # Import provider_map - try relative import first, fall back to absolute
@@ -32,16 +33,19 @@ class OpenXtract:
 
     def _get_parts(self):
         parts = self._model_string.split(":")
-        self._provider = parts[0]
-        self._model = parts[1]
+        self._provider = parts[0] or None
+        self._model = parts[1] or None
         self._api_key = os.getenv(provider_map[self._provider]["api_key"])
-        self._base_url = provider_map[self._provider]["base_url"]
+        self._base_url = provider_map[self._provider]["base_url"] or None
         return self._provider, self._model, self._base_url, self._api_key
 
     def _create_llm(self):
-        return ChatOpenAI(
-            model=self._llm_parts[1], base_url=self._llm_parts[2], api_key=self._llm_parts[3]
-        )
+        if self._provider == "anthropic":
+            return ChatAnthropic(model=self._model, api_key=self._api_key)
+        else:
+            return ChatOpenAI(
+                model=self._model, base_url=self._base_url, api_key=self._api_key
+            )
 
     def extract(self, file_path: str | Path, schema: type[BaseModel]) -> Any:
         return self._llm.with_structured_output(schema).invoke(file_path)
