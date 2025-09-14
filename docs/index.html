@@ -126,6 +126,12 @@
               <button data-example="extract" class="ex-tab active px-4 py-1.5 text-xs font-medium transition-all">
                 AUTO-EXTRACT
               </button>
+              <button data-example="image" class="ex-tab px-4 py-1.5 text-xs font-medium transition-all">
+                IMAGE
+              </button>
+              <button data-example="pdf" class="ex-tab px-4 py-1.5 text-xs font-medium transition-all">
+                PDF
+              </button>
             </div>
           </div>
 
@@ -226,6 +232,34 @@ ox = OpenXtract(model="openai:gpt-5-nano")
 
 # Auto-routes based on input type
 result = ox.extract("This is a test, I live at 123 Main St, Anytown, USA. 12345.", Address)`,
+        image: `from pydantic import BaseModel
+from open_xtract import OpenXtract
+
+class InvoiceData(BaseModel):
+    invoice_number: str
+    date: str
+    total_amount: float
+    vendor: str
+
+ox = OpenXtract(model="openai:gpt-5-nano")
+
+with open("/path/to/receipt.png", "rb") as f:
+    img_bytes = f.read()
+result = ox.extract(img_bytes, InvoiceData)`,
+        pdf: `from pydantic import BaseModel
+from open_xtract import OpenXtract
+
+class InvoiceData(BaseModel):
+    invoice_number: str
+    date: str
+    total_amount: float
+    vendor: str
+
+ox = OpenXtract(model="openai:gpt-5-nano")
+
+with open("/path/to/invoice.pdf", "rb") as f:
+    pdf_bytes = f.read()
+result = ox.extract(pdf_bytes, InvoiceData)`,
       };
 
       const codeBox = document.getElementById('exampleCode');
