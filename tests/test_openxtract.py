@@ -1,8 +1,14 @@
-from pathlib import Path
+import io
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+import pytest
 from open_xtract.main import OpenXtract
+from PIL import Image
 from pydantic import BaseModel
+
+NUM_PARTS_TEXT_PLUS_TWO_IMAGES = 3
+NUM_PARTS_TEXT_PLUS_THREE_IMAGES = 4
 
 
 class MockSchema(BaseModel):
@@ -40,9 +46,9 @@ class TestOpenXtract:
         # Create extractor
         extractor = OpenXtract(model="openai:gpt-4")
 
-        # Test extract method
-        file_path = Path("/test/file.txt")
-        result = extractor.extract(file_path, MockSchema)
+        # Test extract method (text input)
+        text_input = "name: test, value: 42"
+        result = extractor.extract(text_input, MockSchema)
 
         # Verify the result
         assert result.name == "test"
@@ -50,9 +56,177 @@ class TestOpenXtract:
 
         # Verify the mock was called correctly
         mock_llm.with_structured_output.assert_called_once_with(MockSchema)
-        mock_llm.with_structured_output.return_value.invoke.assert_called_once_with(file_path)
+        mock_llm.with_structured_output.return_value.invoke.assert_called_once_with(text_input)
 
         # Verify ChatOpenAI was created with correct parameters
         mock_chat_openai.assert_called_once_with(
             model="gpt-4", base_url="https://api.openai.com/v1", api_key="test-key"
         )
+
+    @patch("open_xtract.main.ChatOpenAI")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    def test_extract_image_bytes_openai(self, mock_chat_openai):
+        mock_llm = Mock()
+        mock_response = MockSchema(name="img", value=1)
+        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
+        mock_chat_openai.return_value = mock_llm
+
+        # Patch HumanMessage to capture content
+        class FakeHumanMessage:
+            def __init__(self, content):
+                self.content = content
+
+        with patch("open_xtract.main.HumanMessage", FakeHumanMessage):
+            ox = OpenXtract(model="openai:gpt-4o-mini")
+            # Generate a small PNG in memory
+            buf = io.BytesIO()
+            Image.new("RGB", (2, 2), color=(255, 0, 0)).save(buf, format="PNG")
+            img_bytes = buf.getvalue()
+
+            result = ox.extract(img_bytes, MockSchema)
+
+        assert result.name == "img"
+        assert result.value == 1  # noqa: PLR2004
+
+        # Validate content structure
+        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
+        assert isinstance(invoke_args[0], list)
+        human_msg = invoke_args[0][0]
+        parts = human_msg.content
+        assert parts[0]["type"] == "text"
+        assert parts[1]["type"] == "image_url"
+        assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+
+    @patch("open_xtract.main.ChatAnthropic")
+    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+    def test_extract_image_bytes_anthropic(self, mock_chat_anthropic):
+        mock_llm = Mock()
+        mock_response = MockSchema(name="img", value=2)
+        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
+        mock_chat_anthropic.return_value = mock_llm
+
+        class FakeHumanMessage:
+            def __init__(self, content):
+                self.content = content
+
+        with patch("open_xtract.main.HumanMessage", FakeHumanMessage):
+            ox = OpenXtract(model="anthropic:claude-3-5-sonnet")
+            buf = io.BytesIO()
+            Image.new("RGB", (2, 2), color=(0, 255, 0)).save(buf, format="PNG")
+            img_bytes = buf.getvalue()
+
+            result = ox.extract(img_bytes, MockSchema)
+
+        assert result.value == 2  # noqa: PLR2004
+        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
+        human_msg = invoke_args[0][0]
+        parts = human_msg.content
+        assert parts[0]["type"] == "text"
+        assert parts[1]["type"] == "image"
+        assert parts[1]["source"]["type"] == "base64"
+        assert parts[1]["source"]["media_type"].startswith("image/")
+
+    @patch("open_xtract.main.ChatOpenAI")
+    @patch("open_xtract.main.importlib.import_module")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    def test_extract_pdf_bytes_openai(self, mock_import_module, mock_chat_openai):
+        mock_llm = Mock()
+        mock_response = MockSchema(name="pdf", value=3)
+        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
+        mock_chat_openai.return_value = mock_llm
+
+        # Fake fitz module
+        class FakePixmap:
+            def tobytes(self, fmt):
+                return b"PNGDATA"
+
+        class FakePage:
+            def get_pixmap(self, dpi):
+                return FakePixmap()
+
+        class FakeDoc:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def __iter__(self):
+                return iter([FakePage(), FakePage()])
+
+        fake_fitz = SimpleNamespace(open=lambda stream, filetype: FakeDoc())
+        mock_import_module.return_value = fake_fitz
+
+        # Construct without __init__ to avoid creating real clients
+        ox = object.__new__(OpenXtract)
+        ox._provider = "openai"
+        ox._llm = mock_llm
+        pdf_bytes = b"%PDF- FAKE"
+        result = ox.extract(pdf_bytes, MockSchema)
+
+        assert result.value == 3  # noqa: PLR2004
+        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
+        human_msg = invoke_args[0][0]
+        parts = human_msg.content
+        # 1 text + 2 images
+        assert len(parts) == NUM_PARTS_TEXT_PLUS_TWO_IMAGES
+        assert parts[1]["type"] == "image_url"
+        assert parts[2]["type"] == "image_url"
+
+    @patch("open_xtract.main.ChatAnthropic")
+    @patch("open_xtract.main.importlib.import_module")
+    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+    def test_extract_pdf_bytes_anthropic(self, mock_import_module, mock_chat_anthropic):
+        mock_llm = Mock()
+        mock_response = MockSchema(name="pdf", value=4)
+        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
+        mock_chat_anthropic.return_value = mock_llm
+
+        class FakePixmap:
+            def tobytes(self, fmt):
+                return b"PNGDATA"
+
+        class FakePage:
+            def get_pixmap(self, dpi):
+                return FakePixmap()
+
+        class FakeDoc:
+            def __enter__(self):
+                return self
+            def __exit__(self, exc_type, exc, tb):
+                return False
+            def __iter__(self):
+                return iter([FakePage(), FakePage(), FakePage()])
+
+        fake_fitz = SimpleNamespace(open=lambda stream, filetype: FakeDoc())
+        mock_import_module.return_value = fake_fitz
+
+        ox = object.__new__(OpenXtract)
+        ox._provider = "anthropic"
+        ox._llm = mock_llm
+        pdf_bytes = b"%PDF- FAKE"
+        result = ox.extract(pdf_bytes, MockSchema)
+
+        assert result.value == 4  # noqa: PLR2004
+        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
+        human_msg = invoke_args[0][0]
+        parts = human_msg.content
+        # 1 text + 3 images
+        assert len(parts) == NUM_PARTS_TEXT_PLUS_THREE_IMAGES
+        assert parts[1]["type"] == "image"
+        assert parts[2]["type"] == "image"
+        assert parts[3]["type"] == "image"
+
+    @patch("open_xtract.main.ChatOpenAI")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    def test_extract_unsupported_bytes_raises(self, mock_chat_openai):
+        mock_chat_openai.return_value = Mock()
+        ox = OpenXtract(model="openai:gpt-4o-mini")
+        with pytest.raises(ValueError):
+            ox.extract(b"not-an-image-or-pdf", MockSchema)
+
+    @patch("open_xtract.main.ChatOpenAI")
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    def test_extract_invalid_type_raises(self, mock_chat_openai):
+        mock_chat_openai.return_value = Mock()
+        ox = OpenXtract(model="openai:gpt-4o-mini")
+        with pytest.raises(TypeError):
+            ox.extract(123, MockSchema)  # type: ignore[arg-type]

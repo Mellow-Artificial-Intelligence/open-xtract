@@ -2,7 +2,7 @@
 
 **Turn documents into structured data**
 
-Open-source toolkit for extracting clean, structured data from text.
+Open-source toolkit for extracting clean, structured data from text, images, and PDFs.
 
 - [GitHub](https://github.com/Mellow-Artificial-Intelligence/open-xtract)
 - [PyPI](https://pypi.org/project/open-xtract/)
@@ -33,8 +33,20 @@ class InvoiceData(BaseModel):
 
 ox = OpenXtract(model="openai:gpt-5-nano")  # or any model
 
-# Extract from text
+# Extract from text (str)
 result = ox.extract("Total: $123.45 on 2025-03-01 from ACME", InvoiceData)
+print(result)
+
+# Extract from image (bytes)
+with open("/path/to/receipt.png", "rb") as f:
+    img_bytes = f.read()
+result = ox.extract(img_bytes, InvoiceData)
+print(result)
+
+# Extract from PDF (bytes) — each page is rendered to an image internally
+with open("/path/to/invoice.pdf", "rb") as f:
+    pdf_bytes = f.read()
+result = ox.extract(pdf_bytes, InvoiceData)
 print(result)
 ```
 
