@@ -1,16 +1,15 @@
 [project]
 name = "open-xtract"
 version = "0.1.2"
-description = "Open-source framework that extracts structured data from PDFs. Bring your own OCR or LLM and extend to any file type."
+description = "Open-source framework that extracts structured data from unstructured data."
 readme = "README.md"
 requires-python = ">=3.12"
-authors = [{ name = "Cole McIntosh", email = "colemcintosh6@gmail.com" }]
+authors = [{ name = "Cole McIntosh", email = "cole@staymellow.ai" }]
 license = { text = "MIT" }
 dependencies = [
     "langgraph>=0.2.0",
     "langchain>=0.3.0",
     "langchain-community>=0.3.0",
-    "pypdf>=5.0.0",
     "pydantic>=2.0.0",
     "typing-extensions>=4.8.0",
     "aiofiles>=24.0.0",
@@ -21,8 +20,6 @@ dependencies = [
     "langchain-google-genai>=2.1.9",
     "langchain-anthropic>=0.3.0",
     "pillow>=11.3.0",
-    "langchain-chroma>=0.1.4",
-    "chromadb>=0.5.5",
     "pymupdf>=1.26.3",
     "pytest>=8.4.1",
 ]
@@ -43,7 +40,7 @@ dev = [
 open-xtract = "open_xtract:main"
 
 [project.urls]
-Homepage = "https://www.open-xtract.com/"
+Homepage = "https://mellow-artificial-intelligence.github.io/open-xtract/"
 
 [build-system]
 requires = ["hatchling"]
