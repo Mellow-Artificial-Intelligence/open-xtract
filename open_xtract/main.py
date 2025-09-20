@@ -35,9 +35,20 @@ class OpenXtract:
         self._llm = self._create_llm()
 
     def _get_parts(self):
-        parts = self._model_string.split(":")
-        self._provider = parts[0] or None
-        self._model = parts[1] or None
+        try:
+            provider, model = self._model_string.split(":", 1)
+        except ValueError as exc:  # Not enough parts to unpack
+            msg = "model string must be in the format 'provider:model'"
+            raise ValueError(msg) from exc
+
+        if not provider or not model:
+            raise ValueError("model string must include both provider and model")
+
+        if provider not in provider_map:
+            raise ValueError(f"unknown provider '{provider}'")
+
+        self._provider = provider
+        self._model = model
         self._api_key = os.getenv(provider_map[self._provider]["api_key"])
         self._base_url = provider_map[self._provider]["base_url"] or None
         return self._provider, self._model, self._base_url, self._api_key
