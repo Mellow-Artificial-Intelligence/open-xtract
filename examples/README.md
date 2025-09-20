@@ -28,6 +28,25 @@ python main.py cookbook
 3. **Text Extraction**: Extracting structured data from plain text
 4. **Field Descriptions**: Using Pydantic Field descriptions for better LLM guidance
 
+## Streamlit Grok-4-Fast Demo (`streamlit_grok4fast_app.py`)
+
+Interactive Streamlit app that:
+
+- Lets you upload PDFs and define a Pydantic schema from the UI
+- Calls Grok-4-Fast on OpenRouter through OpenXtract
+- Displays the structured JSON response
+
+### Running the App
+
+```bash
+streamlit run examples/streamlit_grok4fast_app.py
+
+# or with uv
+uv run streamlit run examples/streamlit_grok4fast_app.py
+```
+
+Set the `OPENROUTER_API_KEY` environment variable ahead of time or paste it into the sidebar when the app loads.
+
 ## Adding New Examples
 
 When adding new examples:
