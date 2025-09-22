@@ -8,6 +8,7 @@ configuring any fields in the UI.
 
 from __future__ import annotations
 
+import inspect
 import os
 from typing import Any, List, Optional, Sequence, Union
 
@@ -258,6 +259,17 @@ def main() -> None:
         st.info(
             "Set the `OPENROUTER_API_KEY` environment variable before using the extractor."
         )
+
+    with st.expander("Show Pydantic schema used", expanded=False):
+        schema_source = "\n\n".join(
+            [
+                inspect.getsource(KeyMetric),
+                inspect.getsource(ReportFinding),
+                inspect.getsource(Recommendation),
+                inspect.getsource(ReportSummary),
+            ]
+        )
+        st.code(schema_source, language="python")
 
     uploaded_pdf = None
     pdf_bytes: Optional[bytes] = None
