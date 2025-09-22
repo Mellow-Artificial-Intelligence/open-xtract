@@ -1,446 +1,304 @@
-"""Streamlit demo for extracting structured data from PDFs with OpenXtract.
+"""Minimal Streamlit demo for running the OpenXtract PDF pipeline.
 
-This sample app lets you upload a PDF, design a Pydantic schema via the UI,
-then send the document to Grok-4-Fast on OpenRouter for structured extraction.
+The app exposes a single PDF uploader and uses a curated Pydantic schema to
+summarise business-style reports. The schema is fixed in code so that users can
+quickly see the kind of structured output OpenXtract can produce without
+configuring any fields in the UI.
 """
 
 from __future__ import annotations
 
-import json
 import os
-import re
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, List, Optional, Sequence, Union
 
 import streamlit as st
 from open_xtract import OpenXtract
-from pydantic import BaseModel, Field, create_model
-
-# Supported field types the user can pick for the dynamic schema builder.
-FIELD_OPTIONS: Dict[str, Type[Any]] = {
-    "Text": str,
-    "Integer": int,
-    "Float": float,
-    "Boolean": bool,
-    "Date (as text)": str,
-}
-
-TYPE_HINT_MAP: Dict[str, str] = {
-    "Text": "str",
-    "Integer": "int",
-    "Float": "float",
-    "Boolean": "bool",
-    "Date (as text)": "str",
-}
+from pydantic import BaseModel, Field
 
 DEFAULT_MODEL = "openrouter:x-ai/grok-4-fast:free"
 
 
-def _init_session_state() -> None:
-    if "fields" not in st.session_state:
-        st.session_state.fields = [
-            {
-                "name": "entity_name",
-                "type": "Text",
-                "required": True,
-                "description": "The primary subject or entity the PDF describes.",
-            }
-        ]
-    if "model_name" not in st.session_state:
-        st.session_state.model_name = "ExtractionResult"
-    if "model_string" not in st.session_state:
-        st.session_state.model_string = DEFAULT_MODEL
-    if "last_run_state" not in st.session_state:
-        st.session_state.last_run_state = None
-        st.session_state.last_run_message = ""
-    if "last_result" not in st.session_state:
-        st.session_state.last_result = None
+class KeyMetric(BaseModel):
+    """Quantitative metric that the report highlights."""
+
+    name: str = Field(..., description="Name of the metric or KPI.")
+    value: str = Field(..., description="Reported value exactly as written.")
+    unit: Optional[str] = Field(None, description="Unit of measure tied to the value.")
+    trend: Optional[str] = Field(None, description="Direction or interpretation of change.")
+    notes: Optional[str] = Field(None, description="Context that explains the metric.")
 
 
-def _reset_extraction_state() -> None:
-    """Clear cached extraction results so the UI reflects the latest inputs."""
+class ReportFinding(BaseModel):
+    """Narrative insight or conclusion surfaced in the report."""
 
-    st.session_state.last_result = None
-    st.session_state.last_run_state = None
-    st.session_state.last_run_message = ""
-
-
-def _trigger_rerun() -> None:
-    rerun = getattr(st, "rerun", None)
-    if rerun is not None:
-        rerun()
-    else:  # pragma: no cover - fallback for older Streamlit
-        st.experimental_rerun()
+    title: str = Field(..., description="Headline for the finding.")
+    impact: Optional[str] = Field(None, description="Impact or severity noted in the report.")
+    evidence: Optional[str] = Field(
+        None,
+        description="Supporting evidence, figures, or citations backing the finding.",
+    )
 
 
-def _normalize_field_name(name: str) -> str:
-    cleaned = re.sub(r"[^0-9a-zA-Z]+", " ", name or "").strip()
-    if not cleaned:
-        return ""
-    parts = [part.lower() for part in cleaned.split() if part]
-    normalized = "_".join(parts)
-    normalized = normalized.strip("_")
-    return normalized
+class Recommendation(BaseModel):
+    """Action the report suggests taking."""
+
+    title: str = Field(..., description="Short label for the recommendation.")
+    rationale: Optional[str] = Field(None, description="Why this recommendation matters.")
+    priority: Optional[str] = Field(None, description="Priority or urgency stated in the report.")
+    owner: Optional[str] = Field(None, description="Suggested owner or responsible party.")
+    due_date: Optional[str] = Field(None, description="Timeline or deadline if provided.")
 
 
-def _normalize_field_input(idx: int) -> None:
-    key = f"field-name-{idx}"
-    current = st.session_state.get(key, "")
-    st.session_state[key] = _normalize_field_name(current)
+class ReportSummary(BaseModel):
+    """Structured summary for business or analytical reports."""
+
+    report_title: str = Field(..., description="Title of the report.")
+    report_date: Optional[str] = Field(None, description="Publication or delivery date.")
+    organization: Optional[str] = Field(None, description="Company or client the report is for.")
+    prepared_by: Optional[str] = Field(None, description="Person or team that authored the report.")
+    report_type: Optional[str] = Field(None, description="Type of report (e.g. quarterly review, audit).")
+    executive_summary: str = Field(..., description="Short narrative overview of the report.")
+    key_metrics: List[KeyMetric] = Field(
+        default_factory=list,
+        description="Important quantitative metrics spotlighted in the report.",
+    )
+    key_findings: List[ReportFinding] = Field(
+        default_factory=list,
+        description="Primary findings or insights highlighted in the report.",
+    )
+    recommendations: List[Recommendation] = Field(
+        default_factory=list,
+        description="Actions suggested based on the findings.",
+    )
+    follow_up_actions: List[str] = Field(
+        default_factory=list,
+        description="Next steps, owners, or timelines mentioned for follow-up.",
+    )
 
 
-def _stringify(value: Any) -> str:
-    if isinstance(value, (dict, list)):
-        return json.dumps(value, indent=2)
-    return str(value)
+def _clean_text(value: Optional[str]) -> str:
+    return value.strip() if isinstance(value, str) else ""
 
 
-def _sanitize_class_name(name: str) -> str:
-    """Turn arbitrary user input into a safe Pydantic model class name."""
-
-    cleaned = re.sub(r"[^0-9a-zA-Z]+", " ", name or "").strip()
-    if not cleaned:
-        return "ExtractionResult"
-
-    parts = [part for part in cleaned.split() if part]
-    candidate = "".join(part[:1].upper() + part[1:] for part in parts)
-    if not candidate:
-        candidate = "ExtractionResult"
-
-    if not candidate[0].isalpha():
-        candidate = f"Model{candidate}"
-
-    if not candidate.isidentifier():
-        candidate = re.sub(r"[^0-9a-zA-Z_]", "", candidate) or "ExtractionResult"
-        if not candidate[0].isalpha():
-            candidate = f"Model{candidate}" if candidate else "ExtractionResult"
-    return candidate
+def _value_or_default(value: Optional[str], *, fallback: str) -> str:
+    cleaned = _clean_text(value)
+    return cleaned if cleaned else fallback
 
 
-def build_schema(
-    model_name: str, fields: List[Dict[str, Any]]
-) -> Tuple[Optional[Type[BaseModel]], str]:
-    """Create a dynamic Pydantic model from validated field definitions."""
+def _ensure_summary(data: Union[ReportSummary, dict[str, Any]]) -> ReportSummary:
+    if isinstance(data, ReportSummary):
+        return data
+    return ReportSummary.model_validate(data)
 
-    class_name = _sanitize_class_name(model_name)
-    if not fields:
-        return None, class_name
 
-    field_definitions: Dict[str, Tuple[Any, Any]] = {}
+def _render_section_heading(label: str) -> None:
+    st.subheader(label)
+    st.divider()
 
-    for field in fields:
-        python_type = FIELD_OPTIONS.get(field["type"], str)
-        description = field.get("description") or None
-        required = bool(field.get("required", True))
 
-        annotation: Any = python_type
-        if not required:
-            annotation = Optional[python_type]
-            default = Field(default=None, description=description)
+def _render_metrics(metrics: Sequence[KeyMetric]) -> None:
+    if not metrics:
+        st.write(
+            "The document does not surface quantitative indicators. Capture at least one KPI in future revisions to support the narrative findings."
+        )
+        return
+
+    for index, metric in enumerate(metrics, start=1):
+        name = _value_or_default(metric.name, fallback=f"Key Metric {index}")
+        value = _value_or_default(metric.value, fallback="Value not specified in the source document.")
+        trend = _clean_text(metric.trend)
+        notes = _clean_text(metric.notes)
+        unit = _clean_text(metric.unit)
+
+        metric_sentence = f"**{name}** — {value}"
+        if unit:
+            metric_sentence += f" ({unit})"
+
+        st.markdown(metric_sentence)
+
+        narrative_bits: List[str] = []
+        if trend:
+            narrative_bits.append(f"Observed trend: {trend}.")
+        if notes:
+            narrative_bits.append(notes)
+        if not narrative_bits:
+            narrative_bits.append(
+                "No qualitative commentary was attached to this metric; validate its implications during stakeholder reviews."
+            )
+        st.caption(" ".join(narrative_bits))
+
+
+def _render_findings(findings: Sequence[ReportFinding]) -> None:
+    if not findings:
+        st.write(
+            "The analyser did not extract explicit findings. Treat this as a cue to formulate headline insights after reviewing the document manually."
+        )
+        return
+
+    for index, finding in enumerate(findings, start=1):
+        title = _value_or_default(finding.title, fallback=f"Finding {index}")
+        impact = _clean_text(finding.impact)
+        evidence = _clean_text(finding.evidence)
+
+        headline = f"**{title}**"
+        if impact:
+            headline += f" — Impact assessed as {impact}."
         else:
-            default = Field(..., description=description)
+            headline += " — Impact not explicitly rated; confirm with the authoring team."
 
-        field_definitions[field["name"]] = (annotation, default)
-
-    dynamic_model = create_model(class_name, **field_definitions)
-    return dynamic_model, class_name
+        st.markdown(headline)
+        st.caption(evidence if evidence else "Evidence reference not surfaced; corroborate during validation.")
 
 
-def _generate_python_snippet(
-    class_name: str, fields: List[Dict[str, Any]], model_string: str
-) -> str:
-    """Produce sample Python code that mirrors the current configuration."""
+def _render_recommendations(items: Sequence[Recommendation]) -> None:
+    if not items:
+        st.write(
+            "No forward-looking actions were captured automatically. Propose next steps based on the dominant findings before circulating the deliverable."
+        )
+        return
 
-    imports = ["from open_xtract import OpenXtract", "from pydantic import BaseModel, Field"]
-    if any(not field.get("required", True) for field in fields):
-        imports.append("from typing import Optional")
+    for index, recommendation in enumerate(items, start=1):
+        title = _value_or_default(recommendation.title, fallback=f"Recommendation {index}")
+        rationale = _value_or_default(
+            recommendation.rationale,
+            fallback="Provide supporting rationale before execution.",
+        )
+        priority = _value_or_default(
+            recommendation.priority,
+            fallback="Priority not ranked; assign urgency during the next review.",
+        )
+        owner = _value_or_default(
+            recommendation.owner,
+            fallback="No owner assigned; nominate accountable lead.",
+        )
+        due_date = _value_or_default(
+            recommendation.due_date,
+            fallback="Timeline to be confirmed.",
+        )
 
-    lines: List[str] = imports + ["", f"class {class_name}(BaseModel):"]
+        st.markdown(f"**{title}**")
+        st.caption(f"Priority: {priority} | Owner: {owner} | Timeline: {due_date}")
+        st.write(rationale)
 
-    if not fields:
-        lines.append("    pass")
-    else:
-        for field in fields:
-            field_name = field["name"]
-            type_string = TYPE_HINT_MAP.get(field["type"], "str")
-            required = field.get("required", True)
-            description = field.get("description") or ""
 
-            annotation = type_string if required else f"Optional[{type_string}]"
-            default_token = "..." if required else "None"
+def _render_follow_up(actions: Sequence[str]) -> None:
+    if not actions:
+        st.write(
+            "Follow-up milestones were not explicitly identified. Schedule a checkpoint to confirm responsibilities and success criteria."
+        )
+        return
 
-            field_args = [default_token]
-            if description:
-                field_args.append(f"description={json.dumps(description)}")
+    for index, action in enumerate(actions, start=1):
+        narrative = _value_or_default(
+            action,
+            fallback="Detail the action item before circulating this report further.",
+        )
+        st.write(f"Action {index}: {narrative}")
 
-            joined_args = ", ".join(field_args)
-            lines.append(f"    {field_name}: {annotation} = Field({joined_args})")
 
-    lines += [
-        "",
-        f"ox = OpenXtract(model={json.dumps(model_string)})",
-        "with open(\"/path/to/document.pdf\", \"rb\") as f:",
-        "    pdf_bytes = f.read()",
-        "",
-        f"result = ox.extract(pdf_bytes, {class_name})",
-        "print(result)",
-    ]
+@st.cache_resource
+def _get_client(model_name: str) -> OpenXtract:
+    return OpenXtract(model=model_name)
 
-    return "\n".join(lines)
+
+def display_report(data: Union[ReportSummary, dict[str, Any]]) -> None:
+    summary = _ensure_summary(data)
+
+    st.success("Structured report extracted. Review the sections below.")
+
+    _render_section_heading("Overview")
+
+    report_title = _value_or_default(summary.report_title, fallback="Untitled report")
+    organization = _value_or_default(
+        summary.organization, fallback="an unspecified organisation"
+    )
+    report_type = _value_or_default(summary.report_type, fallback="a general report")
+    report_date = _value_or_default(summary.report_date, fallback="an unspecified date")
+    prepared_by = _value_or_default(
+        summary.prepared_by, fallback="an unnamed authoring team"
+    )
+
+    st.write(
+        f"{report_title} was prepared for {organization}, positioned as {report_type}, and delivered on {report_date} by {prepared_by}."
+    )
+
+    _render_section_heading("Executive Summary")
+    st.write(
+        _value_or_default(
+            summary.executive_summary,
+            fallback="The document did not provide an executive narrative; synthesise key storylines before publication.",
+        )
+    )
+
+    _render_section_heading("Key Metrics")
+    _render_metrics(summary.key_metrics)
+
+    _render_section_heading("Key Findings")
+    _render_findings(summary.key_findings)
+
+    _render_section_heading("Recommendations")
+    _render_recommendations(summary.recommendations)
+
+    _render_section_heading("Follow-up Actions")
+    _render_follow_up(summary.follow_up_actions)
+
+    st.divider()
+    with st.expander("Raw structured output", expanded=False):
+        st.json(summary.model_dump())
 
 
 def main() -> None:
-    st.set_page_config(page_title="OpenXtract Grok-4-Fast Demo", page_icon="📄", layout="wide")
-    _init_session_state()
-
-    st.title("OpenXtract + Grok-4-Fast PDF Extractor")
+    st.set_page_config(page_title="OpenXtract Report Reader", page_icon="📄")
+    st.title("OpenXtract Report Reader")
     st.caption(
-        "Upload a PDF, outline the structured output you need, and extract it with Grok-4-Fast via OpenRouter."
+        "Upload a report-style PDF and generate an expert grade analysis."
     )
 
-    existing_api_key = os.environ.get("OPENROUTER_API_KEY") or ""
-
-    with st.sidebar:
-        st.header("Configuration")
-
-        if existing_api_key:
-            st.success("Using OPENROUTER_API_KEY from the environment.")
-            if st.toggle(
-                "Override API key for this session",
-                value=False,
-                help="Optional override without touching your shell.",
-            ):
-                override_key = st.text_input(
-                    "Alternate OpenRouter API Key",
-                    type="password",
-                    placeholder="sk-or-...",
-                    help="Stored only in memory for this Streamlit session.",
-                )
-                if override_key:
-                    os.environ["OPENROUTER_API_KEY"] = override_key
-                    _reset_extraction_state()
-        else:
-            api_key = st.text_input(
-                "OpenRouter API Key",
-                type="password",
-                placeholder="sk-or-...",
-                help="Stored only in memory for this session. Get a key at https://openrouter.ai/keys.",
-            )
-            if api_key:
-                os.environ["OPENROUTER_API_KEY"] = api_key
-                _reset_extraction_state()
-
-        st.text_input(
-            "Model",
-            key="model_string",
-            help="Provider:model identifier for OpenXtract (e.g. openrouter:x-ai/grok-4-fast:free).",
-            on_change=_reset_extraction_state,
+    if not os.environ.get("OPENROUTER_API_KEY"):
+        st.info(
+            "Set the `OPENROUTER_API_KEY` environment variable before using the extractor."
         )
 
-        st.text_input(
-            "Schema name",
-            key="model_name",
-            help="Used as the dynamic Pydantic model class name.",
-            on_change=_reset_extraction_state,
+    uploaded_pdf = None
+    pdf_bytes: Optional[bytes] = None
+
+    with st.form("openxtract-upload"):
+        uploaded_pdf = st.file_uploader(
+            "Upload a PDF",
+            type=["pdf"],
+            accept_multiple_files=False,
+            help="Select the report you would like OpenXtract to analyse.",
         )
 
-        st.markdown(
-            "Need help? See the docs at [OpenXtract](https://github.com/Mellow-Artificial-Intelligence/open-xtract)."
-        )
-
-    has_api_key = bool(os.environ.get("OPENROUTER_API_KEY"))
-
-    st.subheader("1 · PDF Document")
-    uploaded_pdf = st.file_uploader(
-        "Upload a PDF",
-        type=["pdf"],
-        accept_multiple_files=False,
-        help="Large PDFs are supported, but provider limits still apply.",
-    )
-
-    if uploaded_pdf is not None:
-        size_mb = uploaded_pdf.size / (1024 * 1024)
-        st.caption(f"Selected: {uploaded_pdf.name} ({size_mb:.2f} MB)")
-    else:
-        st.caption("No file selected yet.")
-
-    st.divider()
-
-    st.subheader("2 · Schema Designer")
-    st.caption("Add fields, set their types, and describe what the extractor should return.")
-
-    snapshot_before_edit = [dict(field) for field in st.session_state.fields]
-    fields: List[Dict[str, Any]] = st.session_state.fields
-    field_type_options = list(FIELD_OPTIONS.keys())
-
-    if st.button("Add field", type="primary"):
-        fields.append({"name": "", "type": "Text", "required": True, "description": ""})
-        _reset_extraction_state()
-
-    for idx, field in enumerate(list(fields)):
-        st.markdown(f"**Field {idx + 1}**")
-        st.text_input(
-            "Name",
-            value=field["name"],
-            key=f"field-name-{idx}",
-            on_change=lambda idx=idx: _normalize_field_input(idx),
-            placeholder="company_name",
-        )
-        st.selectbox(
-            "Type",
-            options=field_type_options,
-            index=field_type_options.index(field["type"]) if field["type"] in FIELD_OPTIONS else 0,
-            key=f"field-type-{idx}",
-        )
-        st.checkbox(
-            "Required",
-            value=field["required"],
-            key=f"field-required-{idx}",
-        )
-        st.text_area(
-            "Description",
-            value=field["description"],
-            key=f"field-desc-{idx}",
-            placeholder="Short guidance for the model.",
-            height=70,
-        )
-        if st.button("Remove", key=f"remove-field-{idx}", type="secondary"):
-            fields.pop(idx)
-            _reset_extraction_state()
-            st.session_state.fields = fields
-            _trigger_rerun()
-
-        st.divider()
-
-    updated_fields: List[Dict[str, Any]] = []
-    for idx, _ in enumerate(fields):
-        raw_name = str(st.session_state.get(f"field-name-{idx}", "")).strip()
-        normalized_name = _normalize_field_name(raw_name)
-        if raw_name and normalized_name and raw_name != normalized_name:
-            st.session_state[f"field-name-{idx}"] = normalized_name
-        field_type = st.session_state.get(f"field-type-{idx}", "Text")
-        updated_fields.append(
-            {
-                "name": normalized_name,
-                "type": field_type if field_type in FIELD_OPTIONS else "Text",
-                "required": bool(st.session_state.get(f"field-required-{idx}", True)),
-                "description": str(st.session_state.get(f"field-desc-{idx}", "")).strip(),
-            }
-        )
-
-    changed = updated_fields != snapshot_before_edit
-    st.session_state.fields = updated_fields
-    if changed:
-        _reset_extraction_state()
-
-    valid_fields: List[Dict[str, Any]] = []
-    invalid_names: List[str] = []
-
-    for field in st.session_state.fields:
-        name = field["name"]
-        if not name:
-            continue
-        if not name.isidentifier():
-            invalid_names.append(name)
-            continue
-        valid_fields.append(field)
-
-    if invalid_names:
-        st.warning(
-            "Rename fields that are not valid Python identifiers: "
-            + ", ".join(f"`{name}`" for name in invalid_names)
-        )
-
-    schema_model, resolved_class_name = build_schema(st.session_state.model_name, valid_fields)
-
-    if schema_model is None:
-        st.info("Add at least one named field to generate a schema preview.")
-    else:
-        with st.expander(f"Pydantic model · {resolved_class_name}", expanded=False):
-            st.json(schema_model.model_json_schema())
-
-    st.divider()
-
-    st.subheader("3 · Extract structured data")
-    ready_to_run = schema_model is not None and uploaded_pdf is not None and has_api_key
-
-    if not has_api_key:
-        st.warning("Add an OpenRouter API key in the sidebar to enable extraction.")
-    elif uploaded_pdf is None:
-        st.info("Upload a PDF to enable extraction.")
-    elif schema_model is None:
-        st.info("Define at least one schema field to enable extraction.")
-
-    extract_button = st.button(
-        "Run extraction",
-        type="primary",
-        disabled=not ready_to_run,
-    )
-
-    if extract_button and ready_to_run:
-        _reset_extraction_state()
-
-        pdf_bytes = uploaded_pdf.getvalue()
-        if not pdf_bytes:
-            st.session_state.last_run_state = "error"
-            st.session_state.last_run_message = "The uploaded file appears to be empty."
-        else:
-            with st.status("Calling Grok-4-Fast via OpenRouter…", expanded=True) as status:
-                try:
-                    ox = OpenXtract(model=st.session_state.model_string)
-                    result = ox.extract(pdf_bytes, schema_model)
-                except Exception as exc:  # pragma: no cover - Streamlit feedback path
-                    status.update(label="Extraction failed", state="error")
-                    st.session_state.last_run_state = "error"
-                    st.session_state.last_run_message = str(exc)
-                    st.exception(exc)
-                else:
-                    status.update(label="Extraction complete", state="complete")
-                    st.session_state.last_run_state = "success"
-                    st.session_state.last_run_message = "Structured extraction complete."
-
-                    if isinstance(result, BaseModel):
-                        st.session_state.last_result = result.model_dump()
-                    elif isinstance(result, (dict, list)):
-                        st.session_state.last_result = result
-                    else:
-                        st.session_state.last_result = result
-
-    if st.session_state.last_run_state == "error" and st.session_state.last_run_message:
-        st.error(st.session_state.last_run_message)
-
-    if st.session_state.last_run_state == "success" and st.session_state.last_result is not None:
-        st.success(st.session_state.last_run_message)
-        last_result = st.session_state.last_result
-        if isinstance(last_result, dict):
-            rows = [
-                {"Field": key, "Value": _stringify(value)}
-                for key, value in last_result.items()
-            ]
-            st.table(rows)
-        elif isinstance(last_result, list):
-            if last_result and all(isinstance(item, dict) for item in last_result):
-                st.dataframe(last_result, use_container_width=True)
+        if uploaded_pdf is not None:
+            pdf_bytes = uploaded_pdf.getvalue()
+            if not pdf_bytes:
+                st.error("The uploaded file appears to be empty.")
             else:
-                st.write(last_result)
-        else:
-            st.write(last_result)
+                st.caption(f"Ready to analyse: {uploaded_pdf.name}")
 
-    st.divider()
+        extract_clicked = st.form_submit_button("Extract insights")
 
-    st.subheader("4 · Use it in Python")
-    if not valid_fields:
-        st.info("Define at least one valid field to generate starter code.")
-    else:
-        snippet = _generate_python_snippet(
-            resolved_class_name,
-            valid_fields,
-            st.session_state.model_string,
-        )
-        st.code(snippet, language="python")
+    if not extract_clicked:
+        return
 
-        st.caption(
-            "Copy this snippet into your project to reproduce the extraction outside Streamlit."
-        )
+    if not uploaded_pdf:
+        st.warning("Upload a PDF before running extraction.")
+        return
+
+    if not pdf_bytes:
+        st.error("The uploaded file appears to be empty.")
+        return
+
+    with st.spinner("Extracting structured report…"):
+        try:
+            client = _get_client(DEFAULT_MODEL)
+            result = client.extract(pdf_bytes, ReportSummary)
+        except Exception as exc:  # pragma: no cover - interactive feedback path
+            st.error(f"Extraction failed: {exc}")
+            return
+
+    display_report(result)
 
 
 if __name__ == "__main__":
