@@ -19,7 +19,21 @@ try:
 except ImportError:
     from provider_map import provider_map  # type: ignore[no-redef] # For when run directly
 
+# Import custom exceptions
+try:
+    from .exceptions import ConfigurationError, InputError, ProcessingError, ProviderError
+except ImportError:
+    from exceptions import (  # type: ignore[no-redef]
+        ConfigurationError,
+        InputError,
+        ProcessingError,
+        ProviderError,
+    )
+
 load_dotenv()
+
+# Constants
+MIN_API_KEY_LENGTH = 10
 
 
 class OpenXtract:
@@ -38,18 +52,57 @@ class OpenXtract:
         try:
             provider, model = self._model_string.split(":", 1)
         except ValueError as exc:  # Not enough parts to unpack
-            msg = "model string must be in the format 'provider:model'"
-            raise ValueError(msg) from exc
+            msg = "Invalid model string format"
+            suggestions = [
+                "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
+                "Available providers: " + ", ".join(provider_map.keys()),
+                "Examples: 'openai:gpt-4o-mini', 'anthropic:claude-3-5-sonnet', 'xai:grok-beta'"
+            ]
+            raise ConfigurationError(msg, suggestions) from exc
 
         if not provider or not model:
-            raise ValueError("model string must include both provider and model")
+            msg = "Model string must include both provider and model name"
+            suggestions = [
+                "Provider cannot be empty",
+                "Model name cannot be empty", 
+                "Use format like 'openai:gpt-4o' or 'anthropic:claude-3-5-sonnet'"
+            ]
+            raise ConfigurationError(msg, suggestions)
 
         if provider not in provider_map:
-            raise ValueError(f"unknown provider '{provider}'")
+            msg = f"Unknown provider '{provider}'"
+            suggestions = [
+                f"Available providers: {', '.join(provider_map.keys())}",
+                "Check for typos in the provider name",
+                "Ensure you're using a supported provider"
+            ]
+            raise ConfigurationError(msg, suggestions)
 
         self._provider = provider
         self._model = model
         self._api_key = os.getenv(provider_map[self._provider]["api_key"])
+        
+        # Validate API key
+        if not self._api_key:
+            msg = f"API key not found for provider '{provider}'"
+            env_var = provider_map[self._provider]["api_key"]
+            suggestions = [
+                f"Set the {env_var} environment variable",
+                "Add the API key to your .env file",
+                f"Export the variable: export {env_var}=your_key_here"
+            ]
+            raise ProviderError(msg, provider, suggestions)
+        
+        # Basic API key validation
+        if len(self._api_key.strip()) < MIN_API_KEY_LENGTH:
+            msg = f"Invalid API key format for provider '{provider}'"
+            suggestions = [
+                "Ensure the API key is complete and not truncated",
+                "Check for extra spaces or newline characters",
+                "Verify the key matches the expected format for this provider"
+            ]
+            raise ProviderError(msg, provider, suggestions)
+        
         self._base_url = provider_map[self._provider]["base_url"] or None
         return self._provider, self._model, self._base_url, self._api_key
 
@@ -80,12 +133,14 @@ class OpenXtract:
             if binary[:5] == b"%PDF-":
                 try:
                     fitz = importlib.import_module("fitz")  # PyMuPDF
-                except Exception as exc:  # pragma: no cover - import error path
-                    msg = (
-                        "PyMuPDF (pymupdf) is required for PDF page rendering. "
-                        "Install with `pip install pymupdf` or include the vision extra."
-                    )
-                    raise RuntimeError(msg) from exc
+                except ImportError as exc:  # pragma: no cover - import error path
+                    msg = "PyMuPDF (pymupdf) is required for PDF processing"
+                    suggestions = [
+                        "Install with: pip install pymupdf",
+                        "Or install with vision extra: pip install open-xtract[vision]",
+                        "Using uv: uv add pymupdf or uv add open-xtract[vision]"
+                    ]
+                    raise ProcessingError(msg, suggestions) from exc
 
                 # Render each page to PNG bytes and add to message content
                 content_parts: list[dict[str, Any]] = [
@@ -122,7 +177,14 @@ class OpenXtract:
                 with Image.open(io.BytesIO(binary)) as img:
                     format_name = (img.format or "PNG").upper()
             except Exception as exc:
-                raise ValueError("Unsupported binary input: expected image or PDF bytes") from exc
+                msg = "Unsupported binary input: expected image or PDF bytes"
+                suggestions = [
+                    "Ensure input is valid image data (PNG, JPEG, etc.)",
+                    "Check that the file is not corrupted",
+                    "For PDFs, ensure the file starts with '%PDF-'",
+                    "Try opening the file with an image viewer first"
+                ]
+                raise InputError(msg, suggestions) from exc
 
             mime = "image/png" if format_name == "PNG" else f"image/{format_name.lower()}"
             b64 = base64.b64encode(binary).decode("utf-8")
@@ -151,7 +213,14 @@ class OpenXtract:
             return self._llm.with_structured_output(schema).invoke([HumanMessage(content=content)])
 
         # Reject file paths or other unsupported types to keep API strict
-        raise TypeError("extract expects `str` for text or `bytes` for image/PDF content")
+        msg = "Invalid input type for extract method"
+        suggestions = [
+            "Use str for text input: ox.extract('text here', Schema)",
+            "Use bytes for image/PDF input: ox.extract(open('file.png', 'rb').read(), Schema)",
+            "For file paths, read the file first: with open('file.pdf', 'rb') as f: ox.extract(f.read(), Schema)",
+            f"Got type: {type(data).__name__}"
+        ]
+        raise InputError(msg, suggestions)
 
 
 __all__ = ["OpenXtract"]
