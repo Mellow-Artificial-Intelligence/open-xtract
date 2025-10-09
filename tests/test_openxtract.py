@@ -1,8 +1,10 @@
 import io
+import os
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 import pytest
+from open_xtract.exceptions import ConfigurationError, InputError, ProviderError
 from open_xtract.main import OpenXtract
 from PIL import Image
 from pydantic import BaseModel
@@ -21,7 +23,7 @@ class MockSchema(BaseModel):
 class TestOpenXtract:
     """Test cases for OpenXtract class."""
 
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
     def test_init(self):
         """Test OpenXtract initialization."""
         extractor = OpenXtract(model="openai:gpt-4")
@@ -29,12 +31,12 @@ class TestOpenXtract:
         assert extractor._model_string == "openai:gpt-4"
         assert extractor._provider == "openai"
         assert extractor._model == "gpt-4"
-        assert extractor._api_key == "test-key"
+        assert extractor._api_key == "test-api-key-12345"
         assert extractor._base_url == "https://api.openai.com/v1"
         assert extractor._llm is not None
 
     @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
     def test_extract_with_mock(self, mock_chat_openai):
         """Test extract method with mocked LLM."""
         # Setup mock
@@ -60,11 +62,11 @@ class TestOpenXtract:
 
         # Verify ChatOpenAI was created with correct parameters
         mock_chat_openai.assert_called_once_with(
-            model="gpt-4", base_url="https://api.openai.com/v1", api_key="test-key"
+            model="gpt-4", base_url="https://api.openai.com/v1", api_key="test-api-key-12345"
         )
 
     @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
     def test_extract_image_bytes_openai(self, mock_chat_openai):
         mock_llm = Mock()
         mock_response = MockSchema(name="img", value=1)
@@ -98,7 +100,7 @@ class TestOpenXtract:
         assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
 
     @patch("open_xtract.main.ChatAnthropic")
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-api-key-12345"})
     def test_extract_image_bytes_anthropic(self, mock_chat_anthropic):
         mock_llm = Mock()
         mock_response = MockSchema(name="img", value=2)
@@ -128,7 +130,7 @@ class TestOpenXtract:
 
     @patch("open_xtract.main.ChatOpenAI")
     @patch("open_xtract.main.importlib.import_module")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
     def test_extract_pdf_bytes_openai(self, mock_import_module, mock_chat_openai):
         mock_llm = Mock()
         mock_response = MockSchema(name="pdf", value=3)
@@ -173,7 +175,7 @@ class TestOpenXtract:
 
     @patch("open_xtract.main.ChatAnthropic")
     @patch("open_xtract.main.importlib.import_module")
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-api-key-12345"})
     def test_extract_pdf_bytes_anthropic(self, mock_import_module, mock_chat_anthropic):
         mock_llm = Mock()
         mock_response = MockSchema(name="pdf", value=4)
@@ -216,17 +218,62 @@ class TestOpenXtract:
         assert parts[3]["type"] == "image"
 
     @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
     def test_extract_unsupported_bytes_raises(self, mock_chat_openai):
         mock_chat_openai.return_value = Mock()
         ox = OpenXtract(model="openai:gpt-4o-mini")
-        with pytest.raises(ValueError):
+        with pytest.raises(InputError):
             ox.extract(b"not-an-image-or-pdf", MockSchema)
 
     @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-key"})
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
     def test_extract_invalid_type_raises(self, mock_chat_openai):
         mock_chat_openai.return_value = Mock()
         ox = OpenXtract(model="openai:gpt-4o-mini")
-        with pytest.raises(TypeError):
+        with pytest.raises(InputError):
             ox.extract(123, MockSchema)  # type: ignore[arg-type]
+
+    def test_custom_exceptions_model_string_format(self):
+        """Test ConfigurationError for invalid model string format."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            OpenXtract(model="invalid-format")
+        
+        assert "Invalid model string format" in str(exc_info.value)
+        assert "Use the format 'provider:model'" in str(exc_info.value)
+
+    def test_custom_exceptions_unknown_provider(self):
+        """Test ConfigurationError for unknown provider."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            OpenXtract(model="unknown:gpt-4")
+        
+        assert "Unknown provider 'unknown'" in str(exc_info.value)
+        assert "Available providers:" in str(exc_info.value)
+
+    def test_custom_exceptions_missing_api_key(self):
+        """Test ProviderError for missing API key."""
+        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
+            with pytest.raises(ProviderError) as exc_info:
+                OpenXtract(model="openai:gpt-4")
+            
+            assert "API key not found for provider 'openai'" in str(exc_info.value)
+            assert "OPENAI_API_KEY" in str(exc_info.value)
+            assert exc_info.value.provider == "openai"
+
+    @patch.dict("os.environ", {"OPENAI_API_KEY": "short"})
+    def test_custom_exceptions_short_api_key(self):
+        """Test ProviderError for short API key."""
+        with pytest.raises(ProviderError) as exc_info:
+            OpenXtract(model="openai:gpt-4")
+        
+        assert "Invalid API key format for provider 'openai'" in str(exc_info.value)
+        assert "Ensure the API key is complete" in str(exc_info.value)
+        assert exc_info.value.provider == "openai"
+
+    def test_error_message_suggestions(self):
+        """Test that error messages include helpful suggestions."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            OpenXtract(model=":")
+        
+        error_str = str(exc_info.value)
+        assert "Suggestions:" in error_str
+        assert "Provider cannot be empty" in error_str
