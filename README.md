@@ -10,7 +10,7 @@
 
 **Turn any document into structured data with AI**
 
-*Open-source toolkit for extracting clean, structured data from text, images, and PDFs using state-of-the-art large language models*
+*Open-source toolkit for extracting clean, structured data from text, images, and PDFs using large language models*
 
 [Homepage](https://mellow-artificial-intelligence.github.io/open-xtract/) • [PyPI](https://pypi.org/project/open-xtract/) • [Documentation](https://github.com/Mellow-Artificial-Intelligence/open-xtract) • [Examples](./examples/)
 
@@ -30,38 +30,7 @@ pip install open-xtract
 uv add open-xtract
 ```
 
-### Basic Usage
-
-```python
-from pydantic import BaseModel
-from open_xtract import OpenXtract
-
-# Define your data structure
-class InvoiceData(BaseModel):
-    invoice_number: str
-    date: str
-    total_amount: float
-    vendor: str
-
-# Initialize extractor
-ox = OpenXtract(model="openai:gpt-4o")
-
-# Extract from any input type
-result = ox.extract("Invoice #123 from ACME Corp on 2025-03-01 for $456.78", InvoiceData)
-print(result)
-# InvoiceData(invoice_number='123', date='2025-03-01', total_amount=456.78, vendor='ACME Corp')
-```
-
-## Features
-
-- **Universal Input Support**: Extract from text, images (PNG, JPG), and PDFs
-- **Model Agnostic**: Works with OpenAI, Anthropic, Google, XAI, and any OpenAI-compatible API
-- **Type-Safe**: Built on Pydantic for guaranteed data structure validation
-- **Fast & Efficient**: Optimized extraction pipeline with minimal overhead
-- **Precise**: Advanced prompt engineering for accurate structured data extraction
-- **Simple API**: One method to extract from any input type
-
-## Detailed Usage
+## Usage
 
 ### Input Types
 
@@ -151,14 +120,6 @@ class DetailedInvoice(BaseModel):
 ox = OpenXtract(model="openai:gpt-4o")
 result = ox.extract(complex_invoice_text, DetailedInvoice)
 ```
-
-## Use Cases
-
-- **Document Processing**: Extract data from invoices, receipts, contracts
-- **Data Migration**: Convert unstructured legacy data to structured formats  
-- **Content Analysis**: Parse emails, reports, and documents for key information
-- **Business Automation**: Automate data entry from various document types
-- **Form Processing**: Extract form data from scanned documents and images
 
 ## Contributing
 
