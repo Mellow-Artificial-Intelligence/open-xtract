@@ -50,3 +50,49 @@ pytest tests/
 ## Questions?
 
 Feel free to open an issue for any questions or discussions!
+
+## Releasing to PyPI
+
+Releases are automated via GitHub Actions. To release a new version:
+
+### Prerequisites
+
+1. **Set up PyPI trusted publishing** (recommended):
+   - Go to [PyPI Account Settings](https://pypi.org/manage/account/)
+   - Navigate to **API tokens** → **Add API token** → **Trusted publisher**
+   - Add your GitHub repository as a trusted publisher
+   - The workflow will automatically authenticate using GitHub's OIDC
+
+2. **OR use API token** (alternative):
+   - Create an API token on PyPI
+   - Add it as a GitHub secret named `PYPI_KEY`
+   - Update `.github/workflows/release.yml` to use the token instead of trusted publishing
+
+### Release Process
+
+1. **Update version** in `pyproject.toml`:
+   ```toml
+   version = "0.1.3"  # Update to new version
+   ```
+
+2. **Commit and push** the version change:
+   ```bash
+   git add pyproject.toml
+   git commit -m "Bump version to 0.1.3"
+   git push
+   ```
+
+3. **Create a GitHub release**:
+   - Go to the repository's Releases page
+   - Click "Create a new release"
+   - Tag: `v0.1.3` (must match the version in pyproject.toml, prefixed with 'v')
+   - Title: `Release v0.1.3` (or your release title)
+   - Description: Add release notes
+   - Click "Publish release"
+
+4. **Automated release**: The GitHub Action will:
+   - Build the package
+   - Verify version matches
+   - Publish to PyPI automatically
+
+**Alternative**: You can also trigger the workflow manually via "Actions" → "Release to PyPI" → "Run workflow" (it will use the version from pyproject.toml).
