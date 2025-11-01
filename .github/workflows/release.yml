@@ -45,6 +45,10 @@ jobs:
             exit 1
           fi
 
+      - name: Create virtual environment
+        run: |
+          uv venv
+
       - name: Install build dependencies
         run: |
           uv pip install build twine
