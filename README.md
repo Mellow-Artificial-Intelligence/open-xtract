@@ -139,19 +139,18 @@ ox = OpenXtract(
     api_key="sk-your-api-key-here"
 )
 
-# Pass API key and custom base URL
-# When api_key and base_url are provided, model can be used without colon
-ox = OpenXtract(
-    model="gpt-4o",
-    api_key="sk-your-api-key-here",
-    base_url="https://api.openai.com/v1"
-)
-
-# Use model without colon when provider is specified separately
+# Use model without colon when provider or base_url is specified
 ox = OpenXtract(
     model="gpt-4o",
     provider="openai",
     api_key="sk-your-api-key-here"
+)
+
+# Or with custom base URL
+ox = OpenXtract(
+    model="gpt-4o",
+    api_key="sk-your-api-key-here",
+    base_url="https://api.openai.com/v1"
 )
 
 # Parameters take priority over environment variables
