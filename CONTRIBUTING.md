@@ -65,7 +65,7 @@ Releases are automated via GitHub Actions. To release a new version:
 
 2. **OR use API token** (alternative):
    - Create an API token on PyPI
-   - Add it as a GitHub secret named `PYPI_API_TOKEN`
+   - Add it as a GitHub secret named `PYPI_KEY`
    - Update `.github/workflows/release.yml` to use the token instead of trusted publishing
 
 ### Release Process

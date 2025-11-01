@@ -64,5 +64,5 @@ jobs:
         # Option 2: API token (fallback if trusted publishing not set up)
         # Uncomment the following and comment out trusted-publisher above:
         # with:
-        #   password: ${{ secrets.PYPI_API_TOKEN }}
+        #   password: ${{ secrets.PYPI_KEY }}
 
