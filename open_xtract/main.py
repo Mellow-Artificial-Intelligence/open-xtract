@@ -42,30 +42,62 @@ class OpenXtract:
     def __init__(
         self,
         model: str,
+        api_key: str | None = None,
+        base_url: str | None = None,
+        provider: str | None = None,
     ) -> None:
         self._model_string = model
+        self._api_key_param = api_key
+        self._base_url_param = base_url
+        self._provider_param = provider
         self._llm_parts = self._get_parts()
 
         self._llm = self._create_llm()
 
     def _get_parts(self):
-        try:
-            provider, model = self._model_string.split(":", 1)
-        except ValueError as exc:  # Not enough parts to unpack
-            msg = "Invalid model string format"
-            suggestions = [
-                "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
-                "Available providers: " + ", ".join(provider_map.keys()),
-                "Examples: 'openai:gpt-4o-mini', 'anthropic:claude-3-5-sonnet', 'xai:grok-beta'"
-            ]
-            raise ConfigurationError(msg, suggestions) from exc
+        # Parse model string - support both "provider:model" and "model" formats
+        if ":" in self._model_string:
+            # Format: "provider:model"
+            try:
+                provider, model = self._model_string.split(":", 1)
+            except ValueError as exc:
+                msg = "Invalid model string format"
+                suggestions = [
+                    "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
+                    "Or use 'model' with provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
+                    "Available providers: " + ", ".join(provider_map.keys()),
+                    "Examples: 'openai:gpt-4o-mini', 'anthropic:claude-3-5-sonnet', 'xai:grok-beta'"
+                ]
+                raise ConfigurationError(msg, suggestions) from exc
 
-        if not provider or not model:
-            msg = "Model string must include both provider and model name"
+            if not provider or not model:
+                msg = "Model string must include both provider and model name"
+                suggestions = [
+                    "Provider cannot be empty",
+                    "Model name cannot be empty", 
+                    "Use format like 'openai:gpt-4o' or 'anthropic:claude-3-5-sonnet'",
+                    "Or use 'model' with provider parameter: OpenXtract(model='gpt-4o', provider='openai')"
+                ]
+                raise ConfigurationError(msg, suggestions)
+        else:
+            # Format: "model" - requires provider parameter
+            model = self._model_string
+            if not self._provider_param:
+                msg = "Provider required when model string doesn't include provider"
+                suggestions = [
+                    "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
+                    "Or provide provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
+                    "Available providers: " + ", ".join(provider_map.keys())
+                ]
+                raise ConfigurationError(msg, suggestions)
+            provider = self._provider_param
+
+        if not model:
+            msg = "Model name cannot be empty"
             suggestions = [
-                "Provider cannot be empty",
-                "Model name cannot be empty", 
-                "Use format like 'openai:gpt-4o' or 'anthropic:claude-3-5-sonnet'"
+                "Provide a valid model name",
+                "Use format like 'openai:gpt-4o' or 'anthropic:claude-3-5-sonnet'",
+                "Or use: OpenXtract(model='gpt-4o', provider='openai')"
             ]
             raise ConfigurationError(msg, suggestions)
 
@@ -80,21 +112,27 @@ class OpenXtract:
 
         self._provider = provider
         self._model = model
-        self._api_key = os.getenv(provider_map[self._provider]["api_key"])
+
+        # Priority: provided parameter > environment variable
+        if self._api_key_param is not None:
+            api_key = self._api_key_param
+        else:
+            api_key = os.getenv(provider_map[self._provider]["api_key"])
         
         # Validate API key
-        if not self._api_key:
+        if not api_key:
             msg = f"API key not found for provider '{provider}'"
             env_var = provider_map[self._provider]["api_key"]
             suggestions = [
                 f"Set the {env_var} environment variable",
+                f"Or pass api_key parameter: OpenXtract(model='...', api_key='your-key')",
                 "Add the API key to your .env file",
                 f"Export the variable: export {env_var}=your_key_here"
             ]
             raise ProviderError(msg, provider, suggestions)
         
         # Basic API key validation
-        if len(self._api_key.strip()) < MIN_API_KEY_LENGTH:
+        if len(api_key.strip()) < MIN_API_KEY_LENGTH:
             msg = f"Invalid API key format for provider '{provider}'"
             suggestions = [
                 "Ensure the API key is complete and not truncated",
@@ -103,7 +141,15 @@ class OpenXtract:
             ]
             raise ProviderError(msg, provider, suggestions)
         
-        self._base_url = provider_map[self._provider]["base_url"] or None
+        self._api_key = api_key
+
+        # Priority: provided parameter > provider map default
+        if self._base_url_param is not None:
+            base_url = self._base_url_param
+        else:
+            base_url = provider_map[self._provider]["base_url"] or None
+        
+        self._base_url = base_url
         return self._provider, self._model, self._base_url, self._api_key
 
     def _create_llm(self):

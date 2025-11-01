@@ -65,9 +65,16 @@ print(result)
 
 ### Input Types
 
-The model string format: `<provider>:<model_string>`
+The model can be specified in two formats:
 
-**Examples**: `"openai:gpt-4o"`, `"anthropic:claude-3-5-sonnet-20241022"`, `"xai:grok-beta"`
+1. **With colon**: `<provider>:<model_string>` (e.g., `"openai:gpt-4o"`)
+2. **Without colon**: `<model_string>` when `provider` parameter is provided separately
+
+**Examples**: 
+- `OpenXtract(model="openai:gpt-4o")` 
+- `OpenXtract(model="gpt-4o", provider="openai")`
+- `OpenXtract(model="anthropic:claude-3-5-sonnet-20241022")`
+- `OpenXtract(model="xai:grok-beta")`
 
 ```python
 from pydantic import BaseModel
@@ -115,6 +122,43 @@ ox = OpenXtract(model="xai:grok-beta")
 
 # OpenRouter (proxy to many models)
 ox = OpenXtract(model="openrouter:qwen/qwen-2.5-72b-instruct")
+```
+
+### Configuration Options
+
+You can configure OpenXtract using environment variables (default) or by passing parameters directly:
+
+```python
+# Using environment variables (default)
+# Set OPENAI_API_KEY=your-key in your environment or .env file
+ox = OpenXtract(model="openai:gpt-4o")
+
+# Pass API key directly
+ox = OpenXtract(
+    model="openai:gpt-4o",
+    api_key="sk-your-api-key-here"
+)
+
+# Pass API key and custom base URL
+ox = OpenXtract(
+    model="openai:gpt-4o",
+    api_key="sk-your-api-key-here",
+    base_url="https://api.openai.com/v1"
+)
+
+# Use model without colon when provider is specified separately
+ox = OpenXtract(
+    model="gpt-4o",
+    provider="openai",
+    api_key="sk-your-api-key-here"
+)
+
+# Parameters take priority over environment variables
+# This will use "direct-key" even if OPENAI_API_KEY is set
+ox = OpenXtract(
+    model="openai:gpt-4o",
+    api_key="direct-key"
+)
 ```
 
 ### Complex Data Structures

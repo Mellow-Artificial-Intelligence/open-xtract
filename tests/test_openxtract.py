@@ -238,8 +238,8 @@ class TestOpenXtract:
         with pytest.raises(ConfigurationError) as exc_info:
             OpenXtract(model="invalid-format")
         
-        assert "Invalid model string format" in str(exc_info.value)
-        assert "Use the format 'provider:model'" in str(exc_info.value)
+        assert "Provider required when model string doesn't include provider" in str(exc_info.value)
+        assert "Or provide provider parameter" in str(exc_info.value)
 
     def test_custom_exceptions_unknown_provider(self):
         """Test ConfigurationError for unknown provider."""
@@ -277,3 +277,112 @@ class TestOpenXtract:
         error_str = str(exc_info.value)
         assert "Suggestions:" in error_str
         assert "Provider cannot be empty" in error_str
+
+    @patch("open_xtract.main.ChatOpenAI")
+    def test_init_with_direct_api_key(self, mock_chat_openai):
+        """Test OpenXtract initialization with direct API key."""
+        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
+            extractor = OpenXtract(
+                model="openai:gpt-4",
+                api_key="test-direct-api-key-12345"
+            )
+
+            assert extractor._provider == "openai"
+            assert extractor._model == "gpt-4"
+            assert extractor._api_key == "test-direct-api-key-12345"
+            assert extractor._base_url == "https://api.openai.com/v1"
+            mock_chat_openai.assert_called_once_with(
+                model="gpt-4",
+                base_url="https://api.openai.com/v1",
+                api_key="test-direct-api-key-12345"
+            )
+
+    @patch("open_xtract.main.ChatOpenAI")
+    def test_init_with_direct_base_url(self, mock_chat_openai):
+        """Test OpenXtract initialization with direct base URL."""
+        extractor = OpenXtract(
+            model="openai:gpt-4",
+            api_key="test-api-key-12345",
+            base_url="https://custom-proxy.com/v1"
+        )
+
+        assert extractor._base_url == "https://custom-proxy.com/v1"
+        mock_chat_openai.assert_called_once_with(
+            model="gpt-4",
+            base_url="https://custom-proxy.com/v1",
+            api_key="test-api-key-12345"
+        )
+
+    @patch("open_xtract.main.ChatOpenAI")
+    def test_init_model_without_colon(self, mock_chat_openai):
+        """Test OpenXtract initialization with model without colon and provider parameter."""
+        extractor = OpenXtract(
+            model="gpt-4",
+            provider="openai",
+            api_key="test-api-key-12345"
+        )
+
+        assert extractor._provider == "openai"
+        assert extractor._model == "gpt-4"
+        assert extractor._api_key == "test-api-key-12345"
+        mock_chat_openai.assert_called_once_with(
+            model="gpt-4",
+            base_url="https://api.openai.com/v1",
+            api_key="test-api-key-12345"
+        )
+
+    def test_init_model_without_colon_no_provider(self):
+        """Test that model without colon raises error when provider not provided."""
+        with pytest.raises(ConfigurationError) as exc_info:
+            OpenXtract(model="gpt-4")
+
+        assert "Provider required when model string doesn't include provider" in str(exc_info.value)
+
+    @patch("open_xtract.main.ChatOpenAI")
+    def test_api_key_priority_over_env_var(self, mock_chat_openai):
+        """Test that direct API key takes priority over environment variable."""
+        with patch.dict(os.environ, {"OPENAI_API_KEY": "env-api-key-12345"}):
+            extractor = OpenXtract(
+                model="openai:gpt-4",
+                api_key="direct-api-key-12345"
+            )
+
+            assert extractor._api_key == "direct-api-key-12345"
+            mock_chat_openai.assert_called_once_with(
+                model="gpt-4",
+                base_url="https://api.openai.com/v1",
+                api_key="direct-api-key-12345"
+            )
+
+    @patch("open_xtract.main.ChatOpenAI")
+    def test_base_url_priority_over_default(self, mock_chat_openai):
+        """Test that direct base URL takes priority over provider map default."""
+        extractor = OpenXtract(
+            model="openai:gpt-4",
+            api_key="test-api-key-12345",
+            base_url="https://custom-url.com/v1"
+        )
+
+        assert extractor._base_url == "https://custom-url.com/v1"
+        mock_chat_openai.assert_called_once_with(
+            model="gpt-4",
+            base_url="https://custom-url.com/v1",
+            api_key="test-api-key-12345"
+        )
+
+    @patch("open_xtract.main.ChatAnthropic")
+    def test_init_anthropic_with_direct_api_key(self, mock_chat_anthropic):
+        """Test Anthropic initialization with direct API key."""
+        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
+            extractor = OpenXtract(
+                model="anthropic:claude-3-5-sonnet",
+                api_key="test-anthropic-key-12345"
+            )
+
+            assert extractor._provider == "anthropic"
+            assert extractor._model == "claude-3-5-sonnet"
+            assert extractor._api_key == "test-anthropic-key-12345"
+            mock_chat_anthropic.assert_called_once_with(
+                model="claude-3-5-sonnet",
+                api_key="test-anthropic-key-12345"
+            )
