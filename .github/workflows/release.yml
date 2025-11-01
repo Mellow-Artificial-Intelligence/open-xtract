@@ -1,0 +1,68 @@
+name: Release to PyPI
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write  # Required for trusted publishing
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          enable-cache: true
+
+      - name: Extract version from tag
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" == "release" ]; then
+            VERSION=${GITHUB_REF#refs/tags/v}
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          else
+            # For manual dispatch, read from pyproject.toml
+            VERSION=$(grep "^version = " pyproject.toml | cut -d'"' -f2)
+            echo "version=$VERSION" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Verify version matches pyproject.toml
+        run: |
+          PYPROJECT_VERSION=$(grep "^version = " pyproject.toml | cut -d'"' -f2)
+          if [ "${{ steps.get_version.outputs.version }}" != "$PYPROJECT_VERSION" ]; then
+            echo "Error: Tag version (${{ steps.get_version.outputs.version }}) doesn't match pyproject.toml ($PYPROJECT_VERSION)"
+            exit 1
+          fi
+
+      - name: Install build dependencies
+        run: |
+          uv pip install build twine
+
+      - name: Build package
+        run: |
+          uv run python -m build
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        # Option 1: Trusted publishing (recommended - more secure)
+        # Set up trusted publishing on PyPI: Account Settings > API tokens > Add API token > Trusted publisher
+        # Then add the GitHub repository as a trusted publisher
+        with:
+          trusted-publisher: true
+
+        # Option 2: API token (fallback if trusted publishing not set up)
+        # Uncomment the following and comment out trusted-publisher above:
+        # with:
+        #   password: ${{ secrets.PYPI_API_TOKEN }}
+
