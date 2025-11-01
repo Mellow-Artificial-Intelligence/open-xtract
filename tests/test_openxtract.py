@@ -386,3 +386,23 @@ class TestOpenXtract:
                 model="claude-3-5-sonnet",
                 api_key="test-anthropic-key-12345"
             )
+
+    @patch("open_xtract.main.ChatOpenAI")
+    def test_model_without_colon_when_api_key_and_base_url_provided(self, mock_chat_openai):
+        """Test that model string can be used without colon when api_key and base_url are provided."""
+        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
+            extractor = OpenXtract(
+                model="gpt-4o",
+                api_key="test-api-key-12345",
+                base_url="https://api.openai.com/v1"
+            )
+
+            assert extractor._provider == "openai"
+            assert extractor._model == "gpt-4o"
+            assert extractor._api_key == "test-api-key-12345"
+            assert extractor._base_url == "https://api.openai.com/v1"
+            mock_chat_openai.assert_called_once_with(
+                model="gpt-4o",
+                base_url="https://api.openai.com/v1",
+                api_key="test-api-key-12345"
+            )
