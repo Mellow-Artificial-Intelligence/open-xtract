@@ -140,8 +140,9 @@ ox = OpenXtract(
 )
 
 # Pass API key and custom base URL
+# When api_key and base_url are provided, model can be used without colon
 ox = OpenXtract(
-    model="openai:gpt-4o",
+    model="gpt-4o",
     api_key="sk-your-api-key-here",
     base_url="https://api.openai.com/v1"
 )

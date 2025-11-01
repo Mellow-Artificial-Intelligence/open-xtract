@@ -65,6 +65,7 @@ class OpenXtract:
                 suggestions = [
                     "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
                     "Or use 'model' with provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
+                    "When api_key and base_url are provided, model can be used directly without colon",
                     "Available providers: " + ", ".join(provider_map.keys()),
                     "Examples: 'openai:gpt-4o-mini', 'anthropic:claude-3-5-sonnet', 'xai:grok-beta'"
                 ]
@@ -80,17 +81,23 @@ class OpenXtract:
                 ]
                 raise ConfigurationError(msg, suggestions)
         else:
-            # Format: "model" - requires provider parameter
+            # Format: "model" - provider may be optional if api_key and base_url are provided
             model = self._model_string
             if not self._provider_param:
-                msg = "Provider required when model string doesn't include provider"
-                suggestions = [
-                    "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
-                    "Or provide provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
-                    "Available providers: " + ", ".join(provider_map.keys())
-                ]
-                raise ConfigurationError(msg, suggestions)
-            provider = self._provider_param
+                # If api_key and base_url are provided, default to "openai" (OpenAI-compatible)
+                if self._api_key_param is not None and self._base_url_param is not None:
+                    provider = "openai"
+                else:
+                    msg = "Provider required when model string doesn't include provider"
+                    suggestions = [
+                        "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
+                        "Or provide provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
+                        "Or provide api_key and base_url to use model string directly",
+                        "Available providers: " + ", ".join(provider_map.keys())
+                    ]
+                    raise ConfigurationError(msg, suggestions)
+            else:
+                provider = self._provider_param
 
         if not model:
             msg = "Model name cannot be empty"
