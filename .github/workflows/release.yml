@@ -8,8 +8,6 @@ on:
 jobs:
   release:
     runs-on: ubuntu-latest
-    permissions:
-      id-token: write  # Required for trusted publishing
 
     steps:
       - name: Checkout repository
@@ -59,14 +57,6 @@ jobs:
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        # Option 1: Trusted publishing (recommended - more secure)
-        # Set up trusted publishing on PyPI: Account Settings > API tokens > Add API token > Trusted publisher
-        # Then add the GitHub repository as a trusted publisher
         with:
-          trusted-publisher: true
-
-        # Option 2: API token (fallback if trusted publishing not set up)
-        # Uncomment the following and comment out trusted-publisher above:
-        # with:
-        #   password: ${{ secrets.PYPI_KEY }}
+          password: ${{ secrets.PYPI_KEY }}
 
