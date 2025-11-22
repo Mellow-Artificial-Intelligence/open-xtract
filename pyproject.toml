@@ -37,9 +37,6 @@ dev = [
     "pre-commit>=3.7.0",
 ]
 
-[project.scripts]
-open-xtract = "open_xtract:main"
-
 [project.urls]
 Homepage = "https://mellow-artificial-intelligence.github.io/open-xtract/"
 
