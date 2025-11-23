@@ -12,7 +12,7 @@
 
 *Open-source toolkit for extracting clean, structured data from text, images, and PDFs using state-of-the-art large language models*
 
-[Homepage](https://mellow-artificial-intelligence.github.io/open-xtract/) • [PyPI](https://pypi.org/project/open-xtract/) • [Documentation](https://github.com/Mellow-Artificial-Intelligence/open-xtract) • [Examples](./examples/)
+[Homepage](https://mellow-artificial-intelligence.github.io/open-xtract/) • [PyPI](https://pypi.org/project/open-xtract/) • [Documentation](https://github.com/Mellow-Artificial-Intelligence/open-xtract)
 
 </div>
 
