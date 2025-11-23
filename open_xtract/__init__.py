@@ -3,7 +3,7 @@ from .main import OpenXtract
 
 __all__ = [
     "OpenXtract",
-    "ConfigurationError", 
+    "ConfigurationError",
     "ProviderError",
     "InputError",
     "ProcessingError",

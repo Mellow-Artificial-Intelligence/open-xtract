@@ -5,4 +5,3 @@ docs/* linguist-documentation
 
 # Normalize line endings for shell scripts
 *.sh text eol=lf
-

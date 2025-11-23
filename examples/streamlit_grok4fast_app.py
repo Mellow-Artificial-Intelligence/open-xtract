@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import inspect
 import os
-from typing import Any, List, Optional, Sequence, Union
+from collections.abc import Sequence
+from typing import Any
 
 import streamlit as st
 from open_xtract import OpenXtract
@@ -24,17 +25,17 @@ class KeyMetric(BaseModel):
 
     name: str = Field(..., description="Name of the metric or KPI.")
     value: str = Field(..., description="Reported value exactly as written.")
-    unit: Optional[str] = Field(None, description="Unit of measure tied to the value.")
-    trend: Optional[str] = Field(None, description="Direction or interpretation of change.")
-    notes: Optional[str] = Field(None, description="Context that explains the metric.")
+    unit: str | None = Field(None, description="Unit of measure tied to the value.")
+    trend: str | None = Field(None, description="Direction or interpretation of change.")
+    notes: str | None = Field(None, description="Context that explains the metric.")
 
 
 class ReportFinding(BaseModel):
     """Narrative insight or conclusion surfaced in the report."""
 
     title: str = Field(..., description="Headline for the finding.")
-    impact: Optional[str] = Field(None, description="Impact or severity noted in the report.")
-    evidence: Optional[str] = Field(
+    impact: str | None = Field(None, description="Impact or severity noted in the report.")
+    evidence: str | None = Field(
         None,
         description="Supporting evidence, figures, or citations backing the finding.",
     )
@@ -44,49 +45,51 @@ class Recommendation(BaseModel):
     """Action the report suggests taking."""
 
     title: str = Field(..., description="Short label for the recommendation.")
-    rationale: Optional[str] = Field(None, description="Why this recommendation matters.")
-    priority: Optional[str] = Field(None, description="Priority or urgency stated in the report.")
-    owner: Optional[str] = Field(None, description="Suggested owner or responsible party.")
-    due_date: Optional[str] = Field(None, description="Timeline or deadline if provided.")
+    rationale: str | None = Field(None, description="Why this recommendation matters.")
+    priority: str | None = Field(None, description="Priority or urgency stated in the report.")
+    owner: str | None = Field(None, description="Suggested owner or responsible party.")
+    due_date: str | None = Field(None, description="Timeline or deadline if provided.")
 
 
 class ReportSummary(BaseModel):
     """Structured summary for business or analytical reports."""
 
     report_title: str = Field(..., description="Title of the report.")
-    report_date: Optional[str] = Field(None, description="Publication or delivery date.")
-    organization: Optional[str] = Field(None, description="Company or client the report is for.")
-    prepared_by: Optional[str] = Field(None, description="Person or team that authored the report.")
-    report_type: Optional[str] = Field(None, description="Type of report (e.g. quarterly review, audit).")
+    report_date: str | None = Field(None, description="Publication or delivery date.")
+    organization: str | None = Field(None, description="Company or client the report is for.")
+    prepared_by: str | None = Field(None, description="Person or team that authored the report.")
+    report_type: str | None = Field(
+        None, description="Type of report (e.g. quarterly review, audit)."
+    )
     executive_summary: str = Field(..., description="Short narrative overview of the report.")
-    key_metrics: List[KeyMetric] = Field(
+    key_metrics: list[KeyMetric] = Field(
         default_factory=list,
         description="Important quantitative metrics spotlighted in the report.",
     )
-    key_findings: List[ReportFinding] = Field(
+    key_findings: list[ReportFinding] = Field(
         default_factory=list,
         description="Primary findings or insights highlighted in the report.",
     )
-    recommendations: List[Recommendation] = Field(
+    recommendations: list[Recommendation] = Field(
         default_factory=list,
         description="Actions suggested based on the findings.",
     )
-    follow_up_actions: List[str] = Field(
+    follow_up_actions: list[str] = Field(
         default_factory=list,
         description="Next steps, owners, or timelines mentioned for follow-up.",
     )
 
 
-def _clean_text(value: Optional[str]) -> str:
+def _clean_text(value: str | None) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _value_or_default(value: Optional[str], *, fallback: str) -> str:
+def _value_or_default(value: str | None, *, fallback: str) -> str:
     cleaned = _clean_text(value)
     return cleaned if cleaned else fallback
 
 
-def _ensure_summary(data: Union[ReportSummary, dict[str, Any]]) -> ReportSummary:
+def _ensure_summary(data: ReportSummary | dict[str, Any]) -> ReportSummary:
     if isinstance(data, ReportSummary):
         return data
     return ReportSummary.model_validate(data)
@@ -106,7 +109,9 @@ def _render_metrics(metrics: Sequence[KeyMetric]) -> None:
 
     for index, metric in enumerate(metrics, start=1):
         name = _value_or_default(metric.name, fallback=f"Key Metric {index}")
-        value = _value_or_default(metric.value, fallback="Value not specified in the source document.")
+        value = _value_or_default(
+            metric.value, fallback="Value not specified in the source document."
+        )
         trend = _clean_text(metric.trend)
         notes = _clean_text(metric.notes)
         unit = _clean_text(metric.unit)
@@ -117,7 +122,7 @@ def _render_metrics(metrics: Sequence[KeyMetric]) -> None:
 
         st.markdown(metric_sentence)
 
-        narrative_bits: List[str] = []
+        narrative_bits: list[str] = []
         if trend:
             narrative_bits.append(f"Observed trend: {trend}.")
         if notes:
@@ -148,7 +153,11 @@ def _render_findings(findings: Sequence[ReportFinding]) -> None:
             headline += " — Impact not explicitly rated; confirm with the authoring team."
 
         st.markdown(headline)
-        st.caption(evidence if evidence else "Evidence reference not surfaced; corroborate during validation.")
+        st.caption(
+            evidence
+            if evidence
+            else "Evidence reference not surfaced; corroborate during validation."
+        )
 
 
 def _render_recommendations(items: Sequence[Recommendation]) -> None:
@@ -202,7 +211,7 @@ def _get_client(model_name: str) -> OpenXtract:
     return OpenXtract(model=model_name)
 
 
-def display_report(data: Union[ReportSummary, dict[str, Any]]) -> None:
+def display_report(data: ReportSummary | dict[str, Any]) -> None:
     summary = _ensure_summary(data)
 
     st.success("Structured report extracted. Review the sections below.")
@@ -210,14 +219,10 @@ def display_report(data: Union[ReportSummary, dict[str, Any]]) -> None:
     _render_section_heading("Overview")
 
     report_title = _value_or_default(summary.report_title, fallback="Untitled report")
-    organization = _value_or_default(
-        summary.organization, fallback="an unspecified organisation"
-    )
+    organization = _value_or_default(summary.organization, fallback="an unspecified organisation")
     report_type = _value_or_default(summary.report_type, fallback="a general report")
     report_date = _value_or_default(summary.report_date, fallback="an unspecified date")
-    prepared_by = _value_or_default(
-        summary.prepared_by, fallback="an unnamed authoring team"
-    )
+    prepared_by = _value_or_default(summary.prepared_by, fallback="an unnamed authoring team")
 
     st.write(
         f"{report_title} was prepared for {organization}, positioned as {report_type}, and delivered on {report_date} by {prepared_by}."
@@ -251,14 +256,10 @@ def display_report(data: Union[ReportSummary, dict[str, Any]]) -> None:
 def main() -> None:
     st.set_page_config(page_title="OpenXtract Report Reader", page_icon="📄")
     st.title("OpenXtract Report Reader")
-    st.caption(
-        "Upload a report-style PDF and generate an expert grade analysis."
-    )
+    st.caption("Upload a report-style PDF and generate an expert grade analysis.")
 
     if not os.environ.get("OPENROUTER_API_KEY"):
-        st.info(
-            "Set the `OPENROUTER_API_KEY` environment variable before using the extractor."
-        )
+        st.info("Set the `OPENROUTER_API_KEY` environment variable before using the extractor.")
 
     with st.expander("Show Pydantic schema used", expanded=False):
         schema_source = "\n\n".join(
@@ -272,7 +273,7 @@ def main() -> None:
         st.code(schema_source, language="python")
 
     uploaded_pdf = None
-    pdf_bytes: Optional[bytes] = None
+    pdf_bytes: bytes | None = None
 
     with st.form("openxtract-upload"):
         uploaded_pdf = st.file_uploader(
