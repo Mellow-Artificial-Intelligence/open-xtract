@@ -52,74 +52,74 @@
         background-size: 400% 400%;
         animation: gradient 15s ease infinite;
       }
-      
+
       .glass {
         background: rgba(255, 255, 255, 0.02);
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.06);
       }
-      
+
       .glow {
         box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
       }
-      
+
       .glow-hover:hover {
         box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
       }
-      
+
       .gradient-text {
         background: linear-gradient(135deg, #ffffff 0%, #a0a0a0 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
-      
+
       .gradient-accent {
         background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
       }
-      
+
       .feature-card {
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
-      
+
       .feature-card:hover {
         transform: translateY(-4px);
         background: rgba(255, 255, 255, 0.03);
       }
-      
+
       .code-block {
         background: rgba(0, 0, 0, 0.4);
         backdrop-filter: blur(10px);
       }
-      
+
       .btn-primary {
         background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
-      
+
       .btn-primary:hover {
         transform: translateY(-1px);
         box-shadow: 0 8px 20px rgba(255, 255, 255, 0.15);
       }
-      
+
       .btn-secondary {
         background: rgba(255, 255, 255, 0.03);
         backdrop-filter: blur(10px);
         border: 1px solid rgba(255, 255, 255, 0.08);
         transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       }
-      
+
       .btn-secondary:hover {
         background: rgba(255, 255, 255, 0.06);
         border-color: rgba(255, 255, 255, 0.15);
         transform: translateY(-1px);
       }
-      
+
       @keyframes shimmer {
         0% { background-position: -1000px 0; }
         100% { background-position: 1000px 0; }
       }
-      
+
       .shimmer {
         background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
         background-size: 1000px 100%;
@@ -159,12 +159,12 @@
           <div class="inline-block mb-8 px-5 py-2 glass rounded-full text-xs font-medium text-white/70 animate-slide-up">
             Extract structured data from any document
           </div>
-          
+
           <h1 class="text-5xl md:text-6xl font-semibold tracking-tight mb-10 leading-[1.1] animate-slide-up" style="animation-delay: 0.1s;">
             Turn anything into<br/>
             <span class="gradient-text">structured data</span>
           </h1>
-          
+
           <p class="text-lg text-white/70 max-w-2xl mx-auto mb-14 leading-relaxed animate-slide-up" style="animation-delay: 0.2s;">
             Open‑source toolkit for extracting clean, structured data from PDFs, images, and text.<br/>
             <span class="text-white/50">Auto-routing with minimal setup.</span>
@@ -291,7 +291,7 @@
       document.addEventListener('DOMContentLoaded', () => {
         lucide.createIcons();
       });
-      
+
       async function copyText(text) {
         if (navigator.clipboard && window.isSecureContext) {
           try { await navigator.clipboard.writeText(text); return true; } catch(e) {}

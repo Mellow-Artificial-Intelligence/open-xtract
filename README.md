@@ -12,7 +12,7 @@
 
 *Open-source toolkit for extracting clean, structured data from text, images, and PDFs using state-of-the-art large language models*
 
-[Homepage](https://mellow-artificial-intelligence.github.io/open-xtract/) • [PyPI](https://pypi.org/project/open-xtract/) • [Documentation](https://github.com/Mellow-Artificial-Intelligence/open-xtract) • [Examples](./examples/)
+[Homepage](https://mellow-artificial-intelligence.github.io/open-xtract/) • [PyPI](https://pypi.org/project/open-xtract/) • [Documentation](https://github.com/Mellow-Artificial-Intelligence/open-xtract)
 
 </div>
 
@@ -70,8 +70,8 @@ The model can be specified in two formats:
 1. **With colon**: `<provider>:<model_string>` (e.g., `"openai:gpt-4o"`)
 2. **Without colon**: `<model_string>` when `provider` parameter is provided separately
 
-**Examples**: 
-- `OpenXtract(model="openai:gpt-4o")` 
+**Examples**:
+- `OpenXtract(model="openai:gpt-4o")`
 - `OpenXtract(model="gpt-4o", provider="openai")`
 - `OpenXtract(model="anthropic:claude-3-5-sonnet-20241022")`
 - `OpenXtract(model="xai:grok-beta")`
@@ -199,7 +199,7 @@ result = ox.extract(complex_invoice_text, DetailedInvoice)
 ## Use Cases
 
 - **Document Processing**: Extract data from invoices, receipts, contracts
-- **Data Migration**: Convert unstructured legacy data to structured formats  
+- **Data Migration**: Convert unstructured legacy data to structured formats
 - **Content Analysis**: Parse emails, reports, and documents for key information
 - **Business Automation**: Automate data entry from various document types
 - **Form Processing**: Extract form data from scanned documents and images

@@ -54,7 +54,7 @@ class OpenXtract:
 
         self._llm = self._create_llm()
 
-    def _get_parts(self):
+    def _get_parts(self):  # noqa: PLR0912, PLR0915
         # Parse model string - support both "provider:model" and "model" formats
         if ":" in self._model_string:
             # Format: "provider:model"
@@ -67,7 +67,7 @@ class OpenXtract:
                     "Or use 'model' with provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
                     "When api_key and base_url are provided, model can be used directly without colon",
                     "Available providers: " + ", ".join(provider_map.keys()),
-                    "Examples: 'openai:gpt-4o-mini', 'anthropic:claude-3-5-sonnet', 'xai:grok-beta'"
+                    "Examples: 'openai:gpt-4o-mini', 'anthropic:claude-3-5-sonnet', 'xai:grok-beta'",
                 ]
                 raise ConfigurationError(msg, suggestions) from exc
 
@@ -75,9 +75,9 @@ class OpenXtract:
                 msg = "Model string must include both provider and model name"
                 suggestions = [
                     "Provider cannot be empty",
-                    "Model name cannot be empty", 
+                    "Model name cannot be empty",
                     "Use format like 'openai:gpt-4o' or 'anthropic:claude-3-5-sonnet'",
-                    "Or use 'model' with provider parameter: OpenXtract(model='gpt-4o', provider='openai')"
+                    "Or use 'model' with provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
                 ]
                 raise ConfigurationError(msg, suggestions)
         else:
@@ -93,7 +93,7 @@ class OpenXtract:
                         "Use the format 'provider:model' (e.g., 'openai:gpt-4o')",
                         "Or provide provider parameter: OpenXtract(model='gpt-4o', provider='openai')",
                         "Or provide api_key and base_url to use model string directly",
-                        "Available providers: " + ", ".join(provider_map.keys())
+                        "Available providers: " + ", ".join(provider_map.keys()),
                     ]
                     raise ConfigurationError(msg, suggestions)
             else:
@@ -104,7 +104,7 @@ class OpenXtract:
             suggestions = [
                 "Provide a valid model name",
                 "Use format like 'openai:gpt-4o' or 'anthropic:claude-3-5-sonnet'",
-                "Or use: OpenXtract(model='gpt-4o', provider='openai')"
+                "Or use: OpenXtract(model='gpt-4o', provider='openai')",
             ]
             raise ConfigurationError(msg, suggestions)
 
@@ -113,7 +113,7 @@ class OpenXtract:
             suggestions = [
                 f"Available providers: {', '.join(provider_map.keys())}",
                 "Check for typos in the provider name",
-                "Ensure you're using a supported provider"
+                "Ensure you're using a supported provider",
             ]
             raise ConfigurationError(msg, suggestions)
 
@@ -125,29 +125,29 @@ class OpenXtract:
             api_key = self._api_key_param
         else:
             api_key = os.getenv(provider_map[self._provider]["api_key"])
-        
+
         # Validate API key
         if not api_key:
             msg = f"API key not found for provider '{provider}'"
             env_var = provider_map[self._provider]["api_key"]
             suggestions = [
                 f"Set the {env_var} environment variable",
-                f"Or pass api_key parameter: OpenXtract(model='...', api_key='your-key')",
+                "Or pass api_key parameter: OpenXtract(model='...', api_key='your-key')",
                 "Add the API key to your .env file",
-                f"Export the variable: export {env_var}=your_key_here"
+                f"Export the variable: export {env_var}=your_key_here",
             ]
             raise ProviderError(msg, provider, suggestions)
-        
+
         # Basic API key validation
         if len(api_key.strip()) < MIN_API_KEY_LENGTH:
             msg = f"Invalid API key format for provider '{provider}'"
             suggestions = [
                 "Ensure the API key is complete and not truncated",
                 "Check for extra spaces or newline characters",
-                "Verify the key matches the expected format for this provider"
+                "Verify the key matches the expected format for this provider",
             ]
             raise ProviderError(msg, provider, suggestions)
-        
+
         self._api_key = api_key
 
         # Priority: provided parameter > provider map default
@@ -155,7 +155,7 @@ class OpenXtract:
             base_url = self._base_url_param
         else:
             base_url = provider_map[self._provider]["base_url"] or None
-        
+
         self._base_url = base_url
         return self._provider, self._model, self._base_url, self._api_key
 
@@ -179,7 +179,7 @@ class OpenXtract:
             return self._llm.with_structured_output(schema).invoke(data)
 
         # Support bytes-like inputs
-        if isinstance(data, (bytes, bytearray, memoryview)):
+        if isinstance(data, bytes | bytearray | memoryview):
             binary = bytes(data)
 
             # PDF detection by header
@@ -191,12 +191,12 @@ class OpenXtract:
                     suggestions = [
                         "Install with: pip install pymupdf",
                         "Or install with vision extra: pip install open-xtract[vision]",
-                        "Using uv: uv add pymupdf or uv add open-xtract[vision]"
+                        "Using uv: uv add pymupdf or uv add open-xtract[vision]",
                     ]
                     raise ProcessingError(msg, suggestions) from exc
 
                 # Render each page to PNG bytes and add to message content
-                content_parts: list[dict[str, Any]] = [
+                content_parts: list[str | dict[str, Any]] = [
                     {"type": "text", "text": "Extract the structured data per the provided schema."}
                 ]
                 with fitz.open(stream=binary, filetype="pdf") as doc:
@@ -235,7 +235,7 @@ class OpenXtract:
                     "Ensure input is valid image data (PNG, JPEG, etc.)",
                     "Check that the file is not corrupted",
                     "For PDFs, ensure the file starts with '%PDF-'",
-                    "Try opening the file with an image viewer first"
+                    "Try opening the file with an image viewer first",
                 ]
                 raise InputError(msg, suggestions) from exc
 
@@ -243,7 +243,7 @@ class OpenXtract:
             b64 = base64.b64encode(binary).decode("utf-8")
 
             if self._provider == "anthropic":
-                content = [
+                content: list[str | dict[str, Any]] = [
                     {
                         "type": "text",
                         "text": "Extract the structured data per the provided schema.",
@@ -271,7 +271,7 @@ class OpenXtract:
             "Use str for text input: ox.extract('text here', Schema)",
             "Use bytes for image/PDF input: ox.extract(open('file.png', 'rb').read(), Schema)",
             "For file paths, read the file first: with open('file.pdf', 'rb') as f: ox.extract(f.read(), Schema)",
-            f"Got type: {type(data).__name__}"
+            f"Got type: {type(data).__name__}",
         ]
         raise InputError(msg, suggestions)
 

@@ -19,10 +19,9 @@ Steps to reproduce the behavior:
 What you expected to happen.
 
 ### Environment
-- OS: 
-- Python: 
-- open-xtract version: 
+- OS:
+- Python:
+- open-xtract version:
 
 ### Additional context
 Add any other context about the problem here.
-
