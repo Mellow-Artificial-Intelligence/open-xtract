@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="en" class="scroll-smooth">
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -7,7 +7,7 @@
     <meta name="description" content="Open‑source framework that extracts structured data from documents." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -15,24 +15,21 @@
         theme: {
           extend: {
             fontFamily: {
-              sans: ['Plus Jakarta Sans', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-              mono: ['SF Mono', 'Monaco', 'Inconsolata', 'Roboto Mono', 'Consolas', 'monospace'],
+              sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+              mono: ['JetBrains Mono', 'SF Mono', 'Monaco', 'Inconsolata', 'Consolas', 'monospace'],
+            },
+            colors: {
+              background: '#000000',
+              surface: '#111111',
+              primary: '#ffffff',
+              secondary: '#888888',
+              accent: '#333333',
             },
             animation: {
-              'gradient': 'gradient 8s ease infinite',
-              'float': 'float 6s ease-in-out infinite',
-              'fade-in': 'fadeIn 0.6s ease-out',
-              'slide-up': 'slideUp 0.6s ease-out',
+              'fade-in': 'fadeIn 0.5s ease-out forwards',
+              'slide-up': 'slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
             },
             keyframes: {
-              gradient: {
-                '0%, 100%': { backgroundPosition: '0% 50%' },
-                '50%': { backgroundPosition: '100% 50%' },
-              },
-              float: {
-                '0%, 100%': { transform: 'translateY(0px)' },
-                '50%': { transform: 'translateY(-20px)' },
-              },
               fadeIn: {
                 '0%': { opacity: '0' },
                 '100%': { opacity: '1' },
@@ -47,360 +44,357 @@
       }
     </script>
     <style>
+      :root {
+        --grid-color: rgba(255, 255, 255, 0.05);
+      }
+      
       body {
-        background: linear-gradient(135deg, #0a0a0a 0%, #1a1a2e 50%, #0a0a0a 100%);
-        background-size: 400% 400%;
-        animation: gradient 15s ease infinite;
+        background-color: #000;
+        background-image: 
+          linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
+          linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
+        background-size: 50px 50px;
+        background-position: center top;
+        min-height: 100vh;
+      }
+      
+      /* Subtle radial gradient at the top */
+      body::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 800px;
+        background: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 70%);
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      /* Fade out grid at bottom */
+      body::after {
+        content: '';
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 200px;
+        background: linear-gradient(to bottom, transparent, #000);
+        pointer-events: none;
+        z-index: 0;
       }
 
       .glass {
-        background: rgba(255, 255, 255, 0.02);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.06);
+        background: rgba(0, 0, 0, 0.6);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        border: 1px solid rgba(255, 255, 255, 0.08);
       }
 
-      .glow {
-        box-shadow: 0 0 15px rgba(255, 255, 255, 0.05);
+      .text-gradient {
+        background: linear-gradient(180deg, #fff 0%, rgba(255, 255, 255, 0.7) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
       }
-
-      .glow-hover:hover {
-        box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
-      }
-
-      .gradient-text {
-        background: linear-gradient(135deg, #ffffff 0%, #a0a0a0 100%);
+      
+      .text-gradient-subtle {
+        background: linear-gradient(180deg, #888 0%, #666 100%);
         -webkit-background-clip: text;
         -webkit-text-fill-color: transparent;
         background-clip: text;
       }
 
-      .gradient-accent {
-        background: linear-gradient(135deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+      /* Custom scrollbar */
+      ::-webkit-scrollbar {
+        width: 8px;
       }
-
-      .feature-card {
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      ::-webkit-scrollbar-track {
+        background: #000;
       }
-
-      .feature-card:hover {
-        transform: translateY(-4px);
-        background: rgba(255, 255, 255, 0.03);
+      ::-webkit-scrollbar-thumb {
+        background: #333;
+        border-radius: 4px;
       }
-
-      .code-block {
-        background: rgba(0, 0, 0, 0.4);
-        backdrop-filter: blur(10px);
+      ::-webkit-scrollbar-thumb:hover {
+        background: #444;
       }
 
       .btn-primary {
-        background: linear-gradient(135deg, #ffffff 0%, #f0f0f0 100%);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        background: #fff;
+        color: #000;
+        transition: all 0.2s ease;
       }
-
       .btn-primary:hover {
+        background: #e5e5e5;
         transform: translateY(-1px);
-        box-shadow: 0 8px 20px rgba(255, 255, 255, 0.15);
       }
-
+      
       .btn-secondary {
-        background: rgba(255, 255, 255, 0.03);
-        backdrop-filter: blur(10px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-        transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        background: #000;
+        color: #fff;
+        border: 1px solid rgba(255, 255, 255, 0.15);
+        transition: all 0.2s ease;
       }
-
       .btn-secondary:hover {
-        background: rgba(255, 255, 255, 0.06);
-        border-color: rgba(255, 255, 255, 0.15);
+        background: #111;
+        border-color: #fff;
         transform: translateY(-1px);
       }
 
-      @keyframes shimmer {
-        0% { background-position: -1000px 0; }
-        100% { background-position: 1000px 0; }
+      .feature-card {
+        transition: border-color 0.3s ease;
+      }
+      .feature-card:hover {
+        border-color: rgba(255, 255, 255, 0.2);
+      }
+      
+      .copy-btn {
+        opacity: 0;
+        transition: opacity 0.2s ease;
+      }
+      .group:hover .copy-btn {
+        opacity: 1;
       }
 
-      .shimmer {
-        background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-        background-size: 1000px 100%;
-        animation: shimmer 3s infinite;
+      /* Clean code block styling */
+      .code-container {
+        background: #0a0a0a;
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
       }
     </style>
 </head>
-  <body class="min-h-screen text-white antialiased font-sans leading-relaxed overflow-x-hidden">
-    <!-- Animated background elements -->
-    <div class="fixed inset-0 overflow-hidden pointer-events-none">
-      <div class="absolute top-1/4 left-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl animate-float"></div>
-      <div class="absolute bottom-1/4 right-1/4 w-96 h-96 bg-white/5 rounded-full blur-3xl animate-float" style="animation-delay: 2s;"></div>
-    </div>
+<body class="text-white font-sans antialiased overflow-x-hidden selection:bg-white/20 selection:text-white">
 
-    <header class="relative z-50 border-b border-white/10 backdrop-blur-md bg-black/20">
-      <div class="mx-auto max-w-6xl px-6 py-6">
-        <div class="flex items-center justify-between">
-          <div class="text-lg font-semibold tracking-wide gradient-text">OpenXtract</div>
-          <nav class="flex items-center gap-8 text-sm">
-            <a class="text-white/70 hover:text-white transition-all duration-300 hover:scale-105 relative group" href="https://github.com/Mellow-Artificial-Intelligence/open-xtract">
-              GitHub
-              <span class="absolute bottom-0 left-0 w-0 h-0.5 bg-white transition-all duration-300 group-hover:w-full"></span>
-            </a>
-            <a class="text-white/70 hover:text-white transition-all duration-300 hover:scale-105 relative group" href="https://pypi.org/project/open-xtract/">
-              PyPI
-              <span class="absolute bottom-0 left-0 w-0 h-0.5 bg-white transition-all duration-300 group-hover:w-full"></span>
-            </a>
-          </nav>
+    <!-- Navbar -->
+    <header class="fixed top-0 w-full z-50 border-b border-white/5 backdrop-blur-xl bg-black/50">
+      <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
+        <a href="#" class="flex items-center gap-2 group">
+          <div class="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center font-bold text-sm group-hover:scale-105 transition-transform">
+            OX
+          </div>
+          <span class="font-semibold text-sm tracking-tight text-white/90">OpenXtract</span>
+        </a>
+        
+        <nav class="hidden md:flex items-center gap-8 text-sm font-medium">
+          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="text-white/60 hover:text-white transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/open-xtract/" class="text-white/60 hover:text-white transition-colors">PyPI</a>
+        </nav>
+
+        <div class="md:hidden">
+          <!-- Mobile menu button placeholder -->
+          <button class="text-white/60 hover:text-white">
+            <i data-lucide="menu" class="w-5 h-5"></i>
+          </button>
         </div>
       </div>
     </header>
 
-    <main class="relative z-10">
-      <!-- Hero -->
-      <section class="mx-auto max-w-6xl px-6 pt-24 md:pt-32 pb-16">
-        <div class="text-center mb-0 animate-fade-in">
-          <div class="inline-block mb-8 px-5 py-2 glass rounded-full text-xs font-medium text-white/70 animate-slide-up">
-            Extract structured data from any document
-          </div>
+    <main class="relative z-10 pt-32 pb-20">
+      <!-- Hero Section -->
+      <section class="max-w-5xl mx-auto px-6 text-center flex flex-col items-center">
+        <!-- Badge -->
+        <div class="animate-slide-up opacity-0 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-white/80 mb-8 hover:bg-white/10 transition-colors cursor-default">
+          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+          v0.1.0 Now Available
+        </div>
 
-          <h1 class="text-5xl md:text-6xl font-semibold tracking-tight mb-10 leading-[1.1] animate-slide-up" style="animation-delay: 0.1s;">
-            Turn anything into<br/>
-            <span class="gradient-text">structured data</span>
-          </h1>
+        <!-- Main Title -->
+        <h1 class="animate-slide-up opacity-0 [animation-delay:100ms] text-5xl md:text-7xl font-bold tracking-tight mb-8 text-gradient max-w-4xl mx-auto leading-[1.1]">
+          Turn documents into <br class="hidden md:block" />
+          structured data.
+        </h1>
 
-          <p class="text-lg text-white/70 max-w-2xl mx-auto mb-14 leading-relaxed animate-slide-up" style="animation-delay: 0.2s;">
-            Open‑source toolkit for extracting clean, structured data from PDFs, images, and text.<br/>
-            <span class="text-white/50">Auto-routing with minimal setup.</span>
-          </p>
+        <!-- Subtitle -->
+        <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-lg md:text-xl text-secondary max-w-2xl mx-auto mb-10 leading-relaxed font-light">
+          An open-source framework to extract clean, typed data from PDFs, images, and text with minimal setup.
+        </p>
 
-          <!-- Install command -->
-          <div class="glass code-block rounded-2xl p-5 max-w-lg mx-auto mb-12 animate-slide-up glow-hover relative overflow-hidden" style="animation-delay: 0.3s;">
-            <div class="absolute inset-0 shimmer"></div>
-            <div class="relative">
-              <div class="text-xs text-white/40 mb-3 tracking-wide">Install</div>
-              <div class="relative group">
-                <pre class="text-white font-mono text-sm"><code id="installCmd" class="block">uv add open-xtract</code></pre>
-                <button data-copy-target="installCmd" aria-label="Copy command"
-                  class="absolute right-0 top-0 p-2 text-white/50 hover:text-white transition-all duration-300 hover:scale-110 rounded-lg hover:bg-white/10">
-                  <i data-lucide="copy" class="copy-icon w-5 h-5"></i>
-                  <i data-lucide="check" class="check-icon hidden w-5 h-5"></i>
-                </button>
-              </div>
+        <!-- CTA Buttons -->
+        <div class="animate-slide-up opacity-0 [animation-delay:300ms] flex flex-col sm:flex-row gap-4 mb-16 w-full sm:w-auto">
+          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" 
+             class="btn-primary h-12 px-8 rounded-full flex items-center justify-center gap-2 font-medium text-sm">
+             <i data-lucide="github" class="w-4 h-4"></i>
+             Star on GitHub
+          </a>
+          <div class="relative group cursor-pointer" onclick="copyInstall()">
+            <div class="btn-secondary h-12 px-6 rounded-full flex items-center justify-center gap-3 font-mono text-sm group-hover:border-white/40">
+              <span class="text-secondary">$</span> uv add open-xtract
+              <i data-lucide="copy" id="copy-icon-install" class="w-3.5 h-3.5 text-secondary group-hover:text-white transition-colors"></i>
+              <i data-lucide="check" id="check-icon-install" class="w-3.5 h-3.5 text-emerald-500 hidden"></i>
             </div>
-          </div>
-
-          <!-- Action buttons -->
-          <div class="flex flex-col sm:flex-row gap-3 justify-center items-center animate-slide-up" style="animation-delay: 0.4s;">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
-               class="btn-primary px-7 py-3 text-black font-medium rounded-xl text-sm">
-              View on GitHub →
-            </a>
-            <a href="https://pypi.org/project/open-xtract/"
-               class="btn-secondary px-7 py-3 text-white font-medium rounded-xl text-sm">
-              Install from PyPI
-            </a>
+            <!-- Toast notification placeholder -->
+            <div id="copy-toast" class="absolute -top-10 left-1/2 -translate-x-1/2 bg-white text-black text-xs font-medium px-2 py-1 rounded shadow-lg opacity-0 transition-opacity pointer-events-none">
+              Copied!
+            </div>
           </div>
         </div>
-      </section>
 
-      <!-- Features -->
-      <section class="border-t border-white/10 py-20 md:py-24">
-        <div class="mx-auto max-w-6xl px-6">
-          <h2 class="text-3xl font-semibold mb-14 text-center gradient-text">Features</h2>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-            <div class="feature-card glass rounded-2xl p-6 text-center glow">
-              <div class="w-14 h-14 mx-auto mb-5 flex items-center justify-center glass rounded-xl gradient-accent">
-                <i data-lucide="file-text" class="w-7 h-7 text-white/90"></i>
+        <!-- Hero Preview / Code -->
+        <div class="animate-slide-up opacity-0 [animation-delay:400ms] w-full max-w-3xl mx-auto relative group">
+          <div class="absolute -inset-1 bg-gradient-to-b from-white/20 to-transparent opacity-20 blur-xl rounded-2xl group-hover:opacity-30 transition-opacity"></div>
+          <div class="code-container rounded-xl overflow-hidden text-left relative bg-[#050505]">
+            <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/[0.02]">
+              <div class="flex gap-1.5">
+                <div class="w-2.5 h-2.5 rounded-full bg-white/20"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-white/20"></div>
+                <div class="w-2.5 h-2.5 rounded-full bg-white/20"></div>
               </div>
-              <h3 class="font-semibold mb-2 text-base">Auto-routing</h3>
-              <p class="text-white/60 text-sm leading-relaxed">Single method detects PDFs, images, URLs, or raw text automatically</p>
+              <div class="text-xs text-secondary font-mono">main.py</div>
             </div>
-            <div class="feature-card glass rounded-2xl p-6 text-center glow">
-              <div class="w-14 h-14 mx-auto mb-5 flex items-center justify-center glass rounded-xl gradient-accent">
-                <i data-lucide="network" class="w-7 h-7 text-white/90"></i>
-              </div>
-              <h3 class="font-semibold mb-2 text-base">Multi-provider</h3>
-              <p class="text-white/60 text-sm leading-relaxed">Supports Claude, GPT, Gemini with automatic provider detection</p>
-            </div>
-            <div class="feature-card glass rounded-2xl p-6 text-center glow">
-              <div class="w-14 h-14 mx-auto mb-5 flex items-center justify-center glass rounded-xl gradient-accent">
-                <i data-lucide="sparkles" class="w-7 h-7 text-white/90"></i>
-              </div>
-              <h3 class="font-semibold mb-2 text-base">Structured output</h3>
-              <p class="text-white/60 text-sm leading-relaxed">Pydantic schemas ensure clean, typed data extraction</p>
+            <div class="p-5 overflow-x-auto">
+              <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> pydantic <span class="text-purple-400">import</span> BaseModel
+<span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> OpenXtract
+
+<span class="text-purple-400">class</span> <span class="text-yellow-200">Address</span>(BaseModel):
+    address: <span class="text-blue-300">str</span>
+    city: <span class="text-blue-300">str</span>
+    zip: <span class="text-blue-300">str</span>
+
+ox = OpenXtract(model=<span class="text-green-400">"openai:gpt-5.1"</span>)
+result = ox.extract(<span class="text-green-400">"123 Main St, NY 10001"</span>, Address)
+<span class="text-secondary"># Returns typed Address object automatically</span></code></pre>
             </div>
           </div>
         </div>
       </section>
 
-      <!-- Examples -->
-      <section class="border-t border-white/10 pt-20 md:pt-24 pb-12">
-        <div class="mx-auto max-w-6xl px-6">
-          <h2 class="text-3xl font-semibold mb-10 text-center gradient-text">Examples</h2>
-
-          <!-- Tabs -->
-          <div class="flex justify-center mb-8">
-            <div class="glass p-1 rounded-xl inline-flex">
-              <button data-example="extract" class="ex-tab active px-5 py-2 text-xs font-medium transition-all duration-300 rounded-lg">
-                Text
-              </button>
-              <button data-example="image" class="ex-tab px-5 py-2 text-xs font-medium transition-all duration-300 rounded-lg">
-                Image
-              </button>
-              <button data-example="pdf" class="ex-tab px-5 py-2 text-xs font-medium transition-all duration-300 rounded-lg">
-                PDF
-              </button>
+      <!-- Feature Grid -->
+      <section class="max-w-6xl mx-auto px-6 py-24 border-t border-white/5 mt-20">
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+          <!-- Feature 1 -->
+          <div class="feature-card p-6 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
+              <i data-lucide="zap" class="w-5 h-5"></i>
             </div>
+            <h3 class="text-lg font-semibold mb-2 text-white">Auto-Routing</h3>
+            <p class="text-secondary text-sm leading-relaxed">
+              Smart detection handles PDFs, images, URLs, or raw text automatically without manual configuration.
+            </p>
           </div>
-
-          <!-- Code display -->
-          <div class="glass code-block rounded-2xl overflow-hidden glow-hover">
-            <div class="glass px-5 py-3 border-b border-white/10 flex justify-between items-center">
-              <div class="text-xs font-medium text-white/60 tracking-wide">Python</div>
-              <button data-copy-target="exampleCode" aria-label="Copy example"
-                class="text-white/50 hover:text-white transition-all duration-300 p-2 rounded-lg hover:bg-white/10 hover:scale-110">
-                <i data-lucide="copy" class="copy-icon w-4 h-4"></i>
-                <i data-lucide="check" class="check-icon hidden w-4 h-4"></i>
-              </button>
+          <!-- Feature 2 -->
+          <div class="feature-card p-6 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
+              <i data-lucide="cpu" class="w-5 h-5"></i>
             </div>
-            <div class="p-6">
-              <pre class="text-sm text-white leading-relaxed overflow-x-auto"><code id="exampleCode" class="font-mono"></code></pre>
+            <h3 class="text-lg font-semibold mb-2 text-white">Multi-Provider</h3>
+            <p class="text-secondary text-sm leading-relaxed">
+              Seamlessly switch between Claude, GPT, and Gemini models. We handle the provider specifics for you.
+            </p>
+          </div>
+          <!-- Feature 3 -->
+          <div class="feature-card p-6 rounded-xl border border-white/10 bg-white/[0.02]">
+            <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
+              <i data-lucide="check-circle" class="w-5 h-5"></i>
             </div>
+            <h3 class="text-lg font-semibold mb-2 text-white">Type Safe</h3>
+            <p class="text-secondary text-sm leading-relaxed">
+              Leverage Pydantic schemas to ensure extracted data is validated, typed, and clean every time.
+            </p>
           </div>
         </div>
       </section>
+
+      <!-- Advanced Example Section -->
+      <section class="max-w-6xl mx-auto px-6 py-24 border-t border-white/5">
+         <div class="flex flex-col md:flex-row gap-12 items-center">
+            <div class="flex-1 space-y-6">
+              <h2 class="text-3xl font-bold tracking-tight">Built for developers.</h2>
+              <p class="text-secondary text-lg leading-relaxed">
+                Stop writing regex. Just define your schema and let the LLM do the heavy lifting.
+              </p>
+              
+              <ul class="space-y-4 mt-8">
+                <li class="flex items-center gap-3 text-sm text-white/80">
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Works with local files & URLs
+                </li>
+                <li class="flex items-center gap-3 text-sm text-white/80">
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Automatic OCR for images
+                </li>
+                <li class="flex items-center gap-3 text-sm text-white/80">
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Unified API for all providers
+                </li>
+              </ul>
+            </div>
+            
+            <div class="flex-1 w-full">
+              <div class="code-container rounded-xl overflow-hidden bg-[#050505] shadow-2xl">
+                 <!-- Tabs -->
+                 <div class="flex border-b border-white/5 bg-white/[0.02] px-4 py-3">
+                   <span class="text-xs font-medium text-white">receipt_parser.py</span>
+                 </div>
+                 <div class="p-6 overflow-x-auto">
+<pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">class</span> <span class="text-yellow-200">Invoice</span>(BaseModel):
+    vendor: <span class="text-blue-300">str</span>
+    date: <span class="text-blue-300">str</span>
+    items: <span class="text-blue-300">List</span>[LineItem]
+    total: <span class="text-blue-300">float</span>
+
+<span class="text-secondary"># Initialize with your preferred model</span>
+ox = OpenXtract(model=<span class="text-green-400">"openai:gpt-5.1"</span>)
+
+<span class="text-secondary"># Pass image bytes directly</span>
+<span class="text-purple-400">with</span> <span class="text-blue-300">open</span>(<span class="text-green-400">"invoice.png"</span>, <span class="text-green-400">"rb"</span>) <span class="text-purple-400">as</span> f:
+    data = ox.extract(f.read(), Invoice)
+
+<span class="text-purple-400">print</span>(f<span class="text-green-400">"Vendor: {data.vendor}, Total: ${data.total}"</span>)</code></pre>
+                 </div>
+              </div>
+            </div>
+         </div>
+      </section>
+
     </main>
 
-    <footer class="relative z-10 border-t border-white/10 mt-12">
-      <div class="mx-auto max-w-6xl px-6 py-12">
-        <div class="flex flex-col md:flex-row justify-between items-center text-sm text-white/60">
-          <div class="mb-4 md:mb-0">
-            © <script>document.write(new Date().getFullYear())</script> OpenXtract • MIT License
-          </div>
-          <div class="flex gap-8">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract/issues"
-               class="hover:text-white transition-colors duration-300">Issues</a>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
-               class="hover:text-white transition-colors duration-300">GitHub</a>
-            <a href="https://pypi.org/project/open-xtract/"
-               class="hover:text-white transition-colors duration-300">PyPI</a>
-          </div>
+    <footer class="border-t border-white/5 bg-black py-12">
+      <div class="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
+        <div class="text-xs text-secondary">
+          &copy; <script>document.write(new Date().getFullYear())</script> OpenXtract. MIT License.
+        </div>
+        <div class="flex gap-6">
+           <a href="#" class="text-xs text-secondary hover:text-white transition-colors">Documentation</a>
+           <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="text-xs text-secondary hover:text-white transition-colors">GitHub</a>
+           <a href="https://pypi.org/project/open-xtract/" class="text-xs text-secondary hover:text-white transition-colors">PyPI</a>
         </div>
       </div>
     </footer>
 
     <script>
-      // Initialize Lucide icons after DOM loads
-      document.addEventListener('DOMContentLoaded', () => {
-        lucide.createIcons();
-      });
+      // Initialize icons
+      lucide.createIcons();
 
-      async function copyText(text) {
-        if (navigator.clipboard && window.isSecureContext) {
-          try { await navigator.clipboard.writeText(text); return true; } catch(e) {}
-        }
-        try {
-          const ta = document.createElement('textarea');
-          ta.value = text;
-          ta.setAttribute('readonly', '');
-          ta.style.position = 'fixed';
-          ta.style.top = '-1000px';
-          document.body.appendChild(ta);
-          ta.focus();
-          ta.select();
-          const ok = document.execCommand('copy');
-          document.body.removeChild(ta);
-          return ok;
-        } catch(e) { return false; }
-      }
+      // Copy functionality
+      function copyInstall() {
+        const cmd = "uv add open-xtract";
+        navigator.clipboard.writeText(cmd).then(() => {
+          const toast = document.getElementById('copy-toast');
+          const copyIcon = document.getElementById('copy-icon-install');
+          const checkIcon = document.getElementById('check-icon-install');
 
-      const copyButtons = document.querySelectorAll('[data-copy-target]');
-      copyButtons.forEach((btn) => {
-        const targetId = btn.getAttribute('data-copy-target');
-        const codeEl = document.getElementById(targetId);
-        const copyIconEl = btn.querySelector('.copy-icon');
-        const checkIconEl = btn.querySelector('.check-icon');
-        if (!codeEl) return;
-        btn.addEventListener('click', async () => {
-          if (copyIconEl && checkIconEl) {
-            copyIconEl.classList.add('hidden');
-            checkIconEl.classList.remove('hidden');
-            setTimeout(() => {
-              checkIconEl.classList.add('hidden');
-              copyIconEl.classList.remove('hidden');
-              lucide.createIcons(); // Reinitialize icons
-            }, 2000);
+          // Show checkmark and hide copy icon
+          if (copyIcon && checkIcon) {
+            copyIcon.classList.add('hidden');
+            checkIcon.classList.remove('hidden');
+            lucide.createIcons(); // Reinitialize icons to ensure visibility
           }
-          await copyText(codeEl.textContent.trim());
-        });
-      });
 
-      const examples = {
-        extract: `from pydantic import BaseModel
-from open_xtract import OpenXtract
-
-class Address(BaseModel):
-    address: str
-    city: str
-    state: str
-    zip: str
-
-ox = OpenXtract(model="openai:gpt-5-nano")
-
-# Auto-routes based on input type
-result = ox.extract("This is a test, I live at 123 Main St, Anytown, USA. 12345.", Address)`,
-        image: `from pydantic import BaseModel
-from open_xtract import OpenXtract
-
-class InvoiceData(BaseModel):
-    invoice_number: str
-    date: str
-    total_amount: float
-    vendor: str
-
-ox = OpenXtract(model="openai:gpt-5-nano")
-
-with open("/path/to/receipt.png", "rb") as f:
-    img_bytes = f.read()
-result = ox.extract(img_bytes, InvoiceData)`,
-        pdf: `from pydantic import BaseModel
-from open_xtract import OpenXtract
-
-class InvoiceData(BaseModel):
-    invoice_number: str
-    date: str
-    total_amount: float
-    vendor: str
-
-ox = OpenXtract(model="openai:gpt-5-nano")
-
-with open("/path/to/invoice.pdf", "rb") as f:
-    pdf_bytes = f.read()
-result = ox.extract(pdf_bytes, InvoiceData)`,
-      };
-
-      const codeBox = document.getElementById('exampleCode');
-      const tabButtons = document.querySelectorAll('.ex-tab');
-      function setExample(kind) {
-        if (examples[kind]) {
-          codeBox.style.opacity = '0';
+          toast.style.opacity = '1';
+          toast.style.top = '-3rem'; 
+          
           setTimeout(() => {
-            codeBox.textContent = examples[kind];
-            codeBox.style.transition = 'opacity 0.3s ease';
-            codeBox.style.opacity = '1';
-          }, 150);
-          tabButtons.forEach(b => {
-            b.classList.remove('active', 'bg-white', 'text-black');
-            b.classList.add('text-white/60');
-          });
-          const active = Array.from(tabButtons).find(b => b.getAttribute('data-example') === kind);
-          if (active) {
-            active.classList.add('active', 'bg-white', 'text-black');
-            active.classList.remove('text-white/60');
-          }
-        }
+            toast.style.opacity = '0';
+            toast.style.top = '-2.5rem';
+
+            // Revert icons
+            if (copyIcon && checkIcon) {
+              checkIcon.classList.add('hidden');
+              copyIcon.classList.remove('hidden');
+              lucide.createIcons(); // Reinitialize icons
+            }
+          }, 1500); // Show checkmark for 1.5 seconds
+        });
       }
-      setExample('extract');
-      tabButtons.forEach(btn => {
-        btn.addEventListener('click', () => setExample(btn.getAttribute('data-example')));
-      });
     </script>
 </body>
 </html>
