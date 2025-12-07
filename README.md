@@ -6,7 +6,7 @@
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-**Extract structured data from any document using Claude Code**
+**Extract structured data from any document using Claude**
 
 Define a Pydantic schema, point to a file, get structured data back.
 
@@ -16,16 +16,7 @@ Define a Pydantic schema, point to a file, get structured data back.
 
 ## How It Works
 
-OpenXtract uses the [Claude Agent SDK](https://docs.anthropic.com/en/docs/claude-code) to read documents and extract structured data. You define a Pydantic schema, and Claude extracts data matching that schema from text files, images, or PDFs.
-
-## Prerequisites
-
-Requires [Claude Code](https://docs.anthropic.com/en/docs/claude-code) installed and authenticated:
-
-```bash
-npm install -g @anthropic-ai/claude-code
-claude  # authenticate
-```
+OpenXtract uses the [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/) to read documents and extract structured data. You define a Pydantic schema, and Claude extracts data matching that schema from text files, images, or PDFs.
 
 ## Installation
 
@@ -101,7 +92,7 @@ ox = OpenXtract(
 |--------|-------------|
 | `model` | Claude model to use. Options: `claude-sonnet-4-5`, `claude-opus-4-5`, `claude-haiku-4-5` |
 | `system_prompt` | Custom instructions for extraction behavior |
-| `permission_mode` | Claude Code permission mode. Default: `acceptEdits` |
+| `permission_mode` | Permission mode for tool execution. Default: `acceptEdits` |
 
 ## Supported File Types
 
