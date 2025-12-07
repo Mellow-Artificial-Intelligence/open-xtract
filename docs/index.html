@@ -244,17 +244,18 @@
               <div class="text-xs text-secondary font-mono">main.py</div>
             </div>
             <div class="p-5 overflow-x-auto">
-              <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> pydantic <span class="text-purple-400">import</span> BaseModel
+              <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">import</span> asyncio
+<span class="text-purple-400">from</span> pydantic <span class="text-purple-400">import</span> BaseModel
 <span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> OpenXtract
 
-<span class="text-purple-400">class</span> <span class="text-yellow-200">Address</span>(BaseModel):
-    address: <span class="text-blue-300">str</span>
-    city: <span class="text-blue-300">str</span>
-    zip: <span class="text-blue-300">str</span>
+<span class="text-purple-400">class</span> <span class="text-yellow-200">Invoice</span>(BaseModel):
+    invoice_number: <span class="text-blue-300">str</span>
+    date: <span class="text-blue-300">str</span>
+    total: <span class="text-blue-300">float</span>
 
-ox = OpenXtract(model=<span class="text-green-400">"openai:gpt-5.1"</span>)
-result = ox.extract(<span class="text-green-400">"123 Main St, NY 10001"</span>, Address)
-<span class="text-secondary"># Returns typed Address object automatically</span></code></pre>
+ox = OpenXtract()
+result = asyncio.run(ox.extract(<span class="text-green-400">"invoice.pdf"</span>, Invoice))
+<span class="text-secondary"># Returns typed Invoice with metadata</span></code></pre>
             </div>
           </div>
         </div>
@@ -278,9 +279,9 @@ result = ox.extract(<span class="text-green-400">"123 Main St, NY 10001"</span>,
             <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
               <i data-lucide="cpu" class="w-5 h-5"></i>
             </div>
-            <h3 class="text-lg font-semibold mb-2 text-white">Multi-Provider</h3>
+            <h3 class="text-lg font-semibold mb-2 text-white">Powered by Claude</h3>
             <p class="text-secondary text-sm leading-relaxed">
-              Seamlessly switch between Claude, GPT, and Gemini models. We handle the provider specifics for you.
+              Built on the Claude Agent SDK. Choose between Sonnet, Opus, or Haiku models for the right balance of speed and accuracy.
             </p>
           </div>
           <!-- Feature 3 -->
@@ -307,13 +308,13 @@ result = ox.extract(<span class="text-green-400">"123 Main St, NY 10001"</span>,
               
               <ul class="space-y-4 mt-8">
                 <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Works with local files & URLs
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Works with PDFs, images, and text files
                 </li>
                 <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Automatic OCR for images
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Returns extraction metadata and cost
                 </li>
                 <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Unified API for all providers
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Async-first API design
                 </li>
               </ul>
             </div>
@@ -328,17 +329,16 @@ result = ox.extract(<span class="text-green-400">"123 Main St, NY 10001"</span>,
 <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">class</span> <span class="text-yellow-200">Invoice</span>(BaseModel):
     vendor: <span class="text-blue-300">str</span>
     date: <span class="text-blue-300">str</span>
-    items: <span class="text-blue-300">List</span>[LineItem]
+    items: <span class="text-blue-300">list</span>[LineItem]
     total: <span class="text-blue-300">float</span>
 
-<span class="text-secondary"># Initialize with your preferred model</span>
-ox = OpenXtract(model=<span class="text-green-400">"openai:gpt-5.1"</span>)
+<span class="text-secondary"># Initialize with your preferred Claude model</span>
+ox = OpenXtract(model=<span class="text-green-400">"claude-sonnet-4-5"</span>)
 
-<span class="text-secondary"># Pass image bytes directly</span>
-<span class="text-purple-400">with</span> <span class="text-blue-300">open</span>(<span class="text-green-400">"invoice.png"</span>, <span class="text-green-400">"rb"</span>) <span class="text-purple-400">as</span> f:
-    data = ox.extract(f.read(), Invoice)
+<span class="text-secondary"># Extract from any document</span>
+result = <span class="text-purple-400">await</span> ox.extract(<span class="text-green-400">"invoice.png"</span>, Invoice)
 
-<span class="text-purple-400">print</span>(f<span class="text-green-400">"Vendor: {data.vendor}, Total: ${data.total}"</span>)</code></pre>
+<span class="text-purple-400">print</span>(f<span class="text-green-400">"Vendor: {result.data.vendor}, Cost: ${result.cost_usd:.4f}"</span>)</code></pre>
                  </div>
               </div>
             </div>
