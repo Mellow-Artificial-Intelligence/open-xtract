@@ -1,16 +1,15 @@
-import io
-import os
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
+"""Tests for OpenXtract."""
+
+import json
+import tempfile
+from dataclasses import dataclass
+from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from open_xtract.exceptions import ConfigurationError, InputError, ProviderError
-from open_xtract.main import OpenXtract
-from PIL import Image
 from pydantic import BaseModel
 
-NUM_PARTS_TEXT_PLUS_TWO_IMAGES = 3
-NUM_PARTS_TEXT_PLUS_THREE_IMAGES = 4
+from open_xtract import ExtractionError, InputError, OpenXtract
 
 
 class MockSchema(BaseModel):
@@ -20,367 +19,423 @@ class MockSchema(BaseModel):
     value: int
 
 
-class TestOpenXtract:
-    """Test cases for OpenXtract class."""
+class InvoiceSchema(BaseModel):
+    """Invoice schema for testing."""
 
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
-    def test_init(self):
-        """Test OpenXtract initialization."""
-        extractor = OpenXtract(model="openai:gpt-4")
+    invoice_number: str
+    date: str
+    total: float
+    vendor: str
 
-        assert extractor._model_string == "openai:gpt-4"
-        assert extractor._provider == "openai"
-        assert extractor._model == "gpt-4"
-        assert extractor._api_key == "test-api-key-12345"
-        assert extractor._base_url == "https://api.openai.com/v1"
-        assert extractor._llm is not None
 
-    @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
-    def test_extract_with_mock(self, mock_chat_openai):
-        """Test extract method with mocked LLM."""
-        # Setup mock
-        mock_llm = Mock()
-        mock_response = MockSchema(name="test", value=42)
-        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
-        mock_chat_openai.return_value = mock_llm
+@dataclass
+class FakeResultMessage:
+    """Fake ResultMessage for testing."""
 
-        # Create extractor
-        extractor = OpenXtract(model="openai:gpt-4")
+    is_error: bool = False
+    result: str | None = None
+    structured_output: dict | None = None
+    duration_ms: int = 100
+    duration_api_ms: int = 50
+    num_turns: int = 1
+    session_id: str = "test-session"
+    total_cost_usd: float | None = 0.001
+    usage: dict | None = None
 
-        # Test extract method (text input)
-        text_input = "name: test, value: 42"
-        result = extractor.extract(text_input, MockSchema)
 
-        # Verify the result
-        assert result.name == "test"
-        assert result.value == 42  # noqa: PLR2004
+def create_mock_result_message(result: dict | None = None, is_error: bool = False):
+    """Create a fake ResultMessage."""
+    return FakeResultMessage(
+        is_error=is_error,
+        result=None,
+        structured_output=result,
+    )
 
-        # Verify the mock was called correctly
-        mock_llm.with_structured_output.assert_called_once_with(MockSchema)
-        mock_llm.with_structured_output.return_value.invoke.assert_called_once_with(text_input)
 
-        # Verify ChatOpenAI was created with correct parameters
-        mock_chat_openai.assert_called_once_with(
-            model="gpt-4", base_url="https://api.openai.com/v1", api_key="test-api-key-12345"
+@pytest.fixture
+def text_file(tmp_path: Path) -> Path:
+    """Create a temporary text file."""
+    file = tmp_path / "test.txt"
+    file.write_text("name: test, value: 42")
+    return file
+
+
+@pytest.fixture
+def json_file(tmp_path: Path) -> Path:
+    """Create a temporary JSON file."""
+    file = tmp_path / "test.json"
+    file.write_text('{"name": "json_test", "value": 100}')
+    return file
+
+
+@pytest.fixture
+def image_file(tmp_path: Path) -> Path:
+    """Create a temporary image file (minimal PNG)."""
+    file = tmp_path / "test.png"
+    # Minimal valid PNG (1x1 transparent pixel)
+    png_data = bytes([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,  # PNG signature
+        0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,  # IHDR chunk
+        0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+        0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+        0x89, 0x00, 0x00, 0x00, 0x0A, 0x49, 0x44, 0x41,  # IDAT chunk
+        0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+        0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+        0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,  # IEND chunk
+        0x42, 0x60, 0x82,
+    ])
+    file.write_bytes(png_data)
+    return file
+
+
+@pytest.fixture
+def pdf_file(tmp_path: Path) -> Path:
+    """Create a temporary PDF file (minimal valid PDF)."""
+    file = tmp_path / "test.pdf"
+    # Minimal valid PDF
+    pdf_content = b"""%PDF-1.0
+1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
+2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
+3 0 obj<</Type/Page/MediaBox[0 0 612 792]/Parent 2 0 R>>endobj
+xref
+0 4
+0000000000 65535 f
+0000000009 00000 n
+0000000052 00000 n
+0000000101 00000 n
+trailer<</Size 4/Root 1 0 R>>
+startxref
+168
+%%EOF"""
+    file.write_bytes(pdf_content)
+    return file
+
+
+class TestOpenXtractInit:
+    """Tests for OpenXtract initialization."""
+
+    def test_init_defaults(self):
+        """Test default initialization."""
+        ox = OpenXtract()
+        assert ox._model is None
+        assert ox._permission_mode == "acceptEdits"
+        assert ox._system_prompt is None
+
+    def test_init_with_model(self):
+        """Test initialization with model."""
+        ox = OpenXtract(model="claude-sonnet-4-5")
+        assert ox._model == "claude-sonnet-4-5"
+
+    def test_init_with_system_prompt(self):
+        """Test initialization with system prompt."""
+        ox = OpenXtract(system_prompt="Extract dates in ISO format.")
+        assert ox._system_prompt == "Extract dates in ISO format."
+
+    def test_init_with_all_options(self):
+        """Test initialization with all options."""
+        ox = OpenXtract(
+            model="claude-opus-4-5",
+            permission_mode="bypassPermissions",
+            system_prompt="Be precise.",
+        )
+        assert ox._model == "claude-opus-4-5"
+        assert ox._permission_mode == "bypassPermissions"
+        assert ox._system_prompt == "Be precise."
+
+
+class TestOpenXtractExtract:
+    """Tests for OpenXtract.extract() method."""
+
+    @pytest.mark.asyncio
+    async def test_extract_file_not_found(self):
+        """Test that InputError is raised for non-existent file."""
+        ox = OpenXtract()
+        with pytest.raises(InputError) as exc_info:
+            await ox.extract("/nonexistent/file.txt", MockSchema)
+        assert "File not found" in str(exc_info.value)
+
+    @pytest.mark.asyncio
+    async def test_extract_text_file(self, text_file: Path):
+        """Test extraction from text file."""
+        mock_result = create_mock_result_message({"name": "test", "value": 42})
+
+        async def mock_query(*args, **kwargs):
+            yield mock_result
+
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(text_file, MockSchema)
+
+        assert result.data.name == "test"
+        assert result.data.value == 42
+
+    @pytest.mark.asyncio
+    async def test_extract_json_file(self, json_file: Path):
+        """Test extraction from JSON file."""
+        mock_result = create_mock_result_message({"name": "json_test", "value": 100})
+
+        async def mock_query(*args, **kwargs):
+            yield mock_result
+
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(json_file, MockSchema)
+
+        assert result.data.name == "json_test"
+        assert result.data.value == 100
+
+    @pytest.mark.asyncio
+    async def test_extract_image_file(self, image_file: Path):
+        """Test extraction from image file."""
+        mock_result = create_mock_result_message({"name": "from_image", "value": 99})
+
+        async def mock_query(*args, **kwargs):
+            yield mock_result
+
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(image_file, MockSchema)
+
+        assert result.data.name == "from_image"
+        assert result.data.value == 99
+
+    @pytest.mark.asyncio
+    async def test_extract_pdf_file(self, pdf_file: Path):
+        """Test extraction from PDF file."""
+        mock_result = create_mock_result_message(
+            {"invoice_number": "INV-001", "date": "2025-01-01", "total": 100.0, "vendor": "ACME"}
         )
 
-    @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
-    def test_extract_image_bytes_openai(self, mock_chat_openai):
-        mock_llm = Mock()
-        mock_response = MockSchema(name="img", value=1)
-        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
-        mock_chat_openai.return_value = mock_llm
+        async def mock_query(*args, **kwargs):
+            yield mock_result
 
-        # Patch HumanMessage to capture content
-        class FakeHumanMessage:
-            def __init__(self, content):
-                self.content = content
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(pdf_file, InvoiceSchema)
 
-        with patch("open_xtract.main.HumanMessage", FakeHumanMessage):
-            ox = OpenXtract(model="openai:gpt-4o-mini")
-            # Generate a small PNG in memory
-            buf = io.BytesIO()
-            Image.new("RGB", (2, 2), color=(255, 0, 0)).save(buf, format="PNG")
-            img_bytes = buf.getvalue()
+        assert result.data.invoice_number == "INV-001"
+        assert result.data.date == "2025-01-01"
+        assert result.data.total == 100.0
+        assert result.data.vendor == "ACME"
 
-            result = ox.extract(img_bytes, MockSchema)
+    @pytest.mark.asyncio
+    async def test_extract_with_model(self, text_file: Path):
+        """Test extraction with specific model."""
+        mock_result = create_mock_result_message({"name": "test", "value": 1})
+        captured_options = {}
 
-        assert result.name == "img"
-        assert result.value == 1  # noqa: PLR2004
+        async def mock_query(prompt, options):
+            captured_options.update(vars(options))
+            yield mock_result
 
-        # Validate content structure
-        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
-        assert isinstance(invoke_args[0], list)
-        human_msg = invoke_args[0][0]
-        parts = human_msg.content
-        assert parts[0]["type"] == "text"
-        assert parts[1]["type"] == "image_url"
-        assert parts[1]["image_url"]["url"].startswith("data:image/png;base64,")
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract(model="claude-opus-4-5")
+            await ox.extract(text_file, MockSchema)
 
-    @patch("open_xtract.main.ChatAnthropic")
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-api-key-12345"})
-    def test_extract_image_bytes_anthropic(self, mock_chat_anthropic):
-        mock_llm = Mock()
-        mock_response = MockSchema(name="img", value=2)
-        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
-        mock_chat_anthropic.return_value = mock_llm
+        assert captured_options.get("model") == "claude-opus-4-5"
 
-        class FakeHumanMessage:
-            def __init__(self, content):
-                self.content = content
+    @pytest.mark.asyncio
+    async def test_extract_with_system_prompt(self, text_file: Path):
+        """Test extraction with system prompt."""
+        mock_result = create_mock_result_message({"name": "test", "value": 1})
+        captured_options = {}
 
-        with patch("open_xtract.main.HumanMessage", FakeHumanMessage):
-            ox = OpenXtract(model="anthropic:claude-3-5-sonnet")
-            buf = io.BytesIO()
-            Image.new("RGB", (2, 2), color=(0, 255, 0)).save(buf, format="PNG")
-            img_bytes = buf.getvalue()
+        async def mock_query(prompt, options):
+            captured_options.update(vars(options))
+            yield mock_result
 
-            result = ox.extract(img_bytes, MockSchema)
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract(system_prompt="Extract carefully.")
+            await ox.extract(text_file, MockSchema)
 
-        assert result.value == 2  # noqa: PLR2004
-        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
-        human_msg = invoke_args[0][0]
-        parts = human_msg.content
-        assert parts[0]["type"] == "text"
-        assert parts[1]["type"] == "image"
-        assert parts[1]["source"]["type"] == "base64"
-        assert parts[1]["source"]["media_type"].startswith("image/")
+        assert captured_options.get("system_prompt") == "Extract carefully."
 
-    @patch("open_xtract.main.ChatOpenAI")
-    @patch("open_xtract.main.importlib.import_module")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
-    def test_extract_pdf_bytes_openai(self, mock_import_module, mock_chat_openai):
-        mock_llm = Mock()
-        mock_response = MockSchema(name="pdf", value=3)
-        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
-        mock_chat_openai.return_value = mock_llm
+    @pytest.mark.asyncio
+    async def test_extract_uses_read_tool(self, text_file: Path):
+        """Test that extraction uses the Read tool."""
+        mock_result = create_mock_result_message({"name": "test", "value": 1})
+        captured_options = {}
 
-        # Fake fitz module
-        class FakePixmap:
-            def tobytes(self, fmt):
-                return b"PNGDATA"
+        async def mock_query(prompt, options):
+            captured_options.update(vars(options))
+            yield mock_result
 
-        class FakePage:
-            def get_pixmap(self, dpi):
-                return FakePixmap()
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            await ox.extract(text_file, MockSchema)
 
-        class FakeDoc:
-            def __enter__(self):
-                return self
+        assert "Read" in captured_options.get("allowed_tools", [])
 
-            def __exit__(self, exc_type, exc, tb):
-                return False
+    @pytest.mark.asyncio
+    async def test_extract_uses_output_format(self, text_file: Path):
+        """Test that extraction uses output_format with JSON schema."""
+        mock_result = create_mock_result_message({"name": "test", "value": 1})
+        captured_options = {}
 
-            def __iter__(self):
-                return iter([FakePage(), FakePage()])
+        async def mock_query(prompt, options):
+            captured_options.update(vars(options))
+            yield mock_result
 
-        fake_fitz = SimpleNamespace(open=lambda stream, filetype: FakeDoc())
-        mock_import_module.return_value = fake_fitz
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            await ox.extract(text_file, MockSchema)
 
-        # Construct without __init__ to avoid creating real clients
-        ox = object.__new__(OpenXtract)
-        ox._provider = "openai"
-        ox._llm = mock_llm
-        pdf_bytes = b"%PDF- FAKE"
-        result = ox.extract(pdf_bytes, MockSchema)
+        output_format = captured_options.get("output_format")
+        assert output_format is not None
+        assert output_format["type"] == "json_schema"
+        assert "properties" in output_format["schema"]
 
-        assert result.value == 3  # noqa: PLR2004
-        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
-        human_msg = invoke_args[0][0]
-        parts = human_msg.content
-        # 1 text + 2 images
-        assert len(parts) == NUM_PARTS_TEXT_PLUS_TWO_IMAGES
-        assert parts[1]["type"] == "image_url"
-        assert parts[2]["type"] == "image_url"
 
-    @patch("open_xtract.main.ChatAnthropic")
-    @patch("open_xtract.main.importlib.import_module")
-    @patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-api-key-12345"})
-    def test_extract_pdf_bytes_anthropic(self, mock_import_module, mock_chat_anthropic):
-        mock_llm = Mock()
-        mock_response = MockSchema(name="pdf", value=4)
-        mock_llm.with_structured_output.return_value.invoke.return_value = mock_response
-        mock_chat_anthropic.return_value = mock_llm
+class TestOpenXtractErrors:
+    """Tests for error handling."""
 
-        class FakePixmap:
-            def tobytes(self, fmt):
-                return b"PNGDATA"
+    @pytest.mark.asyncio
+    async def test_extraction_error_on_failure(self, text_file: Path):
+        """Test ExtractionError when extraction fails."""
+        mock_result = FakeResultMessage(is_error=True, result="Something went wrong")
 
-        class FakePage:
-            def get_pixmap(self, dpi):
-                return FakePixmap()
+        async def mock_query(*args, **kwargs):
+            yield mock_result
 
-        class FakeDoc:
-            def __enter__(self):
-                return self
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            with pytest.raises(ExtractionError) as exc_info:
+                await ox.extract(text_file, MockSchema)
+            assert "Extraction failed" in str(exc_info.value)
 
-            def __exit__(self, exc_type, exc, tb):
-                return False
+    @pytest.mark.asyncio
+    async def test_extraction_error_no_result(self, text_file: Path):
+        """Test ExtractionError when no result returned."""
 
-            def __iter__(self):
-                return iter([FakePage(), FakePage(), FakePage()])
+        async def mock_query(*args, **kwargs):
+            # Yield nothing - empty async generator
+            return
+            yield  # noqa: B901 - makes this an async generator
 
-        fake_fitz = SimpleNamespace(open=lambda stream, filetype: FakeDoc())
-        mock_import_module.return_value = fake_fitz
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            with pytest.raises(ExtractionError) as exc_info:
+                await ox.extract(text_file, MockSchema)
+            assert "No result returned" in str(exc_info.value)
 
-        ox = object.__new__(OpenXtract)
-        ox._provider = "anthropic"
-        ox._llm = mock_llm
-        pdf_bytes = b"%PDF- FAKE"
-        result = ox.extract(pdf_bytes, MockSchema)
+    @pytest.mark.asyncio
+    async def test_extraction_error_schema_mismatch(self, text_file: Path):
+        """Test ExtractionError when result doesn't match schema."""
+        mock_result = create_mock_result_message({"wrong_field": "value"})
 
-        assert result.value == 4  # noqa: PLR2004
-        invoke_args, _ = mock_llm.with_structured_output.return_value.invoke.call_args
-        human_msg = invoke_args[0][0]
-        parts = human_msg.content
-        # 1 text + 3 images
-        assert len(parts) == NUM_PARTS_TEXT_PLUS_THREE_IMAGES
-        assert parts[1]["type"] == "image"
-        assert parts[2]["type"] == "image"
-        assert parts[3]["type"] == "image"
+        async def mock_query(*args, **kwargs):
+            yield mock_result
 
-    @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
-    def test_extract_unsupported_bytes_raises(self, mock_chat_openai):
-        mock_chat_openai.return_value = Mock()
-        ox = OpenXtract(model="openai:gpt-4o-mini")
-        with pytest.raises(InputError):
-            ox.extract(b"not-an-image-or-pdf", MockSchema)
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            with pytest.raises(ExtractionError) as exc_info:
+                await ox.extract(text_file, MockSchema)
+            assert "doesn't match schema" in str(exc_info.value)
 
-    @patch("open_xtract.main.ChatOpenAI")
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "test-api-key-12345"})
-    def test_extract_invalid_type_raises(self, mock_chat_openai):
-        mock_chat_openai.return_value = Mock()
-        ox = OpenXtract(model="openai:gpt-4o-mini")
-        with pytest.raises(InputError):
-            ox.extract(123, MockSchema)  # type: ignore[arg-type]
 
-    def test_custom_exceptions_model_string_format(self):
-        """Test ConfigurationError for invalid model string format."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            OpenXtract(model="invalid-format")
+class TestOpenXtractFileTypes:
+    """Tests for different file type support."""
 
-        assert "Provider required when model string doesn't include provider" in str(exc_info.value)
-        assert "Or provide provider parameter" in str(exc_info.value)
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "filename,content",
+        [
+            ("test.txt", "plain text content"),
+            ("test.md", "# Markdown content"),
+            ("test.csv", "name,value\ntest,42"),
+            ("test.xml", "<root><name>test</name></root>"),
+            ("test.html", "<html><body>test</body></html>"),
+            ("test.yaml", "name: test\nvalue: 42"),
+        ],
+    )
+    async def test_text_file_extensions(self, tmp_path: Path, filename: str, content: str):
+        """Test extraction from various text file types."""
+        file = tmp_path / filename
+        file.write_text(content)
 
-    def test_custom_exceptions_unknown_provider(self):
-        """Test ConfigurationError for unknown provider."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            OpenXtract(model="unknown:gpt-4")
+        mock_result = create_mock_result_message({"name": "test", "value": 42})
 
-        assert "Unknown provider 'unknown'" in str(exc_info.value)
-        assert "Available providers:" in str(exc_info.value)
+        async def mock_query(*args, **kwargs):
+            yield mock_result
 
-    def test_custom_exceptions_missing_api_key(self):
-        """Test ProviderError for missing API key."""
-        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
-            with pytest.raises(ProviderError) as exc_info:
-                OpenXtract(model="openai:gpt-4")
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(file, MockSchema)
 
-            assert "API key not found for provider 'openai'" in str(exc_info.value)
-            assert "OPENAI_API_KEY" in str(exc_info.value)
-            assert exc_info.value.provider == "openai"
+        assert result.data.name == "test"
+        assert result.data.value == 42
 
-    @patch.dict("os.environ", {"OPENAI_API_KEY": "short"})
-    def test_custom_exceptions_short_api_key(self):
-        """Test ProviderError for short API key."""
-        with pytest.raises(ProviderError) as exc_info:
-            OpenXtract(model="openai:gpt-4")
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("extension", [".png", ".jpg", ".jpeg", ".gif", ".webp"])
+    async def test_image_file_extensions(self, tmp_path: Path, extension: str):
+        """Test extraction from various image file types."""
+        file = tmp_path / f"test{extension}"
+        # Write minimal binary content (not valid images, but enough for path testing)
+        file.write_bytes(b"\x00" * 10)
 
-        assert "Invalid API key format for provider 'openai'" in str(exc_info.value)
-        assert "Ensure the API key is complete" in str(exc_info.value)
-        assert exc_info.value.provider == "openai"
+        mock_result = create_mock_result_message({"name": "image", "value": 1})
 
-    def test_error_message_suggestions(self):
-        """Test that error messages include helpful suggestions."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            OpenXtract(model=":")
+        async def mock_query(*args, **kwargs):
+            yield mock_result
 
-        error_str = str(exc_info.value)
-        assert "Suggestions:" in error_str
-        assert "Provider cannot be empty" in error_str
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(file, MockSchema)
 
-    @patch("open_xtract.main.ChatOpenAI")
-    def test_init_with_direct_api_key(self, mock_chat_openai):
-        """Test OpenXtract initialization with direct API key."""
-        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
-            extractor = OpenXtract(model="openai:gpt-4", api_key="test-direct-api-key-12345")
+        assert result.data.name == "image"
 
-            assert extractor._provider == "openai"
-            assert extractor._model == "gpt-4"
-            assert extractor._api_key == "test-direct-api-key-12345"
-            assert extractor._base_url == "https://api.openai.com/v1"
-            mock_chat_openai.assert_called_once_with(
-                model="gpt-4",
-                base_url="https://api.openai.com/v1",
-                api_key="test-direct-api-key-12345",
-            )
+    @pytest.mark.asyncio
+    async def test_pdf_file_extension(self, pdf_file: Path):
+        """Test extraction from PDF file."""
+        mock_result = create_mock_result_message({"name": "pdf", "value": 1})
 
-    @patch("open_xtract.main.ChatOpenAI")
-    def test_init_with_direct_base_url(self, mock_chat_openai):
-        """Test OpenXtract initialization with direct base URL."""
-        extractor = OpenXtract(
-            model="openai:gpt-4",
-            api_key="test-api-key-12345",
-            base_url="https://custom-proxy.com/v1",
-        )
+        async def mock_query(*args, **kwargs):
+            yield mock_result
 
-        assert extractor._base_url == "https://custom-proxy.com/v1"
-        mock_chat_openai.assert_called_once_with(
-            model="gpt-4", base_url="https://custom-proxy.com/v1", api_key="test-api-key-12345"
-        )
+        with (
+            patch("open_xtract.main.query", mock_query),
+            patch("open_xtract.main.ResultMessage", FakeResultMessage),
+        ):
+            ox = OpenXtract()
+            result = await ox.extract(pdf_file, MockSchema)
 
-    @patch("open_xtract.main.ChatOpenAI")
-    def test_init_model_without_colon(self, mock_chat_openai):
-        """Test OpenXtract initialization with model without colon and provider parameter."""
-        extractor = OpenXtract(model="gpt-4", provider="openai", api_key="test-api-key-12345")
-
-        assert extractor._provider == "openai"
-        assert extractor._model == "gpt-4"
-        assert extractor._api_key == "test-api-key-12345"
-        mock_chat_openai.assert_called_once_with(
-            model="gpt-4", base_url="https://api.openai.com/v1", api_key="test-api-key-12345"
-        )
-
-    def test_init_model_without_colon_no_provider(self):
-        """Test that model without colon raises error when provider not provided."""
-        with pytest.raises(ConfigurationError) as exc_info:
-            OpenXtract(model="gpt-4")
-
-        assert "Provider required when model string doesn't include provider" in str(exc_info.value)
-
-    @patch("open_xtract.main.ChatOpenAI")
-    def test_api_key_priority_over_env_var(self, mock_chat_openai):
-        """Test that direct API key takes priority over environment variable."""
-        with patch.dict(os.environ, {"OPENAI_API_KEY": "env-api-key-12345"}):
-            extractor = OpenXtract(model="openai:gpt-4", api_key="direct-api-key-12345")
-
-            assert extractor._api_key == "direct-api-key-12345"
-            mock_chat_openai.assert_called_once_with(
-                model="gpt-4", base_url="https://api.openai.com/v1", api_key="direct-api-key-12345"
-            )
-
-    @patch("open_xtract.main.ChatOpenAI")
-    def test_base_url_priority_over_default(self, mock_chat_openai):
-        """Test that direct base URL takes priority over provider map default."""
-        extractor = OpenXtract(
-            model="openai:gpt-4", api_key="test-api-key-12345", base_url="https://custom-url.com/v1"
-        )
-
-        assert extractor._base_url == "https://custom-url.com/v1"
-        mock_chat_openai.assert_called_once_with(
-            model="gpt-4", base_url="https://custom-url.com/v1", api_key="test-api-key-12345"
-        )
-
-    @patch("open_xtract.main.ChatAnthropic")
-    def test_init_anthropic_with_direct_api_key(self, mock_chat_anthropic):
-        """Test Anthropic initialization with direct API key."""
-        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
-            extractor = OpenXtract(
-                model="anthropic:claude-3-5-sonnet", api_key="test-anthropic-key-12345"
-            )
-
-            assert extractor._provider == "anthropic"
-            assert extractor._model == "claude-3-5-sonnet"
-            assert extractor._api_key == "test-anthropic-key-12345"
-            mock_chat_anthropic.assert_called_once_with(
-                model="claude-3-5-sonnet", api_key="test-anthropic-key-12345"
-            )
-
-    @patch("open_xtract.main.ChatOpenAI")
-    def test_model_without_colon_when_api_key_and_base_url_provided(self, mock_chat_openai):
-        """Test that model string can be used without colon when api_key and base_url are provided."""
-        with patch.dict(os.environ, {}, clear=True):  # Clear all environment variables
-            extractor = OpenXtract(
-                model="gpt-4o", api_key="test-api-key-12345", base_url="https://api.openai.com/v1"
-            )
-
-            assert extractor._provider == "openai"
-            assert extractor._model == "gpt-4o"
-            assert extractor._api_key == "test-api-key-12345"
-            assert extractor._base_url == "https://api.openai.com/v1"
-            mock_chat_openai.assert_called_once_with(
-                model="gpt-4o", base_url="https://api.openai.com/v1", api_key="test-api-key-12345"
-            )
+        assert result.data.name == "pdf"

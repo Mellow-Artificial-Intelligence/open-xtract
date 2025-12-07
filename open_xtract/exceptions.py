@@ -16,29 +16,13 @@ class OpenXtractError(Exception):
         return base_msg
 
 
-class ConfigurationError(OpenXtractError):
-    """Raised when there's an error in OpenXtract configuration."""
-
-    pass
-
-
-class ProviderError(OpenXtractError):
-    """Raised when there's an error with the LLM provider."""
-
-    def __init__(
-        self, message: str, provider: str | None = None, suggestions: list[str] | None = None
-    ) -> None:
-        super().__init__(message, suggestions)
-        self.provider = provider
-
-
 class InputError(OpenXtractError):
-    """Raised when there's an error with the input data."""
+    """Raised when there's an error with the input file or data."""
 
     pass
 
 
-class ProcessingError(OpenXtractError):
-    """Raised when there's an error during document processing."""
+class ExtractionError(OpenXtractError):
+    """Raised when extraction fails or output doesn't match schema."""
 
     pass
