@@ -92,7 +92,6 @@ ox = OpenXtract(
 |--------|-------------|
 | `model` | Claude model to use. Options: `claude-sonnet-4-5`, `claude-opus-4-5`, `claude-haiku-4-5` |
 | `system_prompt` | Custom instructions for extraction behavior |
-| `permission_mode` | Permission mode for tool execution. Default: `acceptEdits` |
 
 ## Supported File Types
 
