@@ -1,10 +1,11 @@
-from .exceptions import ConfigurationError, InputError, ProcessingError, ProviderError
-from .main import OpenXtract
+from .exceptions import ExtractionError, InputError, OpenXtractError
+from .main import ExtractionResult, OpenXtract, UsageStats
 
 __all__ = [
     "OpenXtract",
-    "ConfigurationError",
-    "ProviderError",
+    "ExtractionResult",
+    "UsageStats",
+    "OpenXtractError",
     "InputError",
-    "ProcessingError",
+    "ExtractionError",
 ]
