@@ -1,0 +1,107 @@
+name: open-xtract
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: openxtract-postgres
+    environment:
+      POSTGRES_USER: openxtract
+      POSTGRES_PASSWORD: openxtract_dev
+      POSTGRES_DB: openxtract
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openxtract"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: openxtract-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: openxtract
+      MINIO_ROOT_PASSWORD: openxtract_dev
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  redis:
+    image: redis:7-alpine
+    container_name: openxtract-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+      target: development
+    container_name: openxtract-backend
+    environment:
+      DATABASE_URL: postgresql+asyncpg://openxtract:openxtract_dev@postgres:5432/openxtract
+      DATABASE_URL_SYNC: postgresql://openxtract:openxtract_dev@postgres:5432/openxtract
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: openxtract
+      MINIO_SECRET_KEY: openxtract_dev
+      MINIO_BUCKET: openxtract-files
+      MINIO_SECURE: "false"
+      REDIS_URL: redis://redis:6379
+      SECRET_KEY: dev-secret-key-change-in-production
+      ENCRYPTION_KEY: dev-32-byte-encryption-key-here
+      CORS_ORIGINS: http://localhost:3000
+      DEBUG: "true"
+      PYTHONPATH: /app:/app/lib
+    volumes:
+      - ../backend/app:/app/app
+      - ../backend/alembic:/app/alembic
+      - ../../open_xtract:/app/lib/open_xtract
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ../frontend
+      dockerfile: Dockerfile
+      target: development
+    container_name: openxtract-frontend
+    environment:
+      NEXT_PUBLIC_API_URL: http://localhost:8000
+      NEXTAUTH_URL: http://localhost:3000
+      NEXTAUTH_SECRET: dev-nextauth-secret-change-in-production
+    volumes:
+      - ../frontend/src:/app/src
+      - ../frontend/public:/app/public
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  minio_data:
+  redis_data:
