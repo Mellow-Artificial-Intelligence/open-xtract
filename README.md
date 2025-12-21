@@ -1,4 +1,4 @@
-# open-xtract-v2
+# open-xtract
 
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-E92063.svg)](https://docs.pydantic.dev/)
@@ -9,14 +9,14 @@ Extract structured data from documents, images, audio, and video using LLMs.
 ## Installation
 
 ```bash
-uv sync
+uv add open-xtract
 ```
 
 ## Usage
 
 ```python
 from pydantic import BaseModel
-from main import extract
+from open_xtract import extract
 
 class PdfInfo(BaseModel):
     summary: str
@@ -24,11 +24,44 @@ class PdfInfo(BaseModel):
 
 result = extract(
     schema=PdfInfo,
-    model='google-gla:gemini-3-flash-preview',
-    url='https://example.com/document.pdf',
+    model="google-gla:gemini-3-flash-preview",
+    url="https://example.com/document.pdf",
     instructions="return a 2 sentence summary and the primary language of the document",
 )
 print(result)
+```
+
+## Logging
+
+To enable logfire instrumentation for tracing:
+
+```python
+from open_xtract import configure_logging
+
+configure_logging()
+```
+
+## Error Handling
+
+```python
+from open_xtract import (
+    extract,
+    ExtractionError,
+    ModelError,
+    SchemaValidationError,
+    UrlFetchError,
+)
+
+try:
+    result = extract(...)
+except UrlFetchError as e:
+    print(f"Failed to fetch URL: {e}")
+except SchemaValidationError as e:
+    print(f"Output didn't match schema: {e}")
+except ModelError as e:
+    print(f"Model API error: {e}")
+except ExtractionError as e:
+    print(f"Extraction failed: {e}")
 ```
 
 ## Supported Media Types

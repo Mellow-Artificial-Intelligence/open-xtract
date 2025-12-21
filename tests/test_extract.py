@@ -5,13 +5,13 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import AudioUrl, DocumentUrl, ImageUrl, VideoUrl
 
-from main import (
+from open_xtract import (
     ExtractionError,
     SchemaValidationError,
     UrlFetchError,
-    _get_media_url,
     extract,
 )
+from open_xtract._extract import _get_media_url
 
 
 class TestGetMediaUrl:
@@ -98,7 +98,7 @@ class TestExtract:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.return_value = mock_result
 
-        mock_agent = mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mock_agent = mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         result = extract(
             schema=TestSchema,
@@ -125,7 +125,7 @@ class TestExtract:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.return_value = mock_result
 
-        mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         extract(
             schema=TestSchema,
@@ -152,7 +152,7 @@ class TestExtractErrorHandling:
             "Not Found", request=mock_request, response=mock_response
         )
 
-        mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(UrlFetchError) as exc_info:
             extract(
@@ -171,7 +171,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = httpx.ConnectError("Connection refused")
 
-        mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(UrlFetchError) as exc_info:
             extract(
@@ -193,7 +193,7 @@ class TestExtractErrorHandling:
             [{"type": "missing", "loc": ("data",), "input": {}}],
         )
 
-        mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(SchemaValidationError) as exc_info:
             extract(
@@ -212,7 +212,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = RuntimeError("Something unexpected")
 
-        mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(ExtractionError) as exc_info:
             extract(
@@ -232,7 +232,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = original_error
 
-        mocker.patch("main.Agent", return_value=mock_agent_instance)
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(UrlFetchError) as exc_info:
             extract(

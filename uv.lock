@@ -324,9 +324,9 @@ wheels = [
 ]
 
 [[package]]
-name = "open-xtract-v2"
+name = "open-xtract"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
     { name = "pydantic-ai-slim", extra = ["google", "logfire"] },

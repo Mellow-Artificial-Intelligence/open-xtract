@@ -1,42 +1,16 @@
+"""Core extraction functionality."""
+
 import os
 from typing import TypeVar
 from urllib.parse import urlparse
 
 import httpx
-import logfire
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import Agent, AudioUrl, DocumentUrl, ImageUrl, VideoUrl
 
-logfire.configure()
-logfire.instrument_pydantic_ai()
-logfire.instrument_httpx(capture_all=True)
+from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
 
 T = TypeVar("T", bound=BaseModel)
-
-
-class ExtractionError(Exception):
-    """Base exception for extraction errors."""
-
-    pass
-
-
-class ModelError(ExtractionError):
-    """Error communicating with the model API."""
-
-    pass
-
-
-class SchemaValidationError(ExtractionError):
-    """Model output did not match the expected schema."""
-
-    pass
-
-
-class UrlFetchError(ExtractionError):
-    """Error fetching the URL content."""
-
-    pass
-
 
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a"}
@@ -45,6 +19,7 @@ DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".html", ".csv", ".xls",
 
 
 def _get_media_url(url: str):
+    """Determine the appropriate media URL type based on file extension."""
     parsed = urlparse(url)
     ext = os.path.splitext(parsed.path)[1].lower()
 
@@ -59,6 +34,24 @@ def _get_media_url(url: str):
 
 
 def extract(schema: type[T], model: str, url: str, instructions: str) -> T:
+    """
+    Extract structured data from a URL using an LLM.
+
+    Args:
+        schema: A Pydantic model class defining the expected output structure.
+        model: The model identifier (e.g., 'google-gla:gemini-3-flash-preview').
+        url: The URL of the document, image, audio, or video to extract from.
+        instructions: Instructions for the LLM on what to extract.
+
+    Returns:
+        An instance of the schema populated with extracted data.
+
+    Raises:
+        UrlFetchError: If the URL cannot be fetched.
+        SchemaValidationError: If the model output doesn't match the schema.
+        ModelError: If there's an error communicating with the model API.
+        ExtractionError: For other extraction failures.
+    """
     try:
         agent = Agent(model, instructions=instructions, output_type=schema)
         media_url = _get_media_url(url)
@@ -79,18 +72,3 @@ def extract(schema: type[T], model: str, url: str, instructions: str) -> T:
         if "api" in str(type(e).__module__).lower() or "model" in str(e).lower():
             raise ModelError(f"Model API error: {e}") from e
         raise ExtractionError(f"Extraction failed: {e}") from e
-
-
-class PdfInfo(BaseModel):
-    summary: str
-    language: str
-
-
-if __name__ == "__main__":
-    result = extract(
-        schema=PdfInfo,
-        model="google-gla:gemini-3-flash-preview",
-        url="https://storage.googleapis.com/cloud-samples-data/generative-ai/pdf/2403.05530.pdf",
-        instructions="return a 2 sentence summary and the primary language of the document",
-    )
-    print(result)
