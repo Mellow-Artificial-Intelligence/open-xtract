@@ -1,6 +1,10 @@
 # open-xtract
 
+[![PyPI version](https://img.shields.io/pypi/v/open-xtract.svg)](https://pypi.org/project/open-xtract/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/open-xtract.svg)](https://pypi.org/project/open-xtract/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
+[![CI](https://github.com/Mellow-Artificial-Intelligence/open-xtract/actions/workflows/ci.yml/badge.svg)](https://github.com/Mellow-Artificial-Intelligence/open-xtract/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-E92063.svg)](https://docs.pydantic.dev/)
 [![pydantic-ai](https://img.shields.io/badge/pydantic--ai-1.37+-7C3AED.svg)](https://ai.pydantic.dev/)
 
