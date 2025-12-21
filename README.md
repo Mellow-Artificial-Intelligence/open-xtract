@@ -1,4 +1,4 @@
-# open-xtract
+# Open Xtract
 
 [![PyPI version](https://img.shields.io/pypi/v/open-xtract.svg)](https://pypi.org/project/open-xtract/)
 [![PyPI downloads](https://img.shields.io/pypi/dm/open-xtract.svg)](https://pypi.org/project/open-xtract/)
