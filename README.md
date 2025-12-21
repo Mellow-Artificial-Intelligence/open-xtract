@@ -72,3 +72,7 @@ except ExtractionError as e:
 | Images | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.svg` |
 | Audio | `.mp3`, `.wav`, `.ogg`, `.flac`, `.aac`, `.m4a` |
 | Video | `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.wmv` |
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup and guidelines.
