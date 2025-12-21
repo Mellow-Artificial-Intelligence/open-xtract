@@ -208,7 +208,7 @@
 
         <!-- Subtitle -->
         <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-lg md:text-xl text-secondary max-w-2xl mx-auto mb-10 leading-relaxed font-light">
-          An open-source framework to extract clean, typed data from PDFs, images, and text with minimal setup.
+          An open-source framework to extract clean, typed data from documents, images, audio, and video with minimal setup.
         </p>
 
         <!-- CTA Buttons -->
@@ -244,18 +244,21 @@
               <div class="text-xs text-secondary font-mono">main.py</div>
             </div>
             <div class="p-5 overflow-x-auto">
-              <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">import</span> asyncio
-<span class="text-purple-400">from</span> pydantic <span class="text-purple-400">import</span> BaseModel
-<span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> OpenXtract
+              <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> pydantic <span class="text-purple-400">import</span> BaseModel
+<span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> extract
 
 <span class="text-purple-400">class</span> <span class="text-yellow-200">Invoice</span>(BaseModel):
     invoice_number: <span class="text-blue-300">str</span>
     date: <span class="text-blue-300">str</span>
     total: <span class="text-blue-300">float</span>
 
-ox = OpenXtract()
-result = asyncio.run(ox.extract(<span class="text-green-400">"invoice.pdf"</span>, Invoice))
-<span class="text-secondary"># Returns typed Invoice with metadata</span></code></pre>
+result = extract(
+    schema=Invoice,
+    model=<span class="text-green-400">"anthropic:claude-sonnet-4-5"</span>,
+    url=<span class="text-green-400">"https://example.com/invoice.pdf"</span>,
+    instructions=<span class="text-green-400">"Extract invoice details"</span>,
+)
+<span class="text-secondary"># Returns typed Invoice instance</span></code></pre>
             </div>
           </div>
         </div>
@@ -269,9 +272,9 @@ result = asyncio.run(ox.extract(<span class="text-green-400">"invoice.pdf"</span
             <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
               <i data-lucide="zap" class="w-5 h-5"></i>
             </div>
-            <h3 class="text-lg font-semibold mb-2 text-white">Auto-Routing</h3>
+            <h3 class="text-lg font-semibold mb-2 text-white">Multi-Media Support</h3>
             <p class="text-secondary text-sm leading-relaxed">
-              Smart detection handles PDFs, images, URLs, or raw text automatically without manual configuration.
+              Extract from documents, images, audio, and video. Smart detection routes to the right handler automatically.
             </p>
           </div>
           <!-- Feature 2 -->
@@ -279,9 +282,9 @@ result = asyncio.run(ox.extract(<span class="text-green-400">"invoice.pdf"</span
             <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
               <i data-lucide="cpu" class="w-5 h-5"></i>
             </div>
-            <h3 class="text-lg font-semibold mb-2 text-white">Powered by Claude</h3>
+            <h3 class="text-lg font-semibold mb-2 text-white">Any LLM Provider</h3>
             <p class="text-secondary text-sm leading-relaxed">
-              Built on the Claude Agent SDK. Choose between Sonnet, Opus, or Haiku models for the right balance of speed and accuracy.
+              Built on pydantic-ai. Use OpenAI, Anthropic, Google, or any compatible provider with a single model string.
             </p>
           </div>
           <!-- Feature 3 -->
@@ -308,13 +311,13 @@ result = asyncio.run(ox.extract(<span class="text-green-400">"invoice.pdf"</span
               
               <ul class="space-y-4 mt-8">
                 <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Works with PDFs, images, and text files
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Works with documents, images, audio, and video
                 </li>
                 <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Returns extraction metadata and cost
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Structured error handling with typed exceptions
                 </li>
                 <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Async-first API design
+                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Optional logfire instrumentation for tracing
                 </li>
               </ul>
             </div>
@@ -326,19 +329,23 @@ result = asyncio.run(ox.extract(<span class="text-green-400">"invoice.pdf"</span
                    <span class="text-xs font-medium text-white">receipt_parser.py</span>
                  </div>
                  <div class="p-6 overflow-x-auto">
-<pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">class</span> <span class="text-yellow-200">Invoice</span>(BaseModel):
+<pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> extract, UrlFetchError, ModelError
+
+<span class="text-purple-400">class</span> <span class="text-yellow-200">Receipt</span>(BaseModel):
     vendor: <span class="text-blue-300">str</span>
-    date: <span class="text-blue-300">str</span>
     items: <span class="text-blue-300">list</span>[LineItem]
     total: <span class="text-blue-300">float</span>
 
-<span class="text-secondary"># Initialize with your preferred Claude model</span>
-ox = OpenXtract(model=<span class="text-green-400">"claude-sonnet-4-5"</span>)
-
-<span class="text-secondary"># Extract from any document</span>
-result = <span class="text-purple-400">await</span> ox.extract(<span class="text-green-400">"invoice.png"</span>, Invoice)
-
-<span class="text-purple-400">print</span>(f<span class="text-green-400">"Vendor: {result.data.vendor}, Cost: ${result.cost_usd:.4f}"</span>)</code></pre>
+<span class="text-purple-400">try</span>:
+    result = extract(
+        schema=Receipt,
+        model=<span class="text-green-400">"anthropic:claude-sonnet-4-5"</span>,
+        url=<span class="text-green-400">"https://example.com/receipt.jpg"</span>,
+        instructions=<span class="text-green-400">"Extract receipt details"</span>,
+    )
+    <span class="text-purple-400">print</span>(f<span class="text-green-400">"Vendor: {result.vendor}, Total: ${result.total}"</span>)
+<span class="text-purple-400">except</span> UrlFetchError <span class="text-purple-400">as</span> e:
+    <span class="text-purple-400">print</span>(f<span class="text-green-400">"Failed to fetch: {e}"</span>)</code></pre>
                  </div>
               </div>
             </div>
