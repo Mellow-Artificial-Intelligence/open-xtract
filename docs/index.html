@@ -74,15 +74,15 @@
 
     <!-- Navigation -->
     <header class="fixed top-0 w-full z-50 bg-[#fafafa]/80 backdrop-blur-lg border-b border-black/5">
-      <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
-        <a href="#" class="flex items-center gap-2.5">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
+        <a href="#" class="flex items-center gap-2">
           <div class="w-8 h-8 bg-black flex items-center justify-center">
             <span class="text-white font-mono font-bold text-xs">OX</span>
           </div>
-          <span class="font-mono text-sm text-black/80">Open Xtract</span>
+          <span class="font-mono text-sm text-black/80 hidden sm:inline">Open Xtract</span>
         </a>
 
-        <nav class="flex items-center gap-6">
+        <nav class="flex items-center gap-4 sm:gap-6">
           <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
           <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
         </nav>
@@ -93,7 +93,7 @@
 
       <!-- Hero Section -->
       <section class="relative min-h-screen flex items-center justify-center hero-glow pt-14">
-        <div class="max-w-3xl mx-auto px-6 py-24 text-center">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 py-16 sm:py-24 text-center">
 
           <!-- Badge -->
           <div class="animate-slide-up opacity-0 inline-flex items-center gap-2.5 px-3 py-1.5 border border-black/10 bg-white text-xs mb-8">
@@ -104,41 +104,41 @@
           </div>
 
           <!-- Headline -->
-          <h1 class="animate-slide-up opacity-0 [animation-delay:100ms] text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 bg-gradient-to-b from-black to-black/50 bg-clip-text text-transparent">
+          <h1 class="animate-slide-up opacity-0 [animation-delay:100ms] text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-4 sm:mb-6 bg-gradient-to-b from-black to-black/50 bg-clip-text text-transparent">
             Durable Extraction
           </h1>
 
           <!-- Subheadline -->
-          <p class="animate-slide-up opacity-0 [animation-delay:150ms] text-lg text-black/50 mb-3 font-mono">
+          <p class="animate-slide-up opacity-0 [animation-delay:150ms] text-base sm:text-lg text-black/50 mb-2 sm:mb-3 font-mono">
             Extractions that survive failures.
           </p>
-          <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-sm text-black/40 max-w-md mx-auto mb-10">
+          <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-sm text-black/40 max-w-md mx-auto mb-8 sm:mb-10 px-2">
             Extract structured data from documents, images, audio, and video with fault-tolerant workflows powered by Temporal.
           </p>
 
           <!-- CTAs -->
-          <div class="animate-slide-up opacity-0 [animation-delay:250ms] flex flex-col sm:flex-row gap-3 justify-center mb-14">
+          <div class="animate-slide-up opacity-0 [animation-delay:250ms] flex flex-col sm:flex-row gap-3 justify-center mb-10 sm:mb-14">
             <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
                class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
                <i data-lucide="github" class="w-4 h-4"></i>
                View Source
             </a>
-            <button onclick="copyInstall()" class="h-10 px-4 bg-white border border-black/10 text-black/70 font-mono text-sm flex items-center justify-center gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
-              <span class="text-black/30">$</span> uv add open-xtract[temporal]
-              <span id="copy-icon" class="text-black/30 group-hover:text-black/50"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
-              <span id="check-icon" class="hidden text-emerald-500"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
+            <button onclick="copyInstall()" class="h-10 px-3 sm:px-4 bg-white border border-black/10 text-black/70 font-mono text-xs sm:text-sm flex items-center justify-center gap-2 sm:gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
+              <span class="text-black/30">$</span> <span class="truncate">uv add open-xtract[temporal]</span>
+              <span id="copy-icon" class="text-black/30 group-hover:text-black/50 flex-shrink-0"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
+              <span id="check-icon" class="hidden text-emerald-500 flex-shrink-0"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
             </button>
           </div>
 
           <!-- Code Preview -->
           <div class="animate-slide-up opacity-0 [animation-delay:300ms] max-w-lg mx-auto">
             <div class="code-block overflow-hidden text-left">
-              <div class="px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
+              <div class="px-3 sm:px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
                 <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Terminal</span>
                 <span class="font-mono text-[10px] text-black/20">extract.py</span>
               </div>
-              <div class="p-4 overflow-x-auto">
-<pre class="text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
+              <div class="p-3 sm:p-4 overflow-x-auto">
+<pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
 
 <span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
     <span class="text-black/40">schema=</span><span class="text-black/70">Invoice</span>,
@@ -152,7 +152,7 @@
           </div>
 
           <!-- Tech badges -->
-          <div class="animate-slide-up opacity-0 [animation-delay:400ms] flex flex-wrap justify-center gap-4 mt-8 font-mono text-[11px] text-black/30">
+          <div class="animate-slide-up opacity-0 [animation-delay:400ms] flex flex-wrap justify-center gap-3 sm:gap-4 mt-6 sm:mt-8 font-mono text-[10px] sm:text-[11px] text-black/30">
             <span class="flex items-center gap-1.5"><i data-lucide="database" class="w-3 h-3"></i> PostgreSQL</span>
             <span class="flex items-center gap-1.5"><i data-lucide="infinity" class="w-3 h-3"></i> Temporal</span>
             <span class="flex items-center gap-1.5"><i data-lucide="container" class="w-3 h-3"></i> Docker</span>
@@ -162,9 +162,9 @@
       </section>
 
       <!-- Features -->
-      <section class="py-24 border-t border-black/5">
-        <div class="max-w-5xl mx-auto px-6">
-          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+      <section class="py-16 sm:py-24 border-t border-black/5">
+        <div class="max-w-5xl mx-auto px-4 sm:px-6">
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 sm:gap-4">
 
             <div class="p-5 border border-black/10 bg-white">
               <div class="w-9 h-9 border border-black/10 flex items-center justify-center mb-4">
@@ -211,13 +211,13 @@
       </section>
 
       <!-- How it works -->
-      <section class="py-24 border-t border-black/5">
-        <div class="max-w-6xl mx-auto px-6">
-          <div class="grid grid-cols-1 lg:grid-cols-[1fr,1.4fr] gap-12 items-center">
+      <section class="py-16 sm:py-24 border-t border-black/5">
+        <div class="max-w-6xl mx-auto px-4 sm:px-6">
+          <div class="grid grid-cols-1 lg:grid-cols-[1fr,1.4fr] gap-8 lg:gap-12 items-center">
 
             <div>
               <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mb-3">How it works</p>
-              <h2 class="text-3xl font-bold mb-6 text-black/90">
+              <h2 class="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6 text-black/90">
                 One flag for durability
               </h2>
               <p class="text-black/40 mb-8 leading-relaxed">
@@ -250,12 +250,12 @@
             </div>
 
             <div class="code-block overflow-hidden">
-              <div class="px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
+              <div class="px-3 sm:px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
                 <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Terminal</span>
                 <span class="font-mono text-[10px] text-black/20">workflow.py</span>
               </div>
-              <div class="p-4 overflow-x-auto">
-<pre class="text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">pydantic</span> <span class="text-black/40">import</span> <span class="text-black/70">BaseModel</span>
+              <div class="p-3 sm:p-4 overflow-x-auto">
+<pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">pydantic</span> <span class="text-black/40">import</span> <span class="text-black/70">BaseModel</span>
 <span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract, stop_temporal</span>
 
 <span class="text-black/40">class</span> <span class="text-black/80">Report</span>(<span class="text-black/70">BaseModel</span>):
@@ -281,8 +281,8 @@
       </section>
 
       <!-- Supported Formats -->
-      <section class="py-24 border-t border-black/5">
-        <div class="max-w-3xl mx-auto px-6 text-center">
+      <section class="py-16 sm:py-24 border-t border-black/5">
+        <div class="max-w-3xl mx-auto px-4 sm:px-6 text-center">
           <h2 class="font-mono text-sm text-black/50 mb-6">Works with any media</h2>
           <div class="flex flex-wrap justify-center gap-2">
             <span class="inline-flex items-center gap-2 text-sm text-black/50 border border-black/10 bg-white px-4 py-2">
@@ -303,9 +303,9 @@
       </section>
 
       <!-- CTA -->
-      <section class="py-24 border-t border-black/5">
-        <div class="max-w-2xl mx-auto px-6 text-center">
-          <h2 class="text-2xl font-bold mb-4 text-black/90">Get started</h2>
+      <section class="py-16 sm:py-24 border-t border-black/5">
+        <div class="max-w-2xl mx-auto px-4 sm:px-6 text-center">
+          <h2 class="text-xl sm:text-2xl font-bold mb-4 text-black/90">Get started</h2>
           <p class="text-black/40 text-sm mb-8">
             Extract structured data with fault-tolerant workflows.
           </p>
@@ -316,10 +316,10 @@
                <i data-lucide="github" class="w-4 h-4"></i>
                View Source
             </a>
-            <button onclick="copyInstallBasic()" class="h-10 px-4 bg-white border border-black/10 text-black/70 font-mono text-sm flex items-center justify-center gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
+            <button onclick="copyInstallBasic()" class="h-10 px-3 sm:px-4 bg-white border border-black/10 text-black/70 font-mono text-xs sm:text-sm flex items-center justify-center gap-2 sm:gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
               <span class="text-black/30">$</span> uv add open-xtract
-              <span id="copy-icon-basic" class="text-black/30 group-hover:text-black/50"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
-              <span id="check-icon-basic" class="hidden text-emerald-500"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
+              <span id="copy-icon-basic" class="text-black/30 group-hover:text-black/50 flex-shrink-0"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
+              <span id="check-icon-basic" class="hidden text-emerald-500 flex-shrink-0"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
             </button>
           </div>
         </div>
@@ -328,8 +328,8 @@
     </main>
 
     <!-- Footer -->
-    <footer class="py-8 border-t border-black/5">
-      <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+    <footer class="py-6 sm:py-8 border-t border-black/5">
+      <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
         <span class="font-mono text-xs text-black/30">&copy; 2025 Open Xtract. MIT License.</span>
         <div class="flex gap-6">
           <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">GitHub</a>
