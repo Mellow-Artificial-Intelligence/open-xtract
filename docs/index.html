@@ -3,11 +3,11 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Open‑Xtract — Turn documents into structured data</title>
-    <meta name="description" content="Open‑source framework that extracts structured data from documents." />
+    <title>Open Xtract - Durable Data Extraction</title>
+    <meta name="description" content="Extract structured data from any media with fault-tolerant, durable execution powered by Temporal." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <script src="https://unpkg.com/lucide@latest"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
@@ -15,19 +15,12 @@
         theme: {
           extend: {
             fontFamily: {
-              sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-              mono: ['JetBrains Mono', 'SF Mono', 'Monaco', 'Inconsolata', 'Consolas', 'monospace'],
-            },
-            colors: {
-              background: '#000000',
-              surface: '#111111',
-              primary: '#ffffff',
-              secondary: '#888888',
-              accent: '#333333',
+              sans: ['Inter', 'system-ui', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
             },
             animation: {
-              'fade-in': 'fadeIn 0.5s ease-out forwards',
-              'slide-up': 'slideUp 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards',
+              'fade-in': 'fadeIn 0.8s ease-out forwards',
+              'slide-up': 'slideUp 0.6s ease-out forwards',
             },
             keyframes: {
               fadeIn: {
@@ -44,451 +37,344 @@
       }
     </script>
     <style>
-      :root {
-        --grid-color: rgba(255, 255, 255, 0.05);
-      }
-      
       body {
-        background-color: #000;
-        background-image: 
-          linear-gradient(to right, var(--grid-color) 1px, transparent 1px),
-          linear-gradient(to bottom, var(--grid-color) 1px, transparent 1px);
-        background-size: 50px 50px;
-        background-position: center top;
+        background-color: #fafafa;
         min-height: 100vh;
       }
-      
-      /* Subtle radial gradient at the top */
-      body::before {
-        content: '';
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        height: 800px;
-        background: radial-gradient(circle at 50% 0%, rgba(255, 255, 255, 0.08) 0%, transparent 70%);
-        pointer-events: none;
-        z-index: 0;
+
+      /* Subtle grid */
+      .grid-bg {
+        background-image:
+          linear-gradient(to right, rgba(0,0,0,0.03) 1px, transparent 1px),
+          linear-gradient(to bottom, rgba(0,0,0,0.03) 1px, transparent 1px);
+        background-size: 60px 60px;
       }
 
-      /* Fade out grid at bottom */
-      body::after {
-        content: '';
-        position: fixed;
-        bottom: 0;
-        left: 0;
-        right: 0;
-        height: 200px;
-        background: linear-gradient(to bottom, transparent, #000);
-        pointer-events: none;
-        z-index: 0;
+      /* Hero glow */
+      .hero-glow {
+        background: radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0, 0, 0, 0.04), transparent);
       }
 
-      .glass {
-        background: rgba(0, 0, 0, 0.6);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
-        border: 1px solid rgba(255, 255, 255, 0.08);
-      }
+      /* Scrollbar */
+      ::-webkit-scrollbar { width: 6px; }
+      ::-webkit-scrollbar-track { background: #fafafa; }
+      ::-webkit-scrollbar-thumb { background: #ddd; border-radius: 3px; }
 
-      .text-gradient {
-        background: linear-gradient(180deg, #fff 0%, rgba(255, 255, 255, 0.7) 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-      
-      .text-gradient-subtle {
-        background: linear-gradient(180deg, #888 0%, #666 100%);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
+      /* Selection */
+      ::selection { background: rgba(0, 0, 0, 0.1); color: black; }
 
-      /* Custom scrollbar */
-      ::-webkit-scrollbar {
-        width: 8px;
-      }
-      ::-webkit-scrollbar-track {
-        background: #000;
-      }
-      ::-webkit-scrollbar-thumb {
-        background: #333;
-        border-radius: 4px;
-      }
-      ::-webkit-scrollbar-thumb:hover {
-        background: #444;
-      }
-
-      .btn-primary {
+      /* Code block */
+      .code-block {
         background: #fff;
-        color: #000;
-        transition: all 0.2s ease;
-      }
-      .btn-primary:hover {
-        background: #e5e5e5;
-        transform: translateY(-1px);
-      }
-      
-      .btn-secondary {
-        background: #000;
-        color: #fff;
-        border: 1px solid rgba(255, 255, 255, 0.15);
-        transition: all 0.2s ease;
-      }
-      .btn-secondary:hover {
-        background: #111;
-        border-color: #fff;
-        transform: translateY(-1px);
-      }
-
-      .feature-card {
-        transition: border-color 0.3s ease;
-      }
-      .feature-card:hover {
-        border-color: rgba(255, 255, 255, 0.2);
-      }
-      
-      .copy-btn {
-        opacity: 0;
-        transition: opacity 0.2s ease;
-      }
-      .group:hover .copy-btn {
-        opacity: 1;
-      }
-
-      /* Clean code block styling */
-      .code-container {
-        background: #0a0a0a;
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        border: 1px solid rgba(0, 0, 0, 0.1);
       }
     </style>
 </head>
-<body class="text-white font-sans antialiased overflow-x-hidden selection:bg-white/20 selection:text-white">
+<body class="text-black font-sans antialiased grid-bg">
 
-    <!-- Navbar -->
-    <header class="fixed top-0 w-full z-50 border-b border-white/5 backdrop-blur-xl bg-black/50">
-      <div class="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
-        <a href="#" class="flex items-center gap-2 group">
-          <div class="w-8 h-8 rounded-lg bg-white text-black flex items-center justify-center font-bold text-sm group-hover:scale-105 transition-transform">
-            OX
+    <!-- Navigation -->
+    <header class="fixed top-0 w-full z-50 bg-[#fafafa]/80 backdrop-blur-lg border-b border-black/5">
+      <div class="max-w-5xl mx-auto px-6 h-14 flex items-center justify-between">
+        <a href="#" class="flex items-center gap-2.5">
+          <div class="w-8 h-8 bg-black flex items-center justify-center">
+            <span class="text-white font-mono font-bold text-xs">OX</span>
           </div>
-          <span class="font-semibold text-sm tracking-tight text-white/90">OpenXtract</span>
+          <span class="font-mono text-sm text-black/80">Open Xtract</span>
         </a>
-        
-        <nav class="hidden md:flex items-center gap-8 text-sm font-medium">
-          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="text-white/60 hover:text-white transition-colors">GitHub</a>
-          <a href="https://pypi.org/project/open-xtract/" class="text-white/60 hover:text-white transition-colors">PyPI</a>
-        </nav>
 
-        <div class="md:hidden">
-          <!-- Mobile menu button placeholder -->
-          <button class="text-white/60 hover:text-white">
-            <i data-lucide="menu" class="w-5 h-5"></i>
-          </button>
-        </div>
+        <nav class="flex items-center gap-6">
+          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
+        </nav>
       </div>
     </header>
 
-    <main class="relative z-10 pt-32 pb-20">
+    <main>
+
       <!-- Hero Section -->
-      <section class="max-w-5xl mx-auto px-6 text-center flex flex-col items-center">
-        <!-- Badge -->
-        <div class="animate-slide-up opacity-0 inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-white/80 mb-8 hover:bg-white/10 transition-colors cursor-default">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-          v0.2.0 Now Available
-        </div>
+      <section class="relative min-h-screen flex items-center justify-center hero-glow pt-14">
+        <div class="max-w-3xl mx-auto px-6 py-24 text-center">
 
-        <!-- Main Title -->
-        <h1 class="animate-slide-up opacity-0 [animation-delay:100ms] text-5xl md:text-7xl font-bold tracking-tight mb-8 text-gradient max-w-4xl mx-auto leading-[1.1]">
-          Turn documents into <br class="hidden md:block" />
-          structured data.
-        </h1>
-
-        <!-- Subtitle -->
-        <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-lg md:text-xl text-secondary max-w-2xl mx-auto mb-10 leading-relaxed font-light">
-          An open-source framework to extract clean, typed data from documents, images, audio, and video with minimal setup.
-        </p>
-
-        <!-- CTA Buttons -->
-        <div class="animate-slide-up opacity-0 [animation-delay:300ms] flex flex-col sm:flex-row gap-4 mb-16 w-full sm:w-auto">
-          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" 
-             class="btn-primary h-12 px-8 rounded-full flex items-center justify-center gap-2 font-medium text-sm">
-             <i data-lucide="github" class="w-4 h-4"></i>
-             Star on GitHub
-          </a>
-          <div class="relative group cursor-pointer" onclick="copyInstall()">
-            <div class="btn-secondary h-12 px-6 rounded-full flex items-center justify-center gap-3 font-mono text-sm group-hover:border-white/40">
-              <span class="text-secondary">$</span> uv add open-xtract
-              <i data-lucide="copy" id="copy-icon-install" class="w-3.5 h-3.5 text-secondary group-hover:text-white transition-colors"></i>
-              <i data-lucide="check" id="check-icon-install" class="w-3.5 h-3.5 text-emerald-500 hidden"></i>
-            </div>
-            <!-- Toast notification placeholder -->
-            <div id="copy-toast" class="absolute -top-10 left-1/2 -translate-x-1/2 bg-white text-black text-xs font-medium px-2 py-1 rounded shadow-lg opacity-0 transition-opacity pointer-events-none">
-              Copied!
-            </div>
+          <!-- Badge -->
+          <div class="animate-slide-up opacity-0 inline-flex items-center gap-2.5 px-3 py-1.5 border border-black/10 bg-white text-xs mb-8">
+            <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+            <span class="font-mono text-black/50">v0.2.0</span>
+            <span class="text-black/30">|</span>
+            <span class="text-black/50">Durable Execution</span>
           </div>
-        </div>
 
-        <!-- Hero Preview / Code -->
-        <div class="animate-slide-up opacity-0 [animation-delay:400ms] w-full max-w-3xl mx-auto relative group">
-          <div class="absolute -inset-1 bg-gradient-to-b from-white/20 to-transparent opacity-20 blur-xl rounded-2xl group-hover:opacity-30 transition-opacity"></div>
-          <div class="code-container rounded-xl overflow-hidden text-left relative bg-[#050505]">
-            <div class="flex items-center justify-between px-4 py-3 border-b border-white/5 bg-white/[0.02]">
-              <div class="flex gap-1.5">
-                <div class="w-2.5 h-2.5 rounded-full bg-white/20"></div>
-                <div class="w-2.5 h-2.5 rounded-full bg-white/20"></div>
-                <div class="w-2.5 h-2.5 rounded-full bg-white/20"></div>
+          <!-- Headline -->
+          <h1 class="animate-slide-up opacity-0 [animation-delay:100ms] text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-6 bg-gradient-to-b from-black to-black/50 bg-clip-text text-transparent">
+            Durable Extraction
+          </h1>
+
+          <!-- Subheadline -->
+          <p class="animate-slide-up opacity-0 [animation-delay:150ms] text-lg text-black/50 mb-3 font-mono">
+            Extractions that survive failures.
+          </p>
+          <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-sm text-black/40 max-w-md mx-auto mb-10">
+            Extract structured data from documents, images, audio, and video with fault-tolerant workflows powered by Temporal.
+          </p>
+
+          <!-- CTAs -->
+          <div class="animate-slide-up opacity-0 [animation-delay:250ms] flex flex-col sm:flex-row gap-3 justify-center mb-14">
+            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
+               class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
+               <i data-lucide="github" class="w-4 h-4"></i>
+               View Source
+            </a>
+            <button onclick="copyInstall()" class="h-10 px-4 bg-white border border-black/10 text-black/70 font-mono text-sm flex items-center justify-center gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
+              <span class="text-black/30">$</span> uv add open-xtract[temporal]
+              <span id="copy-icon" class="text-black/30 group-hover:text-black/50"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
+              <span id="check-icon" class="hidden text-emerald-500"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
+            </button>
+          </div>
+
+          <!-- Code Preview -->
+          <div class="animate-slide-up opacity-0 [animation-delay:300ms] max-w-lg mx-auto">
+            <div class="code-block overflow-hidden text-left">
+              <div class="px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
+                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Terminal</span>
+                <span class="font-mono text-[10px] text-black/20">extract.py</span>
               </div>
-              <div class="text-xs text-secondary font-mono">main.py</div>
-            </div>
-            <div class="p-5 overflow-x-auto">
-              <pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> pydantic <span class="text-purple-400">import</span> BaseModel
-<span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> extract
+              <div class="p-4 overflow-x-auto">
+<pre class="text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
 
-<span class="text-purple-400">class</span> <span class="text-yellow-200">Invoice</span>(BaseModel):
-    invoice_number: <span class="text-blue-300">str</span>
-    date: <span class="text-blue-300">str</span>
-    total: <span class="text-blue-300">float</span>
-
-result = extract(
-    schema=Invoice,
-    model=<span class="text-green-400">"anthropic:claude-sonnet-4-5"</span>,
-    url=<span class="text-green-400">"https://example.com/invoice.pdf"</span>,
-    instructions=<span class="text-green-400">"Extract invoice details"</span>,
-)
-<span class="text-secondary"># Returns typed Invoice instance</span></code></pre>
+<span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
+    <span class="text-black/40">schema=</span><span class="text-black/70">Invoice</span>,
+    <span class="text-black/40">model=</span><span class="text-emerald-600">"openai:gpt-5.2"</span>,
+    <span class="text-black/40">url=</span><span class="text-emerald-600">"https://example.com/doc.pdf"</span>,
+    <span class="text-black/40">instructions=</span><span class="text-emerald-600">"Extract invoice data"</span>,
+    <span class="text-black/70">durable</span><span class="text-black/40">=</span><span class="text-orange-500">True</span>,
+)</code></pre>
+              </div>
             </div>
+          </div>
+
+          <!-- Tech badges -->
+          <div class="animate-slide-up opacity-0 [animation-delay:400ms] flex flex-wrap justify-center gap-4 mt-8 font-mono text-[11px] text-black/30">
+            <span class="flex items-center gap-1.5"><i data-lucide="database" class="w-3 h-3"></i> PostgreSQL</span>
+            <span class="flex items-center gap-1.5"><i data-lucide="infinity" class="w-3 h-3"></i> Temporal</span>
+            <span class="flex items-center gap-1.5"><i data-lucide="container" class="w-3 h-3"></i> Docker</span>
+            <span class="flex items-center gap-1.5"><i data-lucide="shield-check" class="w-3 h-3"></i> Pydantic</span>
           </div>
         </div>
       </section>
 
-      <!-- Feature Grid -->
-      <section class="max-w-6xl mx-auto px-6 py-24 border-t border-white/5 mt-20">
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
-          <!-- Feature 1 -->
-          <div class="feature-card p-6 rounded-xl border border-white/10 bg-white/[0.02]">
-            <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
-              <i data-lucide="zap" class="w-5 h-5"></i>
-            </div>
-            <h3 class="text-lg font-semibold mb-2 text-white">Multi-Media Support</h3>
-            <p class="text-secondary text-sm leading-relaxed">
-              Extract from documents, images, audio, and video. Smart detection routes to the right handler automatically.
-            </p>
-          </div>
-          <!-- Feature 2 -->
-          <div class="feature-card p-6 rounded-xl border border-white/10 bg-white/[0.02]">
-            <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
-              <i data-lucide="cpu" class="w-5 h-5"></i>
-            </div>
-            <h3 class="text-lg font-semibold mb-2 text-white">Any LLM Provider</h3>
-            <p class="text-secondary text-sm leading-relaxed">
-              Built on pydantic-ai. Use OpenAI, Anthropic, Google, or any compatible provider with a single model string.
-            </p>
-          </div>
-          <!-- Feature 3 -->
-          <div class="feature-card p-6 rounded-xl border border-white/10 bg-white/[0.02]">
-            <div class="w-10 h-10 rounded-lg bg-white/5 border border-white/10 flex items-center justify-center mb-4 text-white">
-              <i data-lucide="check-circle" class="w-5 h-5"></i>
-            </div>
-            <h3 class="text-lg font-semibold mb-2 text-white">Type Safe</h3>
-            <p class="text-secondary text-sm leading-relaxed">
-              Leverage Pydantic schemas to ensure extracted data is validated, typed, and clean every time.
-            </p>
-          </div>
-        </div>
-      </section>
+      <!-- Features -->
+      <section class="py-24 border-t border-black/5">
+        <div class="max-w-5xl mx-auto px-6">
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
 
-      <!-- Advanced Example Section -->
-      <section class="max-w-6xl mx-auto px-6 py-24 border-t border-white/5">
-         <div class="flex flex-col md:flex-row gap-12 items-center">
-            <div class="flex-1 space-y-6">
-              <h2 class="text-3xl font-bold tracking-tight">Built for developers.</h2>
-              <p class="text-secondary text-lg leading-relaxed">
-                Stop writing regex. Just define your schema and let the LLM do the heavy lifting.
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="w-9 h-9 border border-black/10 flex items-center justify-center mb-4">
+                <i data-lucide="shield" class="w-4 h-4 text-black/50"></i>
+              </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Fault Tolerant</h3>
+              <p class="text-sm text-black/40 leading-relaxed">
+                Workflows survive crashes and restarts with automatic retries.
               </p>
-              
-              <ul class="space-y-4 mt-8">
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Works with documents, images, audio, and video
-                </li>
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Structured error handling with typed exceptions
-                </li>
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="check" class="w-4 h-4 text-white"></i> Optional logfire instrumentation for tracing
-                </li>
-              </ul>
             </div>
-            
-            <div class="flex-1 w-full">
-              <div class="code-container rounded-xl overflow-hidden bg-[#050505] shadow-2xl">
-                 <!-- Tabs -->
-                 <div class="flex border-b border-white/5 bg-white/[0.02] px-4 py-3">
-                   <span class="text-xs font-medium text-white">receipt_parser.py</span>
-                 </div>
-                 <div class="p-6 overflow-x-auto">
-<pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> extract, UrlFetchError, ModelError
 
-<span class="text-purple-400">class</span> <span class="text-yellow-200">Receipt</span>(BaseModel):
-    vendor: <span class="text-blue-300">str</span>
-    items: <span class="text-blue-300">list</span>[LineItem]
-    total: <span class="text-blue-300">float</span>
-
-<span class="text-purple-400">try</span>:
-    result = extract(
-        schema=Receipt,
-        model=<span class="text-green-400">"anthropic:claude-sonnet-4-5"</span>,
-        url=<span class="text-green-400">"https://example.com/receipt.jpg"</span>,
-        instructions=<span class="text-green-400">"Extract receipt details"</span>,
-    )
-    <span class="text-purple-400">print</span>(f<span class="text-green-400">"Vendor: {result.vendor}, Total: ${result.total}"</span>)
-<span class="text-purple-400">except</span> UrlFetchError <span class="text-purple-400">as</span> e:
-    <span class="text-purple-400">print</span>(f<span class="text-green-400">"Failed to fetch: {e}"</span>)</code></pre>
-                 </div>
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="w-9 h-9 border border-black/10 flex items-center justify-center mb-4">
+                <i data-lucide="files" class="w-4 h-4 text-black/50"></i>
               </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Multi-Media</h3>
+              <p class="text-sm text-black/40 leading-relaxed">
+                Documents, images, audio, and video with smart routing.
+              </p>
             </div>
-         </div>
+
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="w-9 h-9 border border-black/10 flex items-center justify-center mb-4">
+                <i data-lucide="cpu" class="w-4 h-4 text-black/50"></i>
+              </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Any LLM</h3>
+              <p class="text-sm text-black/40 leading-relaxed">
+                OpenAI, Anthropic, Google. One model string, zero config.
+              </p>
+            </div>
+
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="w-9 h-9 border border-black/10 flex items-center justify-center mb-4">
+                <i data-lucide="check-circle" class="w-4 h-4 text-black/50"></i>
+              </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Type Safe</h3>
+              <p class="text-sm text-black/40 leading-relaxed">
+                Pydantic schemas ensure validated, typed output every time.
+              </p>
+            </div>
+
+          </div>
+        </div>
       </section>
 
-      <!-- Durable Execution Section -->
-      <section class="max-w-6xl mx-auto px-6 py-24 border-t border-white/5">
-         <div class="flex flex-col md:flex-row gap-12 items-center">
-            <div class="flex-1 w-full order-2 md:order-1">
-              <div class="code-container rounded-xl overflow-hidden bg-[#050505] shadow-2xl">
-                 <!-- Tabs -->
-                 <div class="flex border-b border-white/5 bg-white/[0.02] px-4 py-3">
-                   <span class="text-xs font-medium text-white">durable_extract.py</span>
-                 </div>
-                 <div class="p-6 overflow-x-auto">
-<pre class="text-sm font-mono leading-relaxed"><code class="language-python"><span class="text-purple-400">from</span> open_xtract <span class="text-purple-400">import</span> extract, stop_temporal
+      <!-- How it works -->
+      <section class="py-24 border-t border-black/5">
+        <div class="max-w-6xl mx-auto px-6">
+          <div class="grid grid-cols-1 lg:grid-cols-[1fr,1.4fr] gap-12 items-center">
 
-<span class="text-secondary"># Just add durable=True for automatic</span>
-<span class="text-secondary"># Temporal workflow execution</span>
-result = extract(
-    schema=Article,
-    model=<span class="text-green-400">"openai:gpt-5.2"</span>,
-    url=<span class="text-green-400">"https://example.com/report.pdf"</span>,
-    instructions=<span class="text-green-400">"Extract article info"</span>,
-    durable=<span class="text-orange-400">True</span>,
-    temporal_ui=<span class="text-orange-400">True</span>,  <span class="text-secondary"># Optional, default True</span>
-)
-<span class="text-secondary"># Temporal UI: http://localhost:8080</span>
-
-<span class="text-secondary"># Optional: clean up when done</span>
-stop_temporal()</code></pre>
-                 </div>
-              </div>
-            </div>
-
-            <div class="flex-1 space-y-6 order-1 md:order-2">
-              <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full border border-white/10 bg-white/5 text-xs font-medium text-white/80">
-                <i data-lucide="infinity" class="w-3 h-3"></i>
-                Powered by Temporal
-              </div>
-              <h2 class="text-3xl font-bold tracking-tight">Durable Execution.</h2>
-              <p class="text-secondary text-lg leading-relaxed">
-                Long-running extractions that survive failures. Just add <code class="text-white/80 bg-white/10 px-1.5 py-0.5 rounded text-sm font-mono">durable=True</code> and let Temporal handle the rest.
+            <div>
+              <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mb-3">How it works</p>
+              <h2 class="text-3xl font-bold mb-6 text-black/90">
+                One flag for durability
+              </h2>
+              <p class="text-black/40 mb-8 leading-relaxed">
+                Add <code class="font-mono text-black/70 bg-black/5 px-1.5 py-0.5 text-sm">durable=True</code> and Open Xtract provisions Temporal via Docker automatically.
               </p>
 
-              <ul class="space-y-4 mt-8">
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="container" class="w-4 h-4 text-white"></i> Auto-starts Temporal via Docker
-                </li>
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="database" class="w-4 h-4 text-white"></i> PostgreSQL for persistent state
-                </li>
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="layout-dashboard" class="w-4 h-4 text-white"></i> Optional Temporal UI for monitoring
-                </li>
-                <li class="flex items-center gap-3 text-sm text-white/80">
-                  <i data-lucide="refresh-cw" class="w-4 h-4 text-white"></i> Automatic retries and recovery
-                </li>
-              </ul>
-
-              <div class="pt-4">
-                <div class="relative group cursor-pointer inline-block" onclick="copyTemporalInstall()">
-                  <div class="btn-secondary h-10 px-5 rounded-full flex items-center justify-center gap-3 font-mono text-xs group-hover:border-white/40">
-                    <span class="text-secondary">$</span> uv add open-xtract[temporal]
-                    <i data-lucide="copy" id="copy-icon-temporal" class="w-3 h-3 text-secondary group-hover:text-white transition-colors"></i>
-                    <i data-lucide="check" id="check-icon-temporal" class="w-3 h-3 text-emerald-500 hidden"></i>
+              <div class="space-y-5">
+                <div class="flex gap-4">
+                  <div class="w-7 h-7 border border-black/10 flex items-center justify-center font-mono text-xs text-black/40 flex-shrink-0">1</div>
+                  <div>
+                    <h4 class="font-mono text-sm text-black/70 mb-1">Docker Auto-Start</h4>
+                    <p class="text-sm text-black/40">Temporal and PostgreSQL spin up when needed.</p>
+                  </div>
+                </div>
+                <div class="flex gap-4">
+                  <div class="w-7 h-7 border border-black/10 flex items-center justify-center font-mono text-xs text-black/40 flex-shrink-0">2</div>
+                  <div>
+                    <h4 class="font-mono text-sm text-black/70 mb-1">Workflow Execution</h4>
+                    <p class="text-sm text-black/40">Extractions run as durable workflows with checkpointing.</p>
+                  </div>
+                </div>
+                <div class="flex gap-4">
+                  <div class="w-7 h-7 border border-black/10 flex items-center justify-center font-mono text-xs text-black/40 flex-shrink-0">3</div>
+                  <div>
+                    <h4 class="font-mono text-sm text-black/70 mb-1">Retry & Recovery</h4>
+                    <p class="text-sm text-black/40">Failures retry automatically. State persists across restarts.</p>
                   </div>
                 </div>
               </div>
             </div>
-         </div>
+
+            <div class="code-block overflow-hidden">
+              <div class="px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
+                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Terminal</span>
+                <span class="font-mono text-[10px] text-black/20">workflow.py</span>
+              </div>
+              <div class="p-4 overflow-x-auto">
+<pre class="text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">pydantic</span> <span class="text-black/40">import</span> <span class="text-black/70">BaseModel</span>
+<span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract, stop_temporal</span>
+
+<span class="text-black/40">class</span> <span class="text-black/80">Report</span>(<span class="text-black/70">BaseModel</span>):
+    <span class="text-black/50">title</span>: <span class="text-black/50">str</span>
+    <span class="text-black/50">findings</span>: <span class="text-black/50">list</span>[<span class="text-black/50">str</span>]
+    <span class="text-black/50">severity</span>: <span class="text-black/50">int</span>
+
+<span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
+    <span class="text-black/40">schema=</span><span class="text-black/70">Report</span>,
+    <span class="text-black/40">model=</span><span class="text-emerald-600">"openai:gpt-5.2"</span>,
+    <span class="text-black/40">url=</span><span class="text-emerald-600">"https://example.com/report.pdf"</span>,
+    <span class="text-black/40">instructions=</span><span class="text-emerald-600">"Extract findings"</span>,
+    <span class="text-black/70">durable</span><span class="text-black/40">=</span><span class="text-orange-500">True</span>,
+    <span class="text-black/70">temporal_ui</span><span class="text-black/40">=</span><span class="text-orange-500">True</span>,
+)
+
+<span class="text-black/70">stop_temporal</span>()</code></pre>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </section>
+
+      <!-- Supported Formats -->
+      <section class="py-24 border-t border-black/5">
+        <div class="max-w-3xl mx-auto px-6 text-center">
+          <h2 class="font-mono text-sm text-black/50 mb-6">Works with any media</h2>
+          <div class="flex flex-wrap justify-center gap-2">
+            <span class="inline-flex items-center gap-2 text-sm text-black/50 border border-black/10 bg-white px-4 py-2">
+              <i data-lucide="file-text" class="w-4 h-4"></i> Documents
+            </span>
+            <span class="inline-flex items-center gap-2 text-sm text-black/50 border border-black/10 bg-white px-4 py-2">
+              <i data-lucide="image" class="w-4 h-4"></i> Images
+            </span>
+            <span class="inline-flex items-center gap-2 text-sm text-black/50 border border-black/10 bg-white px-4 py-2">
+              <i data-lucide="volume-2" class="w-4 h-4"></i> Audio
+            </span>
+            <span class="inline-flex items-center gap-2 text-sm text-black/50 border border-black/10 bg-white px-4 py-2">
+              <i data-lucide="video" class="w-4 h-4"></i> Video
+            </span>
+          </div>
+          <p class="font-mono text-xs text-black/30 mt-5">PDF, DOCX, PNG, JPG, MP3, MP4, and 20+ formats</p>
+        </div>
+      </section>
+
+      <!-- CTA -->
+      <section class="py-24 border-t border-black/5">
+        <div class="max-w-2xl mx-auto px-6 text-center">
+          <h2 class="text-2xl font-bold mb-4 text-black/90">Get started</h2>
+          <p class="text-black/40 text-sm mb-8">
+            Extract structured data with fault-tolerant workflows.
+          </p>
+
+          <div class="flex flex-col sm:flex-row gap-3 justify-center">
+            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
+               class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
+               <i data-lucide="github" class="w-4 h-4"></i>
+               View Source
+            </a>
+            <button onclick="copyInstallBasic()" class="h-10 px-4 bg-white border border-black/10 text-black/70 font-mono text-sm flex items-center justify-center gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
+              <span class="text-black/30">$</span> uv add open-xtract
+              <span id="copy-icon-basic" class="text-black/30 group-hover:text-black/50"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
+              <span id="check-icon-basic" class="hidden text-emerald-500"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
+            </button>
+          </div>
+        </div>
       </section>
 
     </main>
 
-    <footer class="border-t border-white/5 bg-black py-12">
-      <div class="max-w-6xl mx-auto px-6 flex flex-col md:flex-row justify-between items-center gap-6">
-        <div class="text-xs text-secondary">
-          &copy; <script>document.write(new Date().getFullYear())</script> OpenXtract. MIT License.
-        </div>
+    <!-- Footer -->
+    <footer class="py-8 border-t border-black/5">
+      <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
+        <span class="font-mono text-xs text-black/30">&copy; 2025 Open Xtract. MIT License.</span>
         <div class="flex gap-6">
-           <a href="#" class="text-xs text-secondary hover:text-white transition-colors">Documentation</a>
-           <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="text-xs text-secondary hover:text-white transition-colors">GitHub</a>
-           <a href="https://pypi.org/project/open-xtract/" class="text-xs text-secondary hover:text-white transition-colors">PyPI</a>
+          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">PyPI</a>
         </div>
       </div>
     </footer>
 
     <script>
-      // Initialize icons
       lucide.createIcons();
 
-      // Copy functionality
+      function copyToClipboard(text) {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          return navigator.clipboard.writeText(text);
+        }
+        // Fallback for older browsers or file:// protocol
+        const textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.style.position = 'fixed';
+        textarea.style.opacity = '0';
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        return Promise.resolve();
+      }
+
       function copyInstall() {
-        const cmd = "uv add open-xtract";
-        navigator.clipboard.writeText(cmd).then(() => {
-          const toast = document.getElementById('copy-toast');
-          const copyIcon = document.getElementById('copy-icon-install');
-          const checkIcon = document.getElementById('check-icon-install');
-
-          // Show checkmark and hide copy icon
-          if (copyIcon && checkIcon) {
-            copyIcon.classList.add('hidden');
-            checkIcon.classList.remove('hidden');
-            lucide.createIcons(); // Reinitialize icons to ensure visibility
-          }
-
-          toast.style.opacity = '1';
-          toast.style.top = '-3rem';
-
+        copyToClipboard("uv add open-xtract[temporal]").then(() => {
+          document.getElementById('copy-icon').classList.add('hidden');
+          document.getElementById('check-icon').classList.remove('hidden');
           setTimeout(() => {
-            toast.style.opacity = '0';
-            toast.style.top = '-2.5rem';
-
-            // Revert icons
-            if (copyIcon && checkIcon) {
-              checkIcon.classList.add('hidden');
-              copyIcon.classList.remove('hidden');
-              lucide.createIcons(); // Reinitialize icons
-            }
-          }, 1500); // Show checkmark for 1.5 seconds
+            document.getElementById('check-icon').classList.add('hidden');
+            document.getElementById('copy-icon').classList.remove('hidden');
+          }, 1500);
         });
       }
 
-      function copyTemporalInstall() {
-        const cmd = "uv add open-xtract[temporal]";
-        navigator.clipboard.writeText(cmd).then(() => {
-          const copyIcon = document.getElementById('copy-icon-temporal');
-          const checkIcon = document.getElementById('check-icon-temporal');
-
-          if (copyIcon && checkIcon) {
-            copyIcon.classList.add('hidden');
-            checkIcon.classList.remove('hidden');
-            lucide.createIcons();
-          }
-
+      function copyInstallBasic() {
+        copyToClipboard("uv add open-xtract").then(() => {
+          document.getElementById('copy-icon-basic').classList.add('hidden');
+          document.getElementById('check-icon-basic').classList.remove('hidden');
           setTimeout(() => {
-            if (copyIcon && checkIcon) {
-              checkIcon.classList.add('hidden');
-              copyIcon.classList.remove('hidden');
-              lucide.createIcons();
-            }
+            document.getElementById('check-icon-basic').classList.add('hidden');
+            document.getElementById('copy-icon-basic').classList.remove('hidden');
           }, 1500);
         });
       }
