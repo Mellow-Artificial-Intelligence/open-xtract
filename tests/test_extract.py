@@ -7,8 +7,10 @@ from pydantic_ai import AudioUrl, DocumentUrl, ImageUrl, VideoUrl
 
 from open_xtract import (
     ExtractionError,
+    ModelError,
     SchemaValidationError,
     UrlFetchError,
+    configure_logging,
     extract,
 )
 from open_xtract._extract import _get_media_url
@@ -243,3 +245,40 @@ class TestExtractErrorHandling:
             )
 
         assert exc_info.value.__cause__ is original_error
+
+    def test_model_error_raised_for_api_module_exception(self, mocker):
+        class TestSchema(BaseModel):
+            data: str
+
+        class FakeApiError(Exception):
+            pass
+
+        FakeApiError.__module__ = "some.api.module"
+
+        mock_agent_instance = MagicMock()
+        mock_agent_instance.run_sync.side_effect = FakeApiError("API failed")
+
+        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+
+        with pytest.raises(ModelError) as exc_info:
+            extract(
+                schema=TestSchema,
+                model="test-model",
+                url="https://example.com/doc.pdf",
+                instructions="test",
+            )
+
+        assert "API failed" in str(exc_info.value)
+
+
+class TestConfigureLogging:
+    def test_configure_logging_calls_logfire(self, mocker):
+        mock_configure = mocker.patch("open_xtract.logfire.configure")
+        mock_instrument_pydantic = mocker.patch("open_xtract.logfire.instrument_pydantic_ai")
+        mock_instrument_httpx = mocker.patch("open_xtract.logfire.instrument_httpx")
+
+        configure_logging()
+
+        mock_configure.assert_called_once()
+        mock_instrument_pydantic.assert_called_once()
+        mock_instrument_httpx.assert_called_once_with(capture_all=True)
