@@ -28,6 +28,7 @@ Homepage = "https://github.com/Mellow-Artificial-Intelligence/open-xtract"
 Documentation = "https://mellow-artificial-intelligence.github.io/open-xtract/"
 Repository = "https://github.com/Mellow-Artificial-Intelligence/open-xtract"
 Issues = "https://github.com/Mellow-Artificial-Intelligence/open-xtract/issues"
+Changelog = "https://github.com/Mellow-Artificial-Intelligence/open-xtract/blob/main/CHANGELOG.md"
 
 [build-system]
 requires = ["hatchling"]
