@@ -29,7 +29,7 @@ class PdfInfo(BaseModel):
 
 result = extract(
     schema=PdfInfo,
-    model="google-gla:gemini-3-flash-preview",
+    model="openai-responses:gpt-5.2",
     url="https://example.com/document.pdf",
     instructions="return a 2 sentence summary and the primary language of the document",
 )
@@ -82,7 +82,7 @@ from open_xtract import extract, stop_temporal
 
 result = extract(
     schema=PdfInfo,
-    model="openai:gpt-5.2",
+    model="openai-responses:gpt-5.2",
     url="https://example.com/document.pdf",
     instructions="Extract document info",
     durable=True,  # enables Temporal
@@ -107,6 +107,10 @@ When `durable=True`:
 | Images | `.jpg`, `.jpeg`, `.png`, `.gif`, `.webp`, `.bmp`, `.svg` |
 | Audio | `.mp3`, `.wav`, `.ogg`, `.flac`, `.aac`, `.m4a` |
 | Video | `.mp4`, `.mov`, `.avi`, `.mkv`, `.webm`, `.wmv` |
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history.
 
 ## Contributing
 
