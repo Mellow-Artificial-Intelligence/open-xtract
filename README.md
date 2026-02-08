@@ -29,7 +29,7 @@ class PdfInfo(BaseModel):
 
 result = extract(
     schema=PdfInfo,
-    model="openai-responses:gpt-5.2",
+    model="anthropic:claude-sonnet-4-5",
     url="https://example.com/document.pdf",
     instructions="return a 2 sentence summary and the primary language of the document",
 )
@@ -82,7 +82,7 @@ from open_xtract import extract, stop_temporal
 
 result = extract(
     schema=PdfInfo,
-    model="openai-responses:gpt-5.2",
+    model="anthropic:claude-sonnet-4-5",
     url="https://example.com/document.pdf",
     instructions="Extract document info",
     durable=True,  # enables Temporal

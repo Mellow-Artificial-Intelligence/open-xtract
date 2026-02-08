@@ -101,7 +101,7 @@ async def run_durable_extraction(
 
     Args:
         schema: A Pydantic model class defining the expected output structure.
-        model: The model identifier (e.g., 'google-gla:gemini-3-flash-preview').
+        model: The model identifier (e.g., 'anthropic:claude-sonnet-4-5').
         url: The URL of the document, image, audio, or video to extract from.
         instructions: Instructions for the LLM on what to extract.
         temporal_ui: If True, start the Temporal UI alongside the server.

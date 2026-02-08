@@ -48,7 +48,7 @@ def extract(
 
     Args:
         schema: A Pydantic model class defining the expected output structure.
-        model: The model identifier (e.g., 'google-gla:gemini-3-flash-preview').
+        model: The model identifier (e.g., 'anthropic:claude-sonnet-4-5').
         url: The URL of the document, image, audio, or video to extract from.
         instructions: Instructions for the LLM on what to extract.
         durable: If True, run extraction with Temporal for durable execution.

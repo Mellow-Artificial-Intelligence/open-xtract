@@ -24,7 +24,7 @@ def main():
 
     result = extract(
         schema=Article,
-        model="openai:gpt-5.2",
+        model="anthropic:claude-sonnet-4-5",
         url=url,
         instructions="Extract the article title, author, a brief summary, and 3-5 key points.",
         durable=True,
