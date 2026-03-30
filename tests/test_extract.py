@@ -13,7 +13,55 @@ from open_xtract import (
     configure_logging,
     extract,
 )
-from open_xtract._extract import _get_media_url
+from open_xtract._extract import _get_media_url, _validate_url
+
+
+class TestValidateUrl:
+    def test_valid_https_url(self):
+        _validate_url("https://example.com/doc.pdf")  # should not raise
+
+    def test_valid_http_url(self):
+        _validate_url("http://example.com/doc.pdf")  # should not raise
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "ftp://example.com/file",
+            "file:///etc/passwd",
+            "gopher://evil.com",
+            "javascript:alert(1)",
+        ],
+    )
+    def test_rejects_non_http_schemes(self, url):
+        with pytest.raises(UrlFetchError, match="Invalid URL scheme"):
+            _validate_url(url)
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://127.0.0.1/admin",
+            "http://10.0.0.1/internal",
+            "http://172.16.0.1/internal",
+            "http://192.168.1.1/internal",
+            "http://169.254.169.254/latest/meta-data/",
+            "http://0.0.0.0/",
+        ],
+    )
+    def test_rejects_private_ip_addresses(self, url):
+        with pytest.raises(UrlFetchError, match="private or internal"):
+            _validate_url(url)
+
+    def test_rejects_localhost(self):
+        with pytest.raises(UrlFetchError, match="localhost"):
+            _validate_url("http://localhost/admin")
+
+    def test_rejects_localhost_localdomain(self):
+        with pytest.raises(UrlFetchError, match="localhost"):
+            _validate_url("http://localhost.localdomain/admin")
+
+    def test_rejects_missing_hostname(self):
+        with pytest.raises(UrlFetchError, match="no hostname"):
+            _validate_url("http:///path")
 
 
 class TestGetMediaUrl:

@@ -1,6 +1,7 @@
 """Core extraction functionality."""
 
 import asyncio
+import ipaddress
 import os
 from typing import TypeVar
 from urllib.parse import urlparse
@@ -17,6 +18,27 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg"}
 AUDIO_EXTENSIONS = {".mp3", ".wav", ".ogg", ".flac", ".aac", ".m4a"}
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".webm", ".wmv"}
 DOCUMENT_EXTENSIONS = {".pdf", ".doc", ".docx", ".txt", ".html", ".csv", ".xls", ".xlsx"}
+
+
+def _validate_url(url: str) -> None:
+    """Validate URL to prevent SSRF attacks."""
+    parsed = urlparse(url)
+
+    if parsed.scheme not in ("http", "https"):
+        raise UrlFetchError(f"Invalid URL scheme: {parsed.scheme!r}. Only http and https are allowed.")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise UrlFetchError("Invalid URL: no hostname found.")
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            raise UrlFetchError("URLs pointing to private or internal network addresses are not allowed.")
+    except ValueError:
+        # hostname is not an IP literal — check for localhost aliases
+        if hostname.lower() in ("localhost", "localhost.localdomain"):
+            raise UrlFetchError("URLs pointing to localhost are not allowed.")
 
 
 def _get_media_url(url: str):
@@ -80,6 +102,7 @@ def extract(
         )
 
     try:
+        _validate_url(url)
         agent = Agent(model, instructions=instructions, output_type=schema)
         media_url = _get_media_url(url)
         result = agent.run_sync(

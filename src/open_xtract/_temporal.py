@@ -8,7 +8,6 @@ from typing import Any
 from urllib.parse import urlparse
 from uuid import uuid4
 
-import temporalio.worker
 from dotenv import load_dotenv
 from pydantic import BaseModel
 from pydantic_ai import Agent, AudioUrl, DocumentUrl, ImageUrl, VideoUrl
@@ -17,7 +16,7 @@ from temporalio.client import Client
 from temporalio.worker import Worker
 
 from ._docker import start_temporal_server
-from ._extract import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
+from ._extract import AUDIO_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS, _validate_url
 
 # Load environment variables from .env file
 load_dotenv(Path.cwd() / ".env")
@@ -112,6 +111,8 @@ async def run_durable_extraction(
     Raises:
         RuntimeError: If Docker or Temporal is not available.
     """
+    _validate_url(url)
+
     start_temporal_server(with_ui=temporal_ui)
 
     client = await Client.connect("localhost:7233")
@@ -129,7 +130,6 @@ async def run_durable_extraction(
         task_queue=TASK_QUEUE,
         workflows=[ExtractionWorkflow],
         activities=[extract_activity],
-        workflow_runner=temporalio.worker.UnsandboxedWorkflowRunner(),
     ):
         result = await client.execute_workflow(
             ExtractionWorkflow.run,
