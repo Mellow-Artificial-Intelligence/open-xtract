@@ -25,7 +25,9 @@ def _validate_url(url: str) -> None:
     parsed = urlparse(url)
 
     if parsed.scheme not in ("http", "https"):
-        raise UrlFetchError(f"Invalid URL scheme: {parsed.scheme!r}. Only http and https are allowed.")
+        raise UrlFetchError(
+            f"Invalid URL scheme: {parsed.scheme!r}. Only http and https are allowed."
+        )
 
     hostname = parsed.hostname
     if not hostname:
@@ -34,11 +36,13 @@ def _validate_url(url: str) -> None:
     try:
         ip = ipaddress.ip_address(hostname)
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
-            raise UrlFetchError("URLs pointing to private or internal network addresses are not allowed.")
+            raise UrlFetchError(
+                "URLs pointing to private or internal network addresses are not allowed."
+            )
     except ValueError:
         # hostname is not an IP literal — check for localhost aliases
         if hostname.lower() in ("localhost", "localhost.localdomain"):
-            raise UrlFetchError("URLs pointing to localhost are not allowed.")
+            raise UrlFetchError("URLs pointing to localhost are not allowed.") from None
 
 
 def _get_media_url(url: str):
