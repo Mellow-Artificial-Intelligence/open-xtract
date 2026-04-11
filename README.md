@@ -1,11 +1,11 @@
-# Open Xtract
+# openextract
 
-[![PyPI version](https://img.shields.io/pypi/v/open-xtract.svg)](https://pypi.org/project/open-xtract/)
-[![PyPI downloads](https://img.shields.io/pypi/dm/open-xtract.svg)](https://pypi.org/project/open-xtract/)
+[![PyPI version](https://img.shields.io/pypi/v/openextract.svg)](https://pypi.org/project/openextract/)
+[![PyPI downloads](https://img.shields.io/pypi/dm/openextract.svg)](https://pypi.org/project/openextract/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
-[![CI](https://github.com/Mellow-Artificial-Intelligence/open-xtract/actions/workflows/ci.yml/badge.svg)](https://github.com/Mellow-Artificial-Intelligence/open-xtract/actions/workflows/ci.yml)
+[![CI](https://github.com/Mellow-Artificial-Intelligence/openextract/actions/workflows/ci.yml/badge.svg)](https://github.com/Mellow-Artificial-Intelligence/openextract/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/Mellow-Artificial-Intelligence/open-xtract)
+[![Coverage](https://img.shields.io/badge/coverage-100%25-brightgreen.svg)](https://github.com/Mellow-Artificial-Intelligence/openextract)
 [![Pydantic v2](https://img.shields.io/badge/pydantic-v2-E92063.svg)](https://docs.pydantic.dev/)
 [![pydantic-ai](https://img.shields.io/badge/pydantic--ai-1.37+-7C3AED.svg)](https://ai.pydantic.dev/)
 
@@ -14,14 +14,14 @@ Extract structured data from documents, images, audio, and video using LLMs.
 ## Installation
 
 ```bash
-uv add open-xtract
+uv add openextract
 ```
 
 ## Usage
 
 ```python
 from pydantic import BaseModel
-from open_xtract import extract
+from openextract import extract
 
 class PdfInfo(BaseModel):
     summary: str
@@ -41,7 +41,7 @@ print(result)
 To enable logfire instrumentation for tracing:
 
 ```python
-from open_xtract import configure_logging
+from openextract import configure_logging
 
 configure_logging()
 ```
@@ -49,7 +49,7 @@ configure_logging()
 ## Error Handling
 
 ```python
-from open_xtract import (
+from openextract import (
     extract,
     ExtractionError,
     ModelError,
@@ -68,36 +68,6 @@ except ModelError as e:
 except ExtractionError as e:
     print(f"Extraction failed: {e}")
 ```
-
-## Durable Execution
-
-For long-running extractions that need to survive failures, use Temporal-backed durable execution:
-
-```bash
-uv add open-xtract[temporal]
-```
-
-```python
-from open_xtract import extract, stop_temporal
-
-result = extract(
-    schema=PdfInfo,
-    model="openai-responses:gpt-5.2",
-    url="https://example.com/document.pdf",
-    instructions="Extract document info",
-    durable=True,  # enables Temporal
-    temporal_ui=True,  # optional, starts UI on http://localhost:8080
-)
-
-# Optional: clean up Docker containers when done
-stop_temporal()
-```
-
-When `durable=True`:
-- Automatically starts Temporal server via Docker (requires Docker to be running)
-- Uses PostgreSQL for persistent workflow state
-- Provides automatic retries and failure recovery
-- Optionally starts Temporal UI for workflow monitoring
 
 ## Supported Media Types
 

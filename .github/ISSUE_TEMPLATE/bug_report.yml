@@ -23,7 +23,7 @@ body:
       description: Minimal code example or steps to reproduce the issue
       placeholder: |
         ```python
-        from open_xtract import extract
+        from openextract import extract
         # your code here
         ```
     validations:
@@ -48,7 +48,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: open-xtract Version
+      label: openextract Version
       placeholder: "0.1.4"
     validations:
       required: true

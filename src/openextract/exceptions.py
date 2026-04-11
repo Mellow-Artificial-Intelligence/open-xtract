@@ -1,4 +1,4 @@
-"""Exceptions for open_xtract."""
+"""Exceptions for openextract."""
 
 
 class ExtractionError(Exception):

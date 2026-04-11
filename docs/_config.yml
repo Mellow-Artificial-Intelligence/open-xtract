@@ -1,6 +1,6 @@
-title: Open-Xtract Documentation
+title: openextract Documentation
 description: Open-source framework that extracts structured data from PDFs
-baseurl: "/open-xtract"
+baseurl: "/openextract"
 url: "https://mellow-artificial-intelligence.github.io"
 
 markdown: kramdown

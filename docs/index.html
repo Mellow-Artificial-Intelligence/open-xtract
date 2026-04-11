@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Open Xtract - Durable Data Extraction</title>
-    <meta name="description" content="Extract structured data from any media with fault-tolerant, durable execution powered by Temporal." />
+    <title>openextract - Structured Data Extraction</title>
+    <meta name="description" content="Extract structured data from documents, images, audio, and video using LLMs." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -77,14 +77,14 @@
       <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         <a href="#" class="flex items-center gap-2">
           <div class="w-8 h-8 bg-black flex items-center justify-center">
-            <span class="text-white font-mono font-bold text-xs">OX</span>
+            <span class="text-white font-mono font-bold text-xs">OE</span>
           </div>
-          <span class="font-mono text-sm text-black/80 hidden sm:inline">Open Xtract</span>
+          <span class="font-mono text-sm text-black/80 hidden sm:inline">openextract</span>
         </a>
 
         <nav class="flex items-center gap-4 sm:gap-6">
-          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
-          <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
+          <a href="https://github.com/Mellow-Artificial-Intelligence/openextract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/openextract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
         </nav>
       </div>
     </header>
@@ -100,31 +100,30 @@
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
             <span class="font-mono text-black/50">v0.2.0</span>
             <span class="text-black/30">|</span>
-            <span class="text-black/50">Durable Execution</span>
+            <span class="text-black/50">Structured Extraction</span>
           </div>
 
           <!-- Headline -->
           <h1 class="animate-slide-up opacity-0 [animation-delay:100ms] text-4xl sm:text-5xl md:text-6xl lg:text-7xl font-bold tracking-tight mb-4 sm:mb-6 bg-gradient-to-b from-black to-black/50 bg-clip-text text-transparent">
-            Durable Extraction
+            Structured Extraction
           </h1>
 
           <!-- Subheadline -->
           <p class="animate-slide-up opacity-0 [animation-delay:150ms] text-base sm:text-lg text-black/50 mb-2 sm:mb-3 font-mono">
-            Extractions that survive failures.
+            Typed output from any media.
           </p>
           <p class="animate-slide-up opacity-0 [animation-delay:200ms] text-sm text-black/40 max-w-md mx-auto mb-8 sm:mb-10 px-2">
-            Extract structured data from documents, images, audio, and video with fault-tolerant workflows powered by Temporal.
+            Extract structured data from documents, images, audio, and video using LLMs and Pydantic schemas.
           </p>
 
           <!-- CTAs -->
           <div class="animate-slide-up opacity-0 [animation-delay:250ms] flex flex-col sm:flex-row gap-3 justify-center mb-10 sm:mb-14">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
-               class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
-               <i data-lucide="github" class="w-4 h-4"></i>
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract"
+               class="h-10 px-5 bg-white border border-black/10 text-black font-medium text-sm flex items-center justify-center hover:bg-black/5 hover:border-black/20 transition-colors">
                View Source
             </a>
             <button onclick="copyInstall()" class="h-10 px-3 sm:px-4 bg-white border border-black/10 text-black/70 font-mono text-xs sm:text-sm flex items-center justify-center gap-2 sm:gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
-              <span class="text-black/30">$</span> <span class="truncate">uv add open-xtract[temporal]</span>
+              <span class="text-black/30">$</span> <span class="truncate">uv add openextract</span>
               <span id="copy-icon" class="text-black/30 group-hover:text-black/50 flex-shrink-0"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
               <span id="check-icon" class="hidden text-emerald-500 flex-shrink-0"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
             </button>
@@ -138,14 +137,13 @@
                 <span class="font-mono text-[10px] text-black/20">extract.py</span>
               </div>
               <div class="p-3 sm:p-4 overflow-x-auto">
-<pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
+<pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">openextract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
 
 <span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
     <span class="text-black/40">schema=</span><span class="text-black/70">Invoice</span>,
     <span class="text-black/40">model=</span><span class="text-emerald-600">"openai:gpt-5.2"</span>,
     <span class="text-black/40">url=</span><span class="text-emerald-600">"https://example.com/doc.pdf"</span>,
     <span class="text-black/40">instructions=</span><span class="text-emerald-600">"Extract invoice data"</span>,
-    <span class="text-black/70">durable</span><span class="text-black/40">=</span><span class="text-orange-500">True</span>,
 )</code></pre>
               </div>
             </div>
@@ -153,10 +151,8 @@
 
           <!-- Tech badges -->
           <div class="animate-slide-up opacity-0 [animation-delay:400ms] flex flex-wrap justify-center gap-3 sm:gap-4 mt-6 sm:mt-8 font-mono text-[10px] sm:text-[11px] text-black/30">
-            <span class="flex items-center gap-1.5"><i data-lucide="database" class="w-3 h-3"></i> PostgreSQL</span>
-            <span class="flex items-center gap-1.5"><i data-lucide="infinity" class="w-3 h-3"></i> Temporal</span>
-            <span class="flex items-center gap-1.5"><i data-lucide="container" class="w-3 h-3"></i> Docker</span>
             <span class="flex items-center gap-1.5"><i data-lucide="shield-check" class="w-3 h-3"></i> Pydantic</span>
+            <span class="flex items-center gap-1.5"><i data-lucide="cpu" class="w-3 h-3"></i> Any LLM</span>
           </div>
         </div>
       </section>
@@ -168,11 +164,11 @@
 
             <div class="p-5 border border-black/10 bg-white">
               <div class="w-9 h-9 border border-black/10 flex items-center justify-center mb-4">
-                <i data-lucide="shield" class="w-4 h-4 text-black/50"></i>
+                <i data-lucide="zap" class="w-4 h-4 text-black/50"></i>
               </div>
-              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Fault Tolerant</h3>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Zero Config</h3>
               <p class="text-sm text-black/40 leading-relaxed">
-                Workflows survive crashes and restarts with automatic retries.
+                One function call. Bring a schema, a URL, and an LLM model string.
               </p>
             </div>
 
@@ -218,32 +214,32 @@
             <div>
               <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mb-3">How it works</p>
               <h2 class="text-2xl sm:text-3xl font-bold mb-4 sm:mb-6 text-black/90">
-                One flag for durability
+                Schema in, typed data out
               </h2>
               <p class="text-black/40 mb-8 leading-relaxed">
-                Add <code class="font-mono text-black/70 bg-black/5 px-1.5 py-0.5 text-sm">durable=True</code> and Open Xtract provisions Temporal via Docker automatically.
+                Define a <code class="font-mono text-black/70 bg-black/5 px-1.5 py-0.5 text-sm">BaseModel</code>, call <code class="font-mono text-black/70 bg-black/5 px-1.5 py-0.5 text-sm">extract()</code>, get validated output.
               </p>
 
               <div class="space-y-5">
                 <div class="flex gap-4">
                   <div class="w-7 h-7 border border-black/10 flex items-center justify-center font-mono text-xs text-black/40 flex-shrink-0">1</div>
                   <div>
-                    <h4 class="font-mono text-sm text-black/70 mb-1">Docker Auto-Start</h4>
-                    <p class="text-sm text-black/40">Temporal and PostgreSQL spin up when needed.</p>
+                    <h4 class="font-mono text-sm text-black/70 mb-1">Define a schema</h4>
+                    <p class="text-sm text-black/40">Describe the shape you want with a Pydantic model.</p>
                   </div>
                 </div>
                 <div class="flex gap-4">
                   <div class="w-7 h-7 border border-black/10 flex items-center justify-center font-mono text-xs text-black/40 flex-shrink-0">2</div>
                   <div>
-                    <h4 class="font-mono text-sm text-black/70 mb-1">Workflow Execution</h4>
-                    <p class="text-sm text-black/40">Extractions run as durable workflows with checkpointing.</p>
+                    <h4 class="font-mono text-sm text-black/70 mb-1">Point at any media</h4>
+                    <p class="text-sm text-black/40">Documents, images, audio, or video via URL.</p>
                   </div>
                 </div>
                 <div class="flex gap-4">
                   <div class="w-7 h-7 border border-black/10 flex items-center justify-center font-mono text-xs text-black/40 flex-shrink-0">3</div>
                   <div>
-                    <h4 class="font-mono text-sm text-black/70 mb-1">Retry & Recovery</h4>
-                    <p class="text-sm text-black/40">Failures retry automatically. State persists across restarts.</p>
+                    <h4 class="font-mono text-sm text-black/70 mb-1">Get typed output</h4>
+                    <p class="text-sm text-black/40">Validated against your schema. No parsing, no regex.</p>
                   </div>
                 </div>
               </div>
@@ -252,11 +248,11 @@
             <div class="code-block overflow-hidden">
               <div class="px-3 sm:px-4 py-2.5 border-b border-black/5 flex items-center justify-between">
                 <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Terminal</span>
-                <span class="font-mono text-[10px] text-black/20">workflow.py</span>
+                <span class="font-mono text-[10px] text-black/20">extract.py</span>
               </div>
               <div class="p-3 sm:p-4 overflow-x-auto">
 <pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">pydantic</span> <span class="text-black/40">import</span> <span class="text-black/70">BaseModel</span>
-<span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract, stop_temporal</span>
+<span class="text-black/40">from</span> <span class="text-black/70">openextract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
 
 <span class="text-black/40">class</span> <span class="text-black/80">Report</span>(<span class="text-black/70">BaseModel</span>):
     <span class="text-black/50">title</span>: <span class="text-black/50">str</span>
@@ -268,11 +264,7 @@
     <span class="text-black/40">model=</span><span class="text-emerald-600">"openai:gpt-5.2"</span>,
     <span class="text-black/40">url=</span><span class="text-emerald-600">"https://example.com/report.pdf"</span>,
     <span class="text-black/40">instructions=</span><span class="text-emerald-600">"Extract findings"</span>,
-    <span class="text-black/70">durable</span><span class="text-black/40">=</span><span class="text-orange-500">True</span>,
-    <span class="text-black/70">temporal_ui</span><span class="text-black/40">=</span><span class="text-orange-500">True</span>,
-)
-
-<span class="text-black/70">stop_temporal</span>()</code></pre>
+)</code></pre>
               </div>
             </div>
 
@@ -307,17 +299,17 @@
         <div class="max-w-2xl mx-auto px-4 sm:px-6 text-center">
           <h2 class="text-xl sm:text-2xl font-bold mb-4 text-black/90">Get started</h2>
           <p class="text-black/40 text-sm mb-8">
-            Extract structured data with fault-tolerant workflows.
+            Extract structured data from any media in one function call.
           </p>
 
           <div class="flex flex-col sm:flex-row gap-3 justify-center">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract"
                class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
                <i data-lucide="github" class="w-4 h-4"></i>
                View Source
             </a>
             <button onclick="copyInstallBasic()" class="h-10 px-3 sm:px-4 bg-white border border-black/10 text-black/70 font-mono text-xs sm:text-sm flex items-center justify-center gap-2 sm:gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
-              <span class="text-black/30">$</span> uv add open-xtract
+              <span class="text-black/30">$</span> uv add openextract
               <span id="copy-icon-basic" class="text-black/30 group-hover:text-black/50 flex-shrink-0"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
               <span id="check-icon-basic" class="hidden text-emerald-500 flex-shrink-0"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
             </button>
@@ -330,10 +322,10 @@
     <!-- Footer -->
     <footer class="py-6 sm:py-8 border-t border-black/5">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <span class="font-mono text-xs text-black/30">&copy; 2025 Open Xtract. MIT License.</span>
+        <span class="font-mono text-xs text-black/30">&copy; 2025 openextract. MIT License.</span>
         <div class="flex gap-6">
-          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">GitHub</a>
-          <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">PyPI</a>
+          <a href="https://github.com/Mellow-Artificial-Intelligence/openextract" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/openextract/" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">PyPI</a>
         </div>
       </div>
     </footer>
@@ -358,7 +350,7 @@
       }
 
       function copyInstall() {
-        copyToClipboard("uv add open-xtract[temporal]").then(() => {
+        copyToClipboard("uv add openextract").then(() => {
           document.getElementById('copy-icon').classList.add('hidden');
           document.getElementById('check-icon').classList.remove('hidden');
           setTimeout(() => {
@@ -369,7 +361,7 @@
       }
 
       function copyInstallBasic() {
-        copyToClipboard("uv add open-xtract").then(() => {
+        copyToClipboard("uv add openextract").then(() => {
           document.getElementById('copy-icon-basic').classList.add('hidden');
           document.getElementById('check-icon-basic').classList.remove('hidden');
           setTimeout(() => {
