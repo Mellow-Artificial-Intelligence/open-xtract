@@ -1,5 +1,5 @@
 """
-open_xtract - Extract structured data from documents, images, audio, and video using LLMs.
+openextract - Extract structured data from documents, images, audio, and video using LLMs.
 """
 
 import logfire

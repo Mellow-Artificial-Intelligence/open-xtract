@@ -35,7 +35,7 @@ jobs:
             exit 0
           fi
           # Check PyPI
-          if curl -s "https://pypi.org/pypi/open-xtract/$VERSION/json" | grep -q '"version"'; then
+          if curl -s "https://pypi.org/pypi/openextract/$VERSION/json" | grep -q '"version"'; then
             echo "exists=true" >> $GITHUB_OUTPUT
             echo "Version $VERSION already exists on PyPI"
           else

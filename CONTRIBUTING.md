@@ -1,13 +1,13 @@
-# Contributing to Open-Xtract
+# Contributing to openextract
 
-Thanks for your interest in contributing to Open-Xtract!
+Thanks for your interest in contributing to openextract!
 
 ## Development Setup
 
 1. Clone the repository:
    ```bash
-   git clone https://github.com/Mellow-Artificial-Intelligence/open-xtract.git
-   cd open-xtract
+   git clone https://github.com/Mellow-Artificial-Intelligence/openextract.git
+   cd openextract
    ```
 
 2. Install dependencies with uv:

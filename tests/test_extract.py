@@ -5,7 +5,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import AudioUrl, DocumentUrl, ImageUrl, VideoUrl
 
-from open_xtract import (
+from openextract import (
     ExtractionError,
     ModelError,
     SchemaValidationError,
@@ -13,7 +13,7 @@ from open_xtract import (
     configure_logging,
     extract,
 )
-from open_xtract._extract import _get_media_url, _validate_url
+from openextract._extract import _get_media_url, _validate_url
 
 
 class TestValidateUrl:
@@ -148,7 +148,7 @@ class TestExtract:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.return_value = mock_result
 
-        mock_agent = mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mock_agent = mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         result = extract(
             schema=TestSchema,
@@ -175,7 +175,7 @@ class TestExtract:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.return_value = mock_result
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         extract(
             schema=TestSchema,
@@ -202,7 +202,7 @@ class TestExtractErrorHandling:
             "Not Found", request=mock_request, response=mock_response
         )
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(UrlFetchError) as exc_info:
             extract(
@@ -221,7 +221,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = httpx.ConnectError("Connection refused")
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(UrlFetchError) as exc_info:
             extract(
@@ -243,7 +243,7 @@ class TestExtractErrorHandling:
             [{"type": "missing", "loc": ("data",), "input": {}}],
         )
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(SchemaValidationError) as exc_info:
             extract(
@@ -262,7 +262,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = RuntimeError("Something unexpected")
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(ExtractionError) as exc_info:
             extract(
@@ -282,7 +282,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = original_error
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(UrlFetchError) as exc_info:
             extract(
@@ -306,7 +306,7 @@ class TestExtractErrorHandling:
         mock_agent_instance = MagicMock()
         mock_agent_instance.run_sync.side_effect = FakeApiError("API failed")
 
-        mocker.patch("open_xtract._extract.Agent", return_value=mock_agent_instance)
+        mocker.patch("openextract._extract.Agent", return_value=mock_agent_instance)
 
         with pytest.raises(ModelError) as exc_info:
             extract(
@@ -321,9 +321,9 @@ class TestExtractErrorHandling:
 
 class TestConfigureLogging:
     def test_configure_logging_calls_logfire(self, mocker):
-        mock_configure = mocker.patch("open_xtract.logfire.configure")
-        mock_instrument_pydantic = mocker.patch("open_xtract.logfire.instrument_pydantic_ai")
-        mock_instrument_httpx = mocker.patch("open_xtract.logfire.instrument_httpx")
+        mock_configure = mocker.patch("openextract.logfire.configure")
+        mock_instrument_pydantic = mocker.patch("openextract.logfire.instrument_pydantic_ai")
+        mock_instrument_httpx = mocker.patch("openextract.logfire.instrument_httpx")
 
         configure_logging()
 

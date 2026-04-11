@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Open Xtract - Structured Data Extraction</title>
+    <title>openextract - Structured Data Extraction</title>
     <meta name="description" content="Extract structured data from documents, images, audio, and video using LLMs." />
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,14 +77,14 @@
       <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
         <a href="#" class="flex items-center gap-2">
           <div class="w-8 h-8 bg-black flex items-center justify-center">
-            <span class="text-white font-mono font-bold text-xs">OX</span>
+            <span class="text-white font-mono font-bold text-xs">OE</span>
           </div>
-          <span class="font-mono text-sm text-black/80 hidden sm:inline">Open Xtract</span>
+          <span class="font-mono text-sm text-black/80 hidden sm:inline">openextract</span>
         </a>
 
         <nav class="flex items-center gap-4 sm:gap-6">
-          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
-          <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
+          <a href="https://github.com/Mellow-Artificial-Intelligence/openextract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/openextract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
         </nav>
       </div>
     </header>
@@ -118,13 +118,12 @@
 
           <!-- CTAs -->
           <div class="animate-slide-up opacity-0 [animation-delay:250ms] flex flex-col sm:flex-row gap-3 justify-center mb-10 sm:mb-14">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
-               class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
-               <i data-lucide="github" class="w-4 h-4"></i>
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract"
+               class="h-10 px-5 bg-white border border-black/10 text-black font-medium text-sm flex items-center justify-center hover:bg-black/5 hover:border-black/20 transition-colors">
                View Source
             </a>
             <button onclick="copyInstall()" class="h-10 px-3 sm:px-4 bg-white border border-black/10 text-black/70 font-mono text-xs sm:text-sm flex items-center justify-center gap-2 sm:gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
-              <span class="text-black/30">$</span> <span class="truncate">uv add open-xtract</span>
+              <span class="text-black/30">$</span> <span class="truncate">uv add openextract</span>
               <span id="copy-icon" class="text-black/30 group-hover:text-black/50 flex-shrink-0"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
               <span id="check-icon" class="hidden text-emerald-500 flex-shrink-0"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
             </button>
@@ -138,7 +137,7 @@
                 <span class="font-mono text-[10px] text-black/20">extract.py</span>
               </div>
               <div class="p-3 sm:p-4 overflow-x-auto">
-<pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
+<pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">openextract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
 
 <span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
     <span class="text-black/40">schema=</span><span class="text-black/70">Invoice</span>,
@@ -153,9 +152,7 @@
           <!-- Tech badges -->
           <div class="animate-slide-up opacity-0 [animation-delay:400ms] flex flex-wrap justify-center gap-3 sm:gap-4 mt-6 sm:mt-8 font-mono text-[10px] sm:text-[11px] text-black/30">
             <span class="flex items-center gap-1.5"><i data-lucide="shield-check" class="w-3 h-3"></i> Pydantic</span>
-            <span class="flex items-center gap-1.5"><i data-lucide="sparkles" class="w-3 h-3"></i> pydantic-ai</span>
             <span class="flex items-center gap-1.5"><i data-lucide="cpu" class="w-3 h-3"></i> Any LLM</span>
-            <span class="flex items-center gap-1.5"><i data-lucide="python" class="w-3 h-3"></i> Python 3.12+</span>
           </div>
         </div>
       </section>
@@ -255,7 +252,7 @@
               </div>
               <div class="p-3 sm:p-4 overflow-x-auto">
 <pre class="text-xs sm:text-sm font-mono leading-relaxed"><code><span class="text-black/40">from</span> <span class="text-black/70">pydantic</span> <span class="text-black/40">import</span> <span class="text-black/70">BaseModel</span>
-<span class="text-black/40">from</span> <span class="text-black/70">open_xtract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
+<span class="text-black/40">from</span> <span class="text-black/70">openextract</span> <span class="text-black/40">import</span> <span class="text-black/70">extract</span>
 
 <span class="text-black/40">class</span> <span class="text-black/80">Report</span>(<span class="text-black/70">BaseModel</span>):
     <span class="text-black/50">title</span>: <span class="text-black/50">str</span>
@@ -306,13 +303,13 @@
           </p>
 
           <div class="flex flex-col sm:flex-row gap-3 justify-center">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract"
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract"
                class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center gap-2 hover:bg-black/80 transition-colors">
                <i data-lucide="github" class="w-4 h-4"></i>
                View Source
             </a>
             <button onclick="copyInstallBasic()" class="h-10 px-3 sm:px-4 bg-white border border-black/10 text-black/70 font-mono text-xs sm:text-sm flex items-center justify-center gap-2 sm:gap-3 hover:bg-black/5 hover:border-black/20 transition-all group">
-              <span class="text-black/30">$</span> uv add open-xtract
+              <span class="text-black/30">$</span> uv add openextract
               <span id="copy-icon-basic" class="text-black/30 group-hover:text-black/50 flex-shrink-0"><i data-lucide="copy" class="w-3.5 h-3.5"></i></span>
               <span id="check-icon-basic" class="hidden text-emerald-500 flex-shrink-0"><i data-lucide="check" class="w-3.5 h-3.5"></i></span>
             </button>
@@ -325,10 +322,10 @@
     <!-- Footer -->
     <footer class="py-6 sm:py-8 border-t border-black/5">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
-        <span class="font-mono text-xs text-black/30">&copy; 2025 Open Xtract. MIT License.</span>
+        <span class="font-mono text-xs text-black/30">&copy; 2025 openextract. MIT License.</span>
         <div class="flex gap-6">
-          <a href="https://github.com/Mellow-Artificial-Intelligence/open-xtract" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">GitHub</a>
-          <a href="https://pypi.org/project/open-xtract/" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">PyPI</a>
+          <a href="https://github.com/Mellow-Artificial-Intelligence/openextract" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">GitHub</a>
+          <a href="https://pypi.org/project/openextract/" class="font-mono text-xs text-black/30 hover:text-black/60 transition-colors">PyPI</a>
         </div>
       </div>
     </footer>
@@ -353,7 +350,7 @@
       }
 
       function copyInstall() {
-        copyToClipboard("uv add open-xtract").then(() => {
+        copyToClipboard("uv add openextract").then(() => {
           document.getElementById('copy-icon').classList.add('hidden');
           document.getElementById('check-icon').classList.remove('hidden');
           setTimeout(() => {
@@ -364,7 +361,7 @@
       }
 
       function copyInstallBasic() {
-        copyToClipboard("uv add open-xtract").then(() => {
+        copyToClipboard("uv add openextract").then(() => {
           document.getElementById('copy-icon-basic').classList.add('hidden');
           document.getElementById('check-icon-basic').classList.remove('hidden');
           setTimeout(() => {
