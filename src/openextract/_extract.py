@@ -33,7 +33,7 @@ def _get_media(file_path):
     return media_bytes, media_type
 
 
-def extract(schema: type[T], model: str, input_file_path: str, instructions: str) -> T:
+def extract(schema: type[T], model: str, input_file: str, instructions: str) -> T:
     """
     Extract structured data from a URL using an LLM.
 
@@ -54,7 +54,7 @@ def extract(schema: type[T], model: str, input_file_path: str, instructions: str
     """
     try:
         load_dotenv()
-        file_bytes, file_type = _get_media(file_path=input_file_path)
+        file_bytes, file_type = _get_media(file_path=input_file)
         agent = Agent(model, instructions=instructions, output_type=schema)
         result = agent.run_sync(
             [

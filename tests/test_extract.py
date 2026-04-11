@@ -125,7 +125,7 @@ class TestExtract:
         result = extract(
             schema=SampleSchema,
             model="google-gla:gemini-3-flash-preview",
-            input_file_path="https://example.com/image.png",
+            input_file="https://example.com/image.png",
             instructions="Extract the title and page count.",
         )
 
@@ -155,7 +155,7 @@ class TestExtract:
             extract(
                 schema=SampleSchema,
                 model="google-gla:gemini-3-flash-preview",
-                input_file_path="https://example.com/image.png",
+                input_file="https://example.com/image.png",
                 instructions="x",
             )
 
@@ -169,7 +169,7 @@ class TestExtract:
             extract(
                 schema=SampleSchema,
                 model="google-gla:gemini-3-flash-preview",
-                input_file_path="https://example.com/image.png",
+                input_file="https://example.com/image.png",
                 instructions="x",
             )
 
@@ -189,7 +189,7 @@ class TestExtract:
             extract(
                 schema=SampleSchema,
                 model="google-gla:gemini-3-flash-preview",
-                input_file_path="https://example.com/image.png",
+                input_file="https://example.com/image.png",
                 instructions="x",
             )
 
@@ -202,7 +202,7 @@ class TestExtract:
             extract(
                 schema=SampleSchema,
                 model="google-gla:gemini-3-flash-preview",
-                input_file_path="https://example.com/image.png",
+                input_file="https://example.com/image.png",
                 instructions="x",
             )
 
@@ -215,6 +215,6 @@ class TestExtract:
             extract(
                 schema=SampleSchema,
                 model="google-gla:gemini-3-flash-preview",
-                input_file_path="https://example.com/image.png",
+                input_file="https://example.com/image.png",
                 instructions="x",
             )
