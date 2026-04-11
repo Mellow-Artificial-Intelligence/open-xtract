@@ -6,7 +6,7 @@ from typing import TypeVar
 from pathlib import Path
 
 import httpx
-from pydantic import BaseModel,Field, ValidationError
+from pydantic import BaseModel, ValidationError
 from pydantic_ai import Agent, BinaryContent
 
 from exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
@@ -70,11 +70,3 @@ def extract(schema: type[T], model: str, input_file_path: str, instructions: str
         if "api" in str(type(e).__module__).lower() or "model" in str(e).lower():
             raise ModelError(f"Model API error: {e}") from e
         raise ExtractionError(f"Extraction failed: {e}") from e
-
-if __name__ == "__main__":
-    class PaperExtract(BaseModel):
-        title: str
-        summary: str
-
-    results = extract(schema=PaperExtract, model="openrouter:google/gemini-2.5-flash-lite-preview-09-2025", input_file_path="https://cdn-avatars.huggingface.co/v1/production/uploads/68f3dd169869968c2622db2c/vIK3BliyoYrUC1wSP67f9.png", instructions="summary should be in spanish")
-    print(results)
