@@ -1,6 +1,5 @@
 """Core extraction functionality."""
 
-import asyncio
 import ipaddress
 import os
 from typing import TypeVar
@@ -60,15 +59,7 @@ def _get_media_url(url: str):
         return DocumentUrl(url=url)
 
 
-def extract(
-    schema: type[T],
-    model: str,
-    url: str,
-    instructions: str,
-    *,
-    durable: bool = False,
-    temporal_ui: bool = True,
-) -> T:
+def extract(schema: type[T], model: str, url: str, instructions: str) -> T:
     """
     Extract structured data from a URL using an LLM.
 
@@ -77,11 +68,6 @@ def extract(
         model: The model identifier (e.g., 'google-gla:gemini-3-flash-preview').
         url: The URL of the document, image, audio, or video to extract from.
         instructions: Instructions for the LLM on what to extract.
-        durable: If True, run extraction with Temporal for durable execution.
-            Requires Docker to be running. Temporal server will be started
-            automatically if not already running.
-        temporal_ui: If True (default), start the Temporal UI alongside the server.
-            Set to False to skip the UI and save resources. Only used when durable=True.
 
     Returns:
         An instance of the schema populated with extracted data.
@@ -91,20 +77,7 @@ def extract(
         SchemaValidationError: If the model output doesn't match the schema.
         ModelError: If there's an error communicating with the model API.
         ExtractionError: For other extraction failures.
-        RuntimeError: If durable=True and Docker is not available.
     """
-    if durable:
-        try:
-            from ._temporal import run_durable_extraction
-        except ImportError as e:
-            raise ImportError(
-                "Temporal dependencies not installed. "
-                "Install with: pip install open-xtract[temporal]"
-            ) from e
-        return asyncio.run(
-            run_durable_extraction(schema, model, url, instructions, temporal_ui=temporal_ui)
-        )
-
     try:
         _validate_url(url)
         agent = Agent(model, instructions=instructions, output_type=schema)

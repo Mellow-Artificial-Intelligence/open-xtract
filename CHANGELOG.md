@@ -4,7 +4,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.2.0] - 2026-01-11
-- Add durable execution with Temporal (#42).
+- Landing page redesign and security updates.
 
 ## [0.1.4] - 2025-12-21
 - Restructure project as installable Python package.

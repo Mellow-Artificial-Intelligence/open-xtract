@@ -37,12 +37,6 @@ build-backend = "hatchling.build"
 [tool.hatch.build.targets.wheel]
 packages = ["src/open_xtract"]
 
-[project.optional-dependencies]
-temporal = [
-    "temporalio>=1.10.0",
-    "python-dotenv>=1.0.0",
-]
-
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",

@@ -69,36 +69,6 @@ except ExtractionError as e:
     print(f"Extraction failed: {e}")
 ```
 
-## Durable Execution
-
-For long-running extractions that need to survive failures, use Temporal-backed durable execution:
-
-```bash
-uv add open-xtract[temporal]
-```
-
-```python
-from open_xtract import extract, stop_temporal
-
-result = extract(
-    schema=PdfInfo,
-    model="openai-responses:gpt-5.2",
-    url="https://example.com/document.pdf",
-    instructions="Extract document info",
-    durable=True,  # enables Temporal
-    temporal_ui=True,  # optional, starts UI on http://localhost:8080
-)
-
-# Optional: clean up Docker containers when done
-stop_temporal()
-```
-
-When `durable=True`:
-- Automatically starts Temporal server via Docker (requires Docker to be running)
-- Uses PostgreSQL for persistent workflow state
-- Provides automatic retries and failure recovery
-- Optionally starts Temporal UI for workflow monitoring
-
 ## Supported Media Types
 
 | Type | Extensions |
