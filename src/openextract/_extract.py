@@ -1,22 +1,24 @@
 """Core extraction functionality."""
 
 import mimetypes
-from dotenv import load_dotenv
-from typing import TypeVar
 from pathlib import Path
+from typing import TypeVar
 
 import httpx
+from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import Agent, BinaryContent
 
-from exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
+from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
 
 T = TypeVar("T", bound=BaseModel)
+
 
 def _get_media_type(file_path: str) -> str:
     """Return the MIME type for a file path (e.g. 'application/pdf')."""
     media_type, _ = mimetypes.guess_type(file_path)
     return media_type or "application/octet-stream"
+
 
 def _get_media(file_path):
     if file_path.startswith("https://"):
@@ -29,6 +31,7 @@ def _get_media(file_path):
     media_type = _get_media_type(file_path=file_path)
 
     return media_bytes, media_type
+
 
 def extract(schema: type[T], model: str, input_file_path: str, instructions: str) -> T:
     """
@@ -56,7 +59,7 @@ def extract(schema: type[T], model: str, input_file_path: str, instructions: str
         result = agent.run_sync(
             [
                 "Extract the requested information from this document.",
-                BinaryContent(data=file_bytes, media_type=file_type)
+                BinaryContent(data=file_bytes, media_type=file_type),
             ]
         )
         return result.output

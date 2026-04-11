@@ -11,3 +11,4 @@ wheels/
 
 # Environment files
 .env
+test/test.pdf
