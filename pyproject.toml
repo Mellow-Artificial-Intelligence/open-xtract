@@ -55,3 +55,4 @@ ignore = ["UP047"]  # TypeVar pattern is valid for pydantic-ai compatibility
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
