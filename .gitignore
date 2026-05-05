@@ -11,4 +11,5 @@ wheels/
 
 # Environment files
 .env
-test/test.pdf
+tests/test.pdf
+tests/test.png

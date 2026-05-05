@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.12.5",
-    "pydantic-ai-slim[google,logfire]>=1.37.0",
+    "pydantic-ai-slim[google,logfire,openai]>=1.37.0",
     "python-dotenv>=1.2.2",
 ]
 
