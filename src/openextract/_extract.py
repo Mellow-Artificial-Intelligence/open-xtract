@@ -56,7 +56,11 @@ def extract(schema: type[T], model: str, input_file: str, instructions: str | No
     try:
         load_dotenv()
         file_bytes, file_type = _get_media(file_path=input_file)
-        agent = Agent(model, instructions=instructions, output_type=NativeOutput(schema) if model.startswith("ollama") else schema)
+        agent = Agent(
+            model,
+            instructions=instructions,
+            output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
+        )
         result = agent.run_sync(
             [
                 "Extract the requested information from this document.",
