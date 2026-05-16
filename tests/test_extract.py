@@ -405,6 +405,22 @@ class TestExtract:
         with pytest.raises(ModelError, match="Model API error"):
             extract(schema=_Person, model="groq:llama-3.3-70b-versatile", input_file=str(local))
 
+    def test_mistral_sdk_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        from mistralai.client.errors.sdkerror import SDKError as MistralSDKError
+
+        class _FakeMistralError(MistralSDKError):
+            def __init__(self, message: str):
+                # Bypass SDKError.__init__ to avoid constructing httpx response objects.
+                Exception.__init__(self, message)
+                object.__setattr__(self, "message", message)
+
+        _make_agent_mock(mocker, run_sync_side_effect=_FakeMistralError("rate limited"))
+
+        with pytest.raises(ModelError, match="Model API error"):
+            extract(schema=_Person, model="mistral:mistral-large-latest", input_file=str(local))
+
     def test_message_mentioning_model_is_wrapped_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")

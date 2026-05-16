@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.12.5",
-    "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,openai,openrouter,xai]>=1.37.0",
+    "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,mistral,openai,openrouter,xai]>=1.37.0",
     "python-dotenv>=1.2.2",
 ]
 
