@@ -24,6 +24,9 @@ dependencies = [
     "python-dotenv>=1.2.2",
 ]
 
+[project.scripts]
+openextract = "openextract._cli:main"
+
 [project.urls]
 Homepage = "https://github.com/Mellow-Artificial-Intelligence/openextract"
 Documentation = "https://mellow-artificial-intelligence.github.io/openextract/"

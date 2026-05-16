@@ -92,6 +92,27 @@ result = extract(
 
 Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
 
+### Command line
+
+`openextract` ships with a CLI for one-shot extractions from the shell.
+
+```bash
+openextract ./reports/q4.pdf \
+  --schema mypkg.schemas:Invoice \
+  --model openai:gpt-5 \
+  --instructions "Pull totals and line items." \
+  --output json
+```
+
+- `<input_file>` is a positional argument; a local path or `https://` URL.
+- `--schema` is a Python import path of the form `module:ClassName` resolving to a Pydantic model.
+- `--model` is a `pydantic-ai` model identifier.
+- `--instructions` is optional natural-language guidance.
+- `--output` is `json` (default; prints `model_dump_json(indent=2)`) or `repr`.
+
+Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
+`5` other extraction error, `1` any other failure (including bad `--schema` paths).
+
 ## Examples
 
 Runnable scripts live in the [`examples/`](examples/) directory. Each one takes the input path as the first argument and prints a JSON dump of the validated result:
