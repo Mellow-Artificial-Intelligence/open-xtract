@@ -7,7 +7,6 @@ from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlF
 
 __all__ = [
     "extract",
-    "configure_logging",
     "ExtractionError",
     "ModelError",
     "SchemaValidationError",

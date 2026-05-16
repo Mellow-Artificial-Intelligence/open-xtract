@@ -15,6 +15,39 @@ from openextract import (
 )
 from openextract._extract import _get_media, _get_media_type
 
+
+def _build_response(
+    *,
+    content: bytes = b"",
+    content_type: str = "application/octet-stream",
+) -> MagicMock:
+    """Build a MagicMock that behaves like an httpx.Response."""
+    response = MagicMock()
+    response.content = content
+    response.headers = {"content-type": content_type} if content_type else {}
+    response.raise_for_status.return_value = None
+    return response
+
+
+# ---------------------------------------------------------------------------
+# Public API surface
+# ---------------------------------------------------------------------------
+
+
+def test_star_import_exposes_only_existing_names():
+    """`from openextract import *` must not reference names that aren't defined."""
+    namespace: dict = {}
+    exec("from openextract import *", namespace)
+    exported = {name for name in namespace if not name.startswith("_")}
+    assert exported == {
+        "extract",
+        "ExtractionError",
+        "ModelError",
+        "SchemaValidationError",
+        "UrlFetchError",
+    }
+
+
 # ---------------------------------------------------------------------------
 # _get_media_type
 # ---------------------------------------------------------------------------
@@ -76,25 +109,67 @@ class TestGetMedia:
             _get_media(str(missing))
 
     def test_fetches_https_url(self, mocker):
-        fake_response = MagicMock()
-        fake_response.content = b"<html>remote</html>"
+        fake_response = _build_response(content=b"<html>remote</html>")
         mock_get = mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
 
         media_bytes, media_type = _get_media("https://example.com/page.html")
 
-        mock_get.assert_called_once_with("https://example.com/page.html")
+        mock_get.assert_called_once()
+        args, kwargs = mock_get.call_args
+        assert args[0] == "https://example.com/page.html"
+        assert kwargs["follow_redirects"] is True
+        assert kwargs["timeout"] == 30.0
         assert media_bytes == b"<html>remote</html>"
         assert media_type == "text/html"
 
-    def test_fetches_https_url_unknown_extension(self, mocker):
-        fake_response = MagicMock()
-        fake_response.content = b"raw-bytes"
+    def test_fetches_http_url(self, mocker):
+        """http:// URLs are fetched, not treated as local paths."""
+        fake_response = _build_response(content=b"plain")
         mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
 
-        media_bytes, media_type = _get_media("https://example.com/path/blob")
+        media_bytes, media_type = _get_media("http://example.com/page.html")
+
+        assert media_bytes == b"plain"
+        assert media_type == "text/html"
+
+    def test_url_without_useful_extension_falls_back_to_response_header(self, mocker):
+        fake_response = _build_response(
+            content=b"raw-bytes",
+            content_type="application/pdf; charset=binary",
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+
+        media_bytes, media_type = _get_media("https://example.com/download?id=42")
 
         assert media_bytes == b"raw-bytes"
+        assert media_type == "application/pdf"
+
+    def test_url_with_no_extension_and_no_header_stays_octet_stream(self, mocker):
+        fake_response = _build_response(content=b"raw-bytes", content_type="")
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+
+        _, media_type = _get_media("https://example.com/blob")
+
         assert media_type == "application/octet-stream"
+
+    def test_known_url_extension_ignores_response_header(self, mocker):
+        """URL extension wins when it's specific; protects against misconfigured servers."""
+        fake_response = _build_response(content=b"%PDF", content_type="text/html")
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+
+        _, media_type = _get_media("https://example.com/doc.pdf")
+
+        assert media_type == "application/pdf"
+
+    def test_http_error_status_raises(self, mocker):
+        fake_response = _build_response(content=b"<html>404</html>")
+        fake_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "404 Not Found", request=MagicMock(), response=fake_response
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+
+        with pytest.raises(httpx.HTTPStatusError):
+            _get_media("https://example.com/missing.pdf")
 
 
 # ---------------------------------------------------------------------------
@@ -175,6 +250,22 @@ class TestExtract:
 
         with pytest.raises(UrlFetchError, match="dns failure"):
             extract(schema=_Person, model="openai:gpt-5", input_file="https://x/y")
+
+    def test_http_404_from_url_becomes_url_fetch_error(self, mocker):
+        """End-to-end: a 404 response from the URL fetch surfaces as UrlFetchError, not garbage."""
+        fake_response = _build_response(content=b"<html>not found</html>")
+        fake_response.status_code = 404
+        fake_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "Not Found", request=MagicMock(), response=fake_response
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+
+        with pytest.raises(UrlFetchError, match="404"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="https://example.com/missing.pdf",
+            )
 
     def test_validation_error_is_wrapped(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
