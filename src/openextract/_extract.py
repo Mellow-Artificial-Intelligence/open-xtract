@@ -93,6 +93,13 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
     except ImportError:  # pragma: no cover - groq extra is installed
         pass
 
+    try:
+        from mistralai.client.errors.mistralerror import MistralError
+
+        error_types.append(MistralError)
+    except ImportError:  # pragma: no cover - mistral extra is installed
+        pass
+
     return tuple(error_types)
 
 

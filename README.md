@@ -25,7 +25,7 @@
 - **Type-safe output.** Define your shape with Pydantic; get back a validated instance.
 - **One function, many modalities.** Documents (PDF, DOCX), images, audio, and video.
 - **Local files or URLs.** Pass a path or an `https://` URL &mdash; `openextract` handles fetching.
-- **Bring your own model.** OpenAI, Anthropic, Google, AWS Bedrock, xAI, Cohere, Hugging Face, Groq, Cerebras, and Ollama supported out of the box via [`pydantic-ai`](https://github.com/pydantic/pydantic-ai).
+- **Bring your own model.** OpenAI, Anthropic, Google, AWS Bedrock, xAI, Cohere, Hugging Face, Groq, Cerebras, Mistral, and Ollama supported out of the box via [`pydantic-ai`](https://github.com/pydantic/pydantic-ai).
 - **Explicit error handling.** Distinct exceptions for URL fetch, schema validation, and model errors.
 - **100% test coverage**, enforced in CI.
 
@@ -136,6 +136,7 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 | Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`     |
 | Groq         | `groq:llama-3.3-70b-versatile`                      |
 | Cerebras     | `cerebras:llama3.1-70b`                             |
+| Mistral      | `mistral:mistral-large-latest`                      |
 | OpenRouter   | `openrouter:anthropic/claude-sonnet-4`              |
 | Ollama       | `ollama:llama3`                                     |
 
