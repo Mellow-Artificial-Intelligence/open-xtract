@@ -65,10 +65,17 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
         pass
 
     try:
+<<<<<<< HEAD
         from botocore.exceptions import ClientError as BedrockClientError
 
         error_types.append(BedrockClientError)
     except ImportError:  # pragma: no cover - bedrock extra is installed
+=======
+        from cohere.core.api_error import ApiError as CohereApiError
+
+        error_types.append(CohereApiError)
+    except ImportError:  # pragma: no cover - cohere extra is installed
+>>>>>>> d53bbf2 (feat: add Cohere provider support)
         pass
 
     return tuple(error_types)

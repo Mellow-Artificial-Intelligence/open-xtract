@@ -25,7 +25,7 @@
 - **Type-safe output.** Define your shape with Pydantic; get back a validated instance.
 - **One function, many modalities.** Documents (PDF, DOCX), images, audio, and video.
 - **Local files or URLs.** Pass a path or an `https://` URL &mdash; `openextract` handles fetching.
-- **Bring your own model.** OpenAI, Google, and Ollama supported out of the box via [`pydantic-ai`](https://github.com/pydantic/pydantic-ai).
+- **Bring your own model.** OpenAI, Google, Ollama, and Cohere supported out of the box via [`pydantic-ai`](https://github.com/pydantic/pydantic-ai).
 - **Explicit error handling.** Distinct exceptions for URL fetch, schema validation, and model errors.
 - **100% test coverage**, enforced in CI.
 
@@ -132,6 +132,7 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 | Google      | `google-gla:gemini-2.5-pro`                         |
 | AWS Bedrock | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`   |
 | xAI         | `xai:grok-4`                                        |
+| Cohere      | `cohere:command-r-plus`                             |
 | Ollama      | `ollama:llama3`                                     |
 
 Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
