@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+- Add `examples/` directory with runnable scripts for invoice, receipt, and meeting-notes extraction.
+
 ## [0.4.0] - 2026-05-16
 - Accept `http://` URLs in addition to `https://`; previously, plain-HTTP URLs were silently treated as local file paths.
 - Raise `UrlFetchError` on non-2xx responses; previously, the HTML error body was passed to the LLM as media bytes.

@@ -92,6 +92,24 @@ result = extract(
 
 Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
 
+## Examples
+
+Runnable scripts live in the [`examples/`](examples/) directory. Each one takes the input path as the first argument and prints a JSON dump of the validated result:
+
+| Script                    | What it does                                            |
+| ------------------------- | ------------------------------------------------------- |
+| `invoice_extraction.py`   | PDF invoice -> structured line items                    |
+| `receipt_extraction.py`   | receipt image -> merchant, items, totals                |
+| `meeting_notes.py`        | audio -> summary, decisions, action items               |
+
+Run any example with `uv` once your provider credentials (e.g. `OPENAI_API_KEY`) are set:
+
+```bash
+uv run python examples/invoice_extraction.py ./invoices/q4.pdf
+```
+
+[See the examples/ directory](examples/) for the full source.
+
 ### Error handling
 
 ```python
