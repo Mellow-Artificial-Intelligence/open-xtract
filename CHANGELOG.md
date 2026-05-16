@@ -10,6 +10,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add Cohere provider support (extra `pydantic-ai-slim[cohere]`; `cohere.core.api_error.ApiError` wrapped as `ModelError`).
 - Add Hugging Face provider support (extra `pydantic-ai-slim[huggingface]`; `huggingface_hub.errors.HfHubHTTPError` wrapped as `ModelError`).
 - Add Groq provider support (extra `pydantic-ai-slim[groq]`; `groq.APIError` wrapped as `ModelError`).
+- Add Cerebras provider support (model identifiers prefixed `cerebras:`, e.g. `cerebras:llama3.1-70b`). Uses the existing `openai` extra under the hood; set `CEREBRAS_API_KEY` in your environment.
 
 ## [0.5.0] - 2026-05-16
 - Add `extract_async` for async extraction using `Agent.run`.
