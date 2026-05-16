@@ -13,3 +13,8 @@ wheels/
 .env
 tests/test.pdf
 tests/test.png
+
+# Coverage
+.coverage
+htmlcov/
+coverage.xml
