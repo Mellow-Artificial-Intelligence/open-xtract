@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add AWS Bedrock provider support (extra `pydantic-ai-slim[bedrock]`; `botocore.exceptions.ClientError` wrapped as `ModelError`).
 - Add xAI (Grok) provider support (extra `pydantic-ai-slim[xai]`).
 - Add Cohere provider support (extra `pydantic-ai-slim[cohere]`; `cohere.core.api_error.ApiError` wrapped as `ModelError`).
+- Add Hugging Face provider support (extra `pydantic-ai-slim[huggingface]`; `huggingface_hub.errors.HfHubHTTPError` wrapped as `ModelError`).
 
 ## [0.5.0] - 2026-05-16
 - Add `extract_async` for async extraction using `Agent.run`.

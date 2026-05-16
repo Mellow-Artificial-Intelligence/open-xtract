@@ -371,6 +371,26 @@ class TestExtract:
         with pytest.raises(ModelError, match="Model API error"):
             extract(schema=_Person, model="cohere:command-r-plus", input_file=str(local))
 
+    def test_huggingface_http_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        from huggingface_hub.errors import HfHubHTTPError
+
+        class _FakeHfHubHTTPError(HfHubHTTPError):
+            def __init__(self, message: str):
+                # Bypass HfHubHTTPError.__init__ to avoid constructing a Response object.
+                Exception.__init__(self, message)
+
+        _make_agent_mock(mocker, run_sync_side_effect=_FakeHfHubHTTPError("hf upstream down"))
+
+        with pytest.raises(ModelError, match="Model API error"):
+            extract(
+                schema=_Person,
+                model="huggingface:meta-llama/Llama-3.3-70B-Instruct",
+                input_file=str(local),
+            )
+
+
     def test_message_mentioning_model_is_wrapped_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")

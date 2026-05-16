@@ -78,6 +78,13 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
     except ImportError:  # pragma: no cover - cohere extra is installed
         pass
 
+    try:
+        from huggingface_hub.errors import HfHubHTTPError
+
+        error_types.append(HfHubHTTPError)
+    except ImportError:  # pragma: no cover - huggingface extra is installed
+        pass
+
     return tuple(error_types)
 
 
