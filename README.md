@@ -131,6 +131,7 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 | Anthropic   | `anthropic:claude-sonnet-4`                         |
 | Google      | `google-gla:gemini-2.5-pro`                         |
 | AWS Bedrock | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`   |
+| xAI         | `xai:grok-4`                                        |
 | Ollama      | `ollama:llama3`                                     |
 
 Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
