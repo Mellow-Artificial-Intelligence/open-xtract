@@ -320,7 +320,6 @@ class TestExtract:
         with pytest.raises(ModelError, match="Model API error"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
 
-<<<<<<< HEAD
     def test_anthropic_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
