@@ -1,7 +1,8 @@
 """Tests for openextract._extract."""
 
+import asyncio
 import io
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
@@ -14,6 +15,9 @@ from openextract import (
     SchemaValidationError,
     UrlFetchError,
     extract,
+    extract_async,
+    extract_many,
+    extract_many_async,
 )
 from openextract._extract import _get_media, _get_media_type
 
@@ -43,6 +47,9 @@ def test_star_import_exposes_only_existing_names():
     exported = {name for name in namespace if not name.startswith("_")}
     assert exported == {
         "extract",
+        "extract_async",
+        "extract_many",
+        "extract_many_async",
         "ExtractionError",
         "ModelError",
         "SchemaValidationError",
@@ -340,6 +347,17 @@ class TestExtract:
         # the message mentions "model".
         assert not isinstance(exc_info.value, ModelError)
 
+    def test_passes_through_existing_extraction_error(self, tmp_path, mocker):
+        """If the wrapped code already raises an ExtractionError, it is not re-wrapped."""
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        original = ModelError("already mapped")
+        _make_agent_mock(mocker, run_sync_side_effect=original)
+
+        with pytest.raises(ModelError) as exc_info:
+            extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
+        assert exc_info.value is original
+
 
 # ---------------------------------------------------------------------------
 # extract: input_file polymorphism
@@ -442,3 +460,288 @@ class TestExtractInputs:
 
         with pytest.raises(TypeError, match="input_file must be"):
             extract(schema=_Person, model="openai:gpt-5", input_file=12345)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# Async helpers and shared mock builder
+# ---------------------------------------------------------------------------
+
+
+def _make_async_agent_mock(mocker, output=None, run_side_effect=None):
+    """Patch openextract._extract.Agent and stub the async ``run`` method."""
+    agent_instance = MagicMock()
+    if run_side_effect is not None:
+        agent_instance.run = AsyncMock(side_effect=run_side_effect)
+    else:
+        run_result = MagicMock()
+        run_result.output = output
+        agent_instance.run = AsyncMock(return_value=run_result)
+    agent_cls = mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+    return agent_cls, agent_instance
+
+
+# ---------------------------------------------------------------------------
+# extract_async
+# ---------------------------------------------------------------------------
+
+
+class TestExtractAsync:
+    async def test_returns_schema_instance_from_local_file(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        expected = _Person(name="Grace", age=85)
+        agent_cls, agent_instance = _make_async_agent_mock(mocker, output=expected)
+
+        result = await extract_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+            instructions="extract",
+        )
+
+        assert result is expected
+        agent_cls.assert_called_once()
+        agent_instance.run.assert_awaited_once()
+
+    async def test_ollama_model_wraps_output_in_native_output(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        expected = _Person(name="Linus", age=54)
+        agent_cls, _ = _make_async_agent_mock(mocker, output=expected)
+
+        result = await extract_async(
+            schema=_Person,
+            model="ollama:llama3",
+            input_file=str(local),
+        )
+
+        assert result is expected
+        output_type = agent_cls.call_args.kwargs["output_type"]
+        assert output_type is not _Person
+        assert type(output_type).__name__ == "NativeOutput"
+
+    async def test_http_status_error_is_wrapped(self, mocker):
+        response = MagicMock()
+        response.status_code = 502
+        err = httpx.HTTPStatusError("boom", request=MagicMock(), response=response)
+        mocker.patch("openextract._extract._get_media", side_effect=err)
+
+        with pytest.raises(UrlFetchError, match="502"):
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file="https://x/y")
+
+    async def test_request_error_is_wrapped(self, mocker):
+        err = httpx.ConnectError("dns failure")
+        mocker.patch("openextract._extract._get_media", side_effect=err)
+
+        with pytest.raises(UrlFetchError, match="dns failure"):
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file="https://x/y")
+
+    async def test_validation_error_is_wrapped(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        try:
+            _Person(name="x", age="not-an-int")  # type: ignore[arg-type]
+        except ValidationError as exc:
+            validation_error = exc
+        _make_async_agent_mock(mocker, run_side_effect=validation_error)
+
+        with pytest.raises(SchemaValidationError, match="Model output did not match schema"):
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+    async def test_generic_exception_is_wrapped_as_extraction_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        _make_async_agent_mock(mocker, run_side_effect=RuntimeError("kaboom"))
+
+        with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+    async def test_model_keyword_exception_is_not_promoted_to_model_error(self, tmp_path, mocker):
+        """Mirrors the sync extract() behavior: substring 'model' no longer triggers ModelError."""
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        _make_async_agent_mock(mocker, run_side_effect=RuntimeError("unknown model identifier"))
+
+        with pytest.raises(ExtractionError) as exc_info:
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
+        assert not isinstance(exc_info.value, ModelError)
+
+    async def test_missing_media_type_for_bytes_input_raises_type_error(self, mocker):
+        """TypeError from _get_media must propagate out of extract_async untouched."""
+        _make_async_agent_mock(mocker, output=_Person(name="x", age=1))
+
+        with pytest.raises(TypeError, match="media_type is required"):
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file=b"abc")
+
+    async def test_passes_through_existing_extraction_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        original = SchemaValidationError("already mapped")
+        _make_async_agent_mock(mocker, run_side_effect=original)
+
+        with pytest.raises(SchemaValidationError) as exc_info:
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
+        assert exc_info.value is original
+
+
+# ---------------------------------------------------------------------------
+# extract_many
+# ---------------------------------------------------------------------------
+
+
+class TestExtractMany:
+    def test_preserves_input_order(self, tmp_path, mocker):
+        files = []
+        for i in range(4):
+            p = tmp_path / f"f{i}.txt"
+            p.write_bytes(b"x")
+            files.append(str(p))
+
+        people = [_Person(name=f"n{i}", age=i) for i in range(4)]
+        # Map each path to its expected person via side_effect.
+        path_to_person = dict(zip(files, people, strict=True))
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            # Tiny await yields control so tasks can interleave.
+            await asyncio.sleep(0)
+            return path_to_person[input_file]
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        results = extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
+
+        assert results == people
+
+    def test_max_concurrency_is_respected(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(10)]
+        for f in files:
+            from pathlib import Path
+
+            Path(f).write_bytes(b"x")
+
+        in_flight = 0
+        peak = 0
+        lock = asyncio.Lock()
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            nonlocal in_flight, peak
+            async with lock:
+                in_flight += 1
+                peak = max(peak, in_flight)
+            await asyncio.sleep(0.01)
+            async with lock:
+                in_flight -= 1
+            return _Person(name=input_file, age=1)
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        results = extract_many(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+            max_concurrency=3,
+        )
+
+        assert len(results) == 10
+        assert peak <= 3
+        assert peak >= 1
+
+    def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            if input_file.endswith("f1.txt"):
+                raise ModelError("boom on f1")
+            await asyncio.sleep(0.01)
+            return _Person(name=input_file, age=1)
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        with pytest.raises(ModelError, match="boom on f1"):
+            extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
+
+    def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            if input_file.endswith("f1.txt"):
+                raise ModelError("boom on f1")
+            return _Person(name=input_file, age=1)
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        results = extract_many(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+            return_exceptions=True,
+        )
+
+        assert isinstance(results[0], _Person)
+        assert isinstance(results[1], ModelError)
+        assert isinstance(results[2], _Person)
+
+
+# ---------------------------------------------------------------------------
+# extract_many_async
+# ---------------------------------------------------------------------------
+
+
+class TestExtractManyAsync:
+    async def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            if input_file.endswith("f0.txt"):
+                raise ModelError("boom first")
+            await asyncio.sleep(0.01)
+            return _Person(name=input_file, age=1)
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        with pytest.raises(ModelError, match="boom first"):
+            await extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=files,
+            )
+
+    async def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            if input_file.endswith("f1.txt"):
+                raise SchemaValidationError("bad schema")
+            return _Person(name=input_file, age=1)
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        results = await extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+            return_exceptions=True,
+        )
+
+        assert isinstance(results[0], _Person)
+        assert isinstance(results[1], SchemaValidationError)
+        assert isinstance(results[2], _Person)
+
+    async def test_preserves_input_order(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(5)]
+        expected = [_Person(name=f, age=i) for i, f in enumerate(files)]
+        mapping = dict(zip(files, expected, strict=True))
+
+        async def fake_extract_async(schema, model, input_file, instructions=None):
+            await asyncio.sleep(0)
+            return mapping[input_file]
+
+        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+
+        results = await extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+        )
+
+        assert results == expected

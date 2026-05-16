@@ -1,6 +1,8 @@
 """Core extraction functionality."""
 
+import asyncio
 import mimetypes
+from collections.abc import Iterable
 from pathlib import Path
 from typing import BinaryIO, TypeVar
 
@@ -110,6 +112,36 @@ def _get_media(
     )
 
 
+def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent:
+    """Construct the pydantic_ai Agent, handling the ollama output-type quirk."""
+    return Agent(
+        model,
+        instructions=instructions,
+        output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
+    )
+
+
+def _build_run_inputs(file_bytes: bytes, file_type: str) -> list:
+    """Build the prompt inputs passed to the agent run."""
+    return [
+        "Extract the requested information from this document.",
+        BinaryContent(data=file_bytes, media_type=file_type),
+    ]
+
+
+def _map_exception(exc: BaseException) -> ExtractionError:
+    """Translate a low-level exception into the appropriate ExtractionError subclass."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return UrlFetchError(f"Failed to fetch URL: {exc.response.status_code}")
+    if isinstance(exc, httpx.RequestError):
+        return UrlFetchError(f"Failed to fetch URL: {exc}")
+    if isinstance(exc, ValidationError):
+        return SchemaValidationError(f"Model output did not match schema: {exc}")
+    if isinstance(exc, _MODEL_ERROR_TYPES):
+        return ModelError(f"Model API error: {exc}")
+    return ExtractionError(f"Extraction failed: {exc}")
+
+
 def extract(
     schema: type[T],
     model: str,
@@ -145,27 +177,109 @@ def extract(
     try:
         load_dotenv()
         file_bytes, file_type = _get_media(input_file, media_type=media_type)
-        agent = Agent(
-            model,
-            instructions=instructions,
-            output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
-        )
-        result = agent.run_sync(
-            [
-                "Extract the requested information from this document.",
-                BinaryContent(data=file_bytes, media_type=file_type),
-            ]
-        )
+        agent = _build_agent(schema, model, instructions)
+        result = agent.run_sync(_build_run_inputs(file_bytes, file_type))
         return result.output
-    except httpx.HTTPStatusError as e:
-        raise UrlFetchError(f"Failed to fetch URL: {e.response.status_code}") from e
-    except httpx.RequestError as e:
-        raise UrlFetchError(f"Failed to fetch URL: {e}") from e
-    except ValidationError as e:
-        raise SchemaValidationError(f"Model output did not match schema: {e}") from e
     except TypeError:
         raise
+    except ExtractionError:
+        raise
     except Exception as e:
-        if isinstance(e, _MODEL_ERROR_TYPES):
-            raise ModelError(f"Model API error: {e}") from e
-        raise ExtractionError(f"Extraction failed: {e}") from e
+        raise _map_exception(e) from e
+
+
+async def extract_async(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+) -> T:
+    """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
+    try:
+        load_dotenv()
+        file_bytes, file_type = _get_media(input_file, media_type=media_type)
+        agent = _build_agent(schema, model, instructions)
+        result = await agent.run(_build_run_inputs(file_bytes, file_type))
+        return result.output
+    except TypeError:
+        raise
+    except ExtractionError:
+        raise
+    except Exception as e:
+        raise _map_exception(e) from e
+
+
+async def _gather_extractions(
+    schema: type[T],
+    model: str,
+    input_files: Iterable[str | bytes | BinaryIO],
+    instructions: str | None,
+    max_concurrency: int,
+    return_exceptions: bool,
+) -> list:
+    files = list(input_files)
+    semaphore = asyncio.Semaphore(max_concurrency)
+
+    async def _bounded(item):
+        async with semaphore:
+            return await extract_async(schema, model, item, instructions)
+
+    tasks = [_bounded(item) for item in files]
+    return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
+
+
+def extract_many(
+    schema: type[T],
+    model: str,
+    input_files: Iterable[str | bytes | BinaryIO],
+    instructions: str | None = None,
+    *,
+    max_concurrency: int = 5,
+    return_exceptions: bool = False,
+) -> list:
+    """Run :func:`extract_async` over many inputs concurrently from sync code.
+
+    Args:
+        schema: A Pydantic model class defining the expected output structure.
+        model: The model identifier.
+        input_files: Iterable of paths, URLs, or already-resolved bytes.
+        instructions: Optional natural-language guidance.
+        max_concurrency: Maximum number of in-flight extractions.
+        return_exceptions: If True, exceptions are returned in-place instead of raised
+            (mirrors :func:`asyncio.gather`).
+
+    Returns:
+        A list of results (or exceptions, when ``return_exceptions=True``) in input order.
+    """
+    return asyncio.run(
+        _gather_extractions(
+            schema,
+            model,
+            input_files,
+            instructions,
+            max_concurrency,
+            return_exceptions,
+        )
+    )
+
+
+async def extract_many_async(
+    schema: type[T],
+    model: str,
+    input_files: Iterable[str | bytes | BinaryIO],
+    instructions: str | None = None,
+    *,
+    max_concurrency: int = 5,
+    return_exceptions: bool = False,
+) -> list:
+    """Async sibling of :func:`extract_many`."""
+    return await _gather_extractions(
+        schema,
+        model,
+        input_files,
+        instructions,
+        max_concurrency,
+        return_exceptions,
+    )
