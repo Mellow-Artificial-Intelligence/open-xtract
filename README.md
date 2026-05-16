@@ -125,12 +125,13 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 
 `model` follows the `pydantic-ai` provider prefix convention:
 
-| Provider  | Example identifier          |
-| --------- | --------------------------- |
-| OpenAI    | `openai:gpt-5`              |
-| Anthropic | `anthropic:claude-sonnet-4` |
-| Google    | `google-gla:gemini-2.5-pro` |
-| Ollama    | `ollama:llama3`             |
+| Provider    | Example identifier                                  |
+| ----------- | --------------------------------------------------- |
+| OpenAI      | `openai:gpt-5`                                      |
+| Anthropic   | `anthropic:claude-sonnet-4`                         |
+| Google      | `google-gla:gemini-2.5-pro`                         |
+| AWS Bedrock | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`   |
+| Ollama      | `ollama:llama3`                                     |
 
 Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
 

@@ -5,6 +5,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 - Add Anthropic provider support (extra `pydantic-ai-slim[anthropic]`; provider errors wrapped as `ModelError`).
+- Add AWS Bedrock provider support (extra `pydantic-ai-slim[bedrock]`; `botocore.exceptions.ClientError` wrapped as `ModelError`).
 
 ## [0.5.0] - 2026-05-16
 - Add `extract_async` for async extraction using `Agent.run`.
