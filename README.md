@@ -80,6 +80,14 @@ result = extract(
 )
 ```
 
+### Bytes or file-like objects
+
+```python
+result = extract(schema=PdfInfo, model="openai:gpt-5", input_file=pdf_bytes, media_type="application/pdf")
+# A file-like object with .read() works too; pass media_type explicitly:
+result = extract(schema=PdfInfo, model="openai:gpt-5", input_file=open("q4.pdf", "rb"), media_type="application/pdf")
+```
+
 ### Choosing a model
 
 `model` follows the `pydantic-ai` provider prefix convention:
@@ -158,14 +166,15 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 ## API reference
 
-### `extract(schema, model, input_file, instructions=None)`
+### `extract(schema, model, input_file, instructions=None, *, media_type=None)`
 
-| Argument       | Type              | Description                                                      |
-| -------------- | ----------------- | ---------------------------------------------------------------- |
-| `schema`       | `type[BaseModel]` | A Pydantic model class describing the desired output shape.      |
-| `model`        | `str`             | A `pydantic-ai` model identifier (e.g. `"openai:gpt-5"`).        |
-| `input_file`   | `str`             | A local file path or an `https://` URL.                          |
-| `instructions` | `str \| None`     | Optional natural-language guidance for the model.                |
+| Argument       | Type                          | Description                                                                                                       |
+| -------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `schema`       | `type[BaseModel]`             | A Pydantic model class describing the desired output shape.                                                       |
+| `model`        | `str`                         | A `pydantic-ai` model identifier (e.g. `"openai:gpt-5"`).                                                         |
+| `input_file`   | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
+| `instructions` | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
+| `media_type`   | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
 
 Returns an instance of `schema`.
 

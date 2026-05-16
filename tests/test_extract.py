@@ -1,10 +1,12 @@
 """Tests for openextract._extract."""
 
+import io
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
 from pydantic import BaseModel, ValidationError
+from pydantic_ai import BinaryContent
 
 from openextract import (
     ExtractionError,
@@ -337,3 +339,106 @@ class TestExtract:
         # The new classifier should NOT promote this to ModelError just because
         # the message mentions "model".
         assert not isinstance(exc_info.value, ModelError)
+
+
+# ---------------------------------------------------------------------------
+# extract: input_file polymorphism
+# ---------------------------------------------------------------------------
+
+
+def _binary_content_arg(agent_instance) -> BinaryContent:
+    """Pull the BinaryContent that was passed to agent.run_sync."""
+    (call_args,) = agent_instance.run_sync.call_args.args
+    binary = next(part for part in call_args if isinstance(part, BinaryContent))
+    return binary
+
+
+class TestExtractInputs:
+    def test_bytes_input_with_media_type(self, mocker):
+        expected = _Person(name="Grace", age=85)
+        _, agent_instance = _make_agent_mock(mocker, output=expected)
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=b"raw-payload",
+            media_type="application/pdf",
+        )
+
+        assert result is expected
+        binary = _binary_content_arg(agent_instance)
+        assert binary.data == b"raw-payload"
+        assert binary.media_type == "application/pdf"
+
+    def test_filelike_input_with_media_type(self, mocker):
+        expected = _Person(name="Ada", age=36)
+        _, agent_instance = _make_agent_mock(mocker, output=expected)
+        buffer = io.BytesIO(b"buffered-bytes")
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=buffer,
+            media_type="image/png",
+        )
+
+        assert result is expected
+        binary = _binary_content_arg(agent_instance)
+        assert binary.data == b"buffered-bytes"
+        assert binary.media_type == "image/png"
+        # Caller owns the handle; we must not close it.
+        assert not buffer.closed
+
+    def test_bytes_input_without_media_type_raises(self, mocker):
+        _make_agent_mock(mocker, output=_Person(name="x", age=1))
+
+        with pytest.raises(TypeError, match="media_type is required"):
+            extract(schema=_Person, model="openai:gpt-5", input_file=b"abc")
+
+    def test_filelike_input_without_media_type_raises(self, mocker):
+        _make_agent_mock(mocker, output=_Person(name="x", age=1))
+
+        with pytest.raises(TypeError, match="media_type is required"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=io.BytesIO(b"abc"),
+            )
+
+    def test_str_input_still_works(self, tmp_path, mocker):
+        local = tmp_path / "doc.txt"
+        local.write_bytes(b"file-bytes")
+        expected = _Person(name="Linus", age=54)
+        _, agent_instance = _make_agent_mock(mocker, output=expected)
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+        )
+
+        assert result is expected
+        binary = _binary_content_arg(agent_instance)
+        assert binary.data == b"file-bytes"
+        assert binary.media_type == "text/plain"
+
+    def test_str_input_media_type_override(self, tmp_path, mocker):
+        local = tmp_path / "doc.txt"
+        local.write_bytes(b"file-bytes")
+        _, agent_instance = _make_agent_mock(mocker, output=_Person(name="x", age=1))
+
+        extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+            media_type="text/markdown",
+        )
+
+        binary = _binary_content_arg(agent_instance)
+        assert binary.media_type == "text/markdown"
+
+    def test_unsupported_input_type_raises_type_error(self, mocker):
+        _make_agent_mock(mocker, output=_Person(name="x", age=1))
+
+        with pytest.raises(TypeError, match="input_file must be"):
+            extract(schema=_Person, model="openai:gpt-5", input_file=12345)  # type: ignore[arg-type]
