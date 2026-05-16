@@ -11,6 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add keyword-only `media_type` parameter for explicit MIME typing; required for `bytes` and file-like inputs, and overrides the guess for `str` paths and URLs.
 - Add `extract_async` for async extraction using `Agent.run`.
 - Add `extract_many` and `extract_many_async` for concurrent batch extraction with configurable concurrency and optional exception capture.
+- Add optional `max_retries` and `retry_backoff` keyword arguments to `extract()` for retrying transient `ModelError` failures with exponential backoff and jitter. Default behavior is unchanged (no retries).
 
 ## [0.4.0] - 2026-05-16
 - Accept `http://` URLs in addition to `https://`; previously, plain-HTTP URLs were silently treated as local file paths.
