@@ -44,6 +44,7 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
         pass
 
     try:
+        # Also covers OpenRouter, which uses the openai SDK under the hood.
         from openai import APIError as OpenAIAPIError
 
         error_types.append(OpenAIAPIError)

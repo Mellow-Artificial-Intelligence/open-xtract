@@ -1193,7 +1193,7 @@ version = "0.5.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
-    { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "openai", "xai"] },
+    { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "openai", "openrouter", "xai"] },
     { name = "python-dotenv" },
 ]
 
@@ -1209,7 +1209,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "openai", "xai"], specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "openai", "openrouter", "xai"], specifier = ">=1.37.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
 
@@ -1559,6 +1559,9 @@ logfire = [
 openai = [
     { name = "openai" },
     { name = "tiktoken" },
+]
+openrouter = [
+    { name = "openai" },
 ]
 xai = [
     { name = "xai-sdk" },
