@@ -136,7 +136,10 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 | Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`     |
 | Groq         | `groq:llama-3.3-70b-versatile`                      |
 | Cerebras     | `cerebras:llama3.1-70b`                             |
+| OpenRouter   | `openrouter:anthropic/claude-sonnet-4`              |
 | Ollama       | `ollama:llama3`                                     |
+
+OpenRouter and Cerebras are openai-compatible (they go through the `openai` client under the hood), so their errors are already classified via the existing openai path &mdash; no separate exception handling is needed.
 
 Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
 
