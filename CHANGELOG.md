@@ -14,6 +14,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add OpenRouter provider support (extra `pydantic-ai-slim[openrouter]`; openai-compatible so existing exception classification applies).
 - Add Mistral provider support (extra `pydantic-ai-slim[mistral]`; `mistralai.client.errors.mistralerror.MistralError` wrapped as `ModelError`).
 - Document Outlines provider support (`outlines:` prefix; install separately with a backend extra such as `pydantic-ai-slim[outlines-transformers]`).
+- Clarify Ollama support: it works via the `openai`-compatible code path; `pydantic-ai-slim` does not publish a dedicated `ollama` extra, so no separate dependency is required.
 
 ## [0.5.0] - 2026-05-16
 - Add `extract_async` for async extraction using `Agent.run`.
