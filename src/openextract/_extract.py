@@ -19,6 +19,41 @@ _URL_PREFIXES = ("http://", "https://")
 _URL_FETCH_TIMEOUT = 30.0
 
 
+def _collect_model_error_types() -> tuple[type[BaseException], ...]:
+    """Collect known provider/model error base classes that are importable.
+
+    Each import is guarded so a missing optional provider does not break the
+    package. The returned tuple is suitable for use with ``isinstance``.
+    """
+    error_types: list[type[BaseException]] = []
+
+    try:
+        from pydantic_ai.exceptions import ModelAPIError
+
+        error_types.append(ModelAPIError)
+    except ImportError:  # pragma: no cover - pydantic-ai is a hard dependency
+        pass
+
+    try:
+        from openai import APIError as OpenAIAPIError
+
+        error_types.append(OpenAIAPIError)
+    except ImportError:  # pragma: no cover - openai extra is installed
+        pass
+
+    try:
+        from google.genai.errors import APIError as GoogleAPIError
+
+        error_types.append(GoogleAPIError)
+    except ImportError:  # pragma: no cover - google extra is installed
+        pass
+
+    return tuple(error_types)
+
+
+_MODEL_ERROR_TYPES: tuple[type[BaseException], ...] = _collect_model_error_types()
+
+
 def _get_media_type(file_path: str) -> str:
     """Return the MIME type for a file path (e.g. 'application/pdf')."""
     media_type, _ = mimetypes.guess_type(file_path)
@@ -85,6 +120,6 @@ def extract(schema: type[T], model: str, input_file: str, instructions: str | No
     except ValidationError as e:
         raise SchemaValidationError(f"Model output did not match schema: {e}") from e
     except Exception as e:
-        if "api" in str(type(e).__module__).lower() or "model" in str(e).lower():
+        if isinstance(e, _MODEL_ERROR_TYPES):
             raise ModelError(f"Model API error: {e}") from e
         raise ExtractionError(f"Extraction failed: {e}") from e

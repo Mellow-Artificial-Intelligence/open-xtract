@@ -279,21 +279,33 @@ class TestExtract:
         with pytest.raises(SchemaValidationError, match="Model output did not match schema"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
 
-    def test_api_module_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+    def test_pydantic_ai_model_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
+        from pydantic_ai.exceptions import ModelHTTPError
 
-        class _ApiThing(Exception):
-            pass
-
-        # Force the exception's defining module to look like an "api" module.
-        _ApiThing.__module__ = "some.vendor.api.client"
-        _make_agent_mock(mocker, run_sync_side_effect=_ApiThing("upstream down"))
+        provider_error = ModelHTTPError(status_code=503, model_name="gpt-5", body="upstream down")
+        _make_agent_mock(mocker, run_sync_side_effect=provider_error)
 
         with pytest.raises(ModelError, match="Model API error"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
 
-    def test_message_mentioning_model_is_wrapped_as_model_error(self, tmp_path, mocker):
+    def test_openai_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        from openai import APIError as OpenAIAPIError
+
+        class _FakeOpenAIError(OpenAIAPIError):
+            def __init__(self, message: str):
+                # Bypass OpenAIAPIError.__init__ to avoid constructing request/body objects.
+                Exception.__init__(self, message)
+
+        _make_agent_mock(mocker, run_sync_side_effect=_FakeOpenAIError("rate limited"))
+
+        with pytest.raises(ModelError, match="Model API error"):
+            extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+    def test_message_mentioning_model_is_wrapped_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
         _make_agent_mock(
@@ -301,7 +313,7 @@ class TestExtract:
             run_sync_side_effect=RuntimeError("unknown model identifier"),
         )
 
-        with pytest.raises(ModelError, match="Model API error"):
+        with pytest.raises(ExtractionError, match="Extraction failed: unknown model identifier"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
 
     def test_generic_exception_is_wrapped_as_extraction_error(self, tmp_path, mocker):
@@ -311,3 +323,17 @@ class TestExtract:
 
         with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+    def test_message_mentioning_model_is_not_subclass_of_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        _make_agent_mock(
+            mocker,
+            run_sync_side_effect=RuntimeError("the model said no"),
+        )
+
+        with pytest.raises(ExtractionError) as exc_info:
+            extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
+        # The new classifier should NOT promote this to ModelError just because
+        # the message mentions "model".
+        assert not isinstance(exc_info.value, ModelError)
