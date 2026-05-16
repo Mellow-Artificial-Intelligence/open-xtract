@@ -125,24 +125,27 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 
 `model` follows the `pydantic-ai` provider prefix convention:
 
-| Provider     | Example identifier                                  |
-| ------------ | --------------------------------------------------- |
-| OpenAI       | `openai:gpt-5`                                      |
-| Anthropic    | `anthropic:claude-sonnet-4`                         |
-| Google       | `google-gla:gemini-2.5-pro`                         |
-| AWS Bedrock  | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`   |
-| xAI          | `xai:grok-4`                                        |
-| Cohere       | `cohere:command-r-plus`                             |
-| Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`     |
-| Groq         | `groq:llama-3.3-70b-versatile`                      |
-| Cerebras     | `cerebras:llama3.1-70b`                             |
-| Mistral      | `mistral:mistral-large-latest`                      |
-| OpenRouter   | `openrouter:anthropic/claude-sonnet-4`              |
-| Ollama       | `ollama:llama3`                                     |
+| Provider     | Example identifier                                       |
+| ------------ | -------------------------------------------------------- |
+| OpenAI       | `openai:gpt-5`                                           |
+| Anthropic    | `anthropic:claude-sonnet-4`                              |
+| Google       | `google-gla:gemini-2.5-pro`                              |
+| AWS Bedrock  | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`        |
+| xAI          | `xai:grok-4`                                             |
+| Cohere       | `cohere:command-r-plus`                                  |
+| Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`          |
+| Groq         | `groq:llama-3.3-70b-versatile`                           |
+| Cerebras     | `cerebras:llama3.1-70b`                                  |
+| Mistral      | `mistral:mistral-large-latest`                           |
+| OpenRouter   | `openrouter:anthropic/claude-sonnet-4`                   |
+| Outlines     | `outlines:transformers/meta-llama/Llama-3.2-1B-Instruct` |
+| Ollama       | `ollama:llama3`                                          |
+
+Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
 
 OpenRouter and Cerebras are openai-compatible (they go through the `openai` client under the hood), so their errors are already classified via the existing openai path &mdash; no separate exception handling is needed.
 
-Set the corresponding provider credentials in your environment (e.g. `OPENAI_API_KEY`). `openextract` loads `.env` automatically.
+Outlines runs models locally (via HuggingFace transformers, llama-cpp, MLX, vLLM, or SGLang) and enforces JSON-schema-conforming output at the token level. Install it separately alongside the backend you want, for example `pip install pydantic-ai-slim[outlines-transformers]`.
 
 ### Command line
 
