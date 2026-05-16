@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add `openextract` command-line interface for running extractions from the shell.
 - Add `examples/` directory with runnable scripts for invoice, receipt, and meeting-notes extraction.
 - Replace the substring-based exception classifier in `extract()` with typed provider-error matching against a tuple of known model-error base classes (`pydantic_ai.exceptions.ModelAPIError`, `openai.APIError`, `google.genai.errors.APIError`). Behavior change: an arbitrary exception whose message merely mentions "model" is no longer promoted to `ModelError`; it is now wrapped as `ExtractionError` unless the exception type is a subclass of a known provider error.
+- Accept raw `bytes` or any binary file-like object as `extract`'s `input_file`.
+- Add keyword-only `media_type` parameter for explicit MIME typing; required for `bytes` and file-like inputs, and overrides the guess for `str` paths and URLs.
 
 ## [0.4.0] - 2026-05-16
 - Accept `http://` URLs in addition to `https://`; previously, plain-HTTP URLs were silently treated as local file paths.
