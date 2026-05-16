@@ -463,6 +463,104 @@ class TestExtractInputs:
 
 
 # ---------------------------------------------------------------------------
+# extract retry behavior
+# ---------------------------------------------------------------------------
+
+
+class TestExtractRetry:
+    def test_no_retry_by_default_raises_immediately(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        once = mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=ModelError("upstream down"),
+        )
+
+        with pytest.raises(ModelError, match="upstream down"):
+            extract(schema=_Person, model="openai:gpt-5", input_file="ignored")
+
+        assert once.call_count == 1
+        sleep_mock.assert_not_called()
+
+    def test_retry_succeeds_after_transient_model_errors(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        expected = _Person(name="Grace", age=85)
+        once = mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=[ModelError("flaky"), ModelError("flaky"), expected],
+        )
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file="ignored",
+            max_retries=2,
+        )
+
+        assert result is expected
+        assert once.call_count == 3
+        assert sleep_mock.call_count == 2
+
+    def test_retry_exhausted_raises_last_model_error(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        once = mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=ModelError("persistent"),
+        )
+
+        with pytest.raises(ModelError, match="persistent"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=2,
+            )
+
+        assert once.call_count == 3
+        assert sleep_mock.call_count == 2
+
+    def test_backoff_schedule_uses_exponential_jitter(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=ModelError("nope"),
+        )
+
+        with pytest.raises(ModelError):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=3,
+                retry_backoff=1.0,
+            )
+
+        delays = [call.args[0] for call in sleep_mock.call_args_list]
+        assert len(delays) == 3
+        assert delays == sorted(delays)
+        assert 1.0 <= delays[0] <= 1.25
+        assert 2.0 <= delays[1] <= 2.5
+        assert 4.0 <= delays[2] <= 5.0
+
+    def test_schema_validation_error_is_not_retried(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        once = mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=SchemaValidationError("bad shape"),
+        )
+
+        with pytest.raises(SchemaValidationError, match="bad shape"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=3,
+            )
+
+        assert once.call_count == 1
+        sleep_mock.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
 # Async helpers and shared mock builder
 # ---------------------------------------------------------------------------
 

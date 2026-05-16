@@ -88,6 +88,20 @@ result = extract(schema=PdfInfo, model="openai:gpt-5", input_file=pdf_bytes, med
 result = extract(schema=PdfInfo, model="openai:gpt-5", input_file=open("q4.pdf", "rb"), media_type="application/pdf")
 ```
 
+### Retry on transient model errors
+
+```python
+result = extract(
+    schema=PdfInfo,
+    model="openai:gpt-5",
+    input_file="./reports/q4.pdf",
+    max_retries=3,
+)
+```
+
+`max_retries` defaults to `0` (single attempt). When set, `extract` retries only on `ModelError` and sleeps `retry_backoff * (2 ** attempt)` seconds (with up to 25% jitter) between attempts. `retry_backoff` defaults to `1.0` second.
+
+
 ### Choosing a model
 
 `model` follows the `pydantic-ai` provider prefix convention:
@@ -166,15 +180,17 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 ## API reference
 
-### `extract(schema, model, input_file, instructions=None, *, media_type=None)`
+### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
 
-| Argument       | Type                          | Description                                                                                                       |
-| -------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `schema`       | `type[BaseModel]`             | A Pydantic model class describing the desired output shape.                                                       |
-| `model`        | `str`                         | A `pydantic-ai` model identifier (e.g. `"openai:gpt-5"`).                                                         |
-| `input_file`   | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
-| `instructions` | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
-| `media_type`   | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
+| Argument        | Type                          | Description                                                                                                       |
+| --------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `schema`        | `type[BaseModel]`             | A Pydantic model class describing the desired output shape.                                                       |
+| `model`         | `str`                         | A `pydantic-ai` model identifier (e.g. `"openai:gpt-5"`).                                                         |
+| `input_file`    | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
+| `instructions`  | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
+| `media_type`    | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
+| `max_retries`   | `int` (keyword-only)          | Extra attempts after a `ModelError`. Defaults to `0` (no retry).                                                  |
+| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter between retries.                                                 |
 
 Returns an instance of `schema`.
 

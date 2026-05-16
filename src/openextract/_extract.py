@@ -2,6 +2,8 @@
 
 import asyncio
 import mimetypes
+import random
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import BinaryIO, TypeVar
@@ -142,6 +144,28 @@ def _map_exception(exc: BaseException) -> ExtractionError:
     return ExtractionError(f"Extraction failed: {exc}")
 
 
+def _extract_once(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None,
+    media_type: str | None,
+) -> T:
+    """Perform a single sync extraction attempt, classifying exceptions on failure."""
+    try:
+        load_dotenv()
+        file_bytes, file_type = _get_media(input_file, media_type=media_type)
+        agent = _build_agent(schema, model, instructions)
+        result = agent.run_sync(_build_run_inputs(file_bytes, file_type))
+        return result.output
+    except TypeError:
+        raise
+    except ExtractionError:
+        raise
+    except Exception as e:
+        raise _map_exception(e) from e
+
+
 def extract(
     schema: type[T],
     model: str,
@@ -149,6 +173,8 @@ def extract(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> T:
     """
     Extract structured data from a document, image, audio, or video file using an LLM.
@@ -162,6 +188,12 @@ def extract(
         instructions: Optional natural-language guidance for the LLM.
         media_type: Optional MIME type. Required for ``bytes`` and file-like
             inputs; overrides the guess for ``str`` inputs when provided.
+        max_retries: Number of additional attempts to make after a ``ModelError``.
+            Defaults to 0 (no retries, single attempt). Only ``ModelError``
+            triggers a retry; other exceptions propagate immediately.
+        retry_backoff: Base backoff in seconds. Sleep between attempts is
+            ``retry_backoff * (2 ** attempt) * (1 + random.uniform(0, 0.25))``,
+            i.e. exponential backoff with up to 25% jitter.
 
     Returns:
         An instance of the schema populated with extracted data.
@@ -171,21 +203,19 @@ def extract(
             is not provided.
         UrlFetchError: If the URL cannot be fetched or returns a non-2xx status.
         SchemaValidationError: If the model output doesn't match the schema.
-        ModelError: If there's an error communicating with the model API.
+        ModelError: If retries (if any) are exhausted.
         ExtractionError: For other extraction failures.
     """
-    try:
-        load_dotenv()
-        file_bytes, file_type = _get_media(input_file, media_type=media_type)
-        agent = _build_agent(schema, model, instructions)
-        result = agent.run_sync(_build_run_inputs(file_bytes, file_type))
-        return result.output
-    except TypeError:
-        raise
-    except ExtractionError:
-        raise
-    except Exception as e:
-        raise _map_exception(e) from e
+    attempt = 0
+    while True:
+        try:
+            return _extract_once(schema, model, input_file, instructions, media_type)
+        except ModelError:
+            if attempt >= max_retries:
+                raise
+            delay = retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
+            time.sleep(delay)
+            attempt += 1
 
 
 async def extract_async(
