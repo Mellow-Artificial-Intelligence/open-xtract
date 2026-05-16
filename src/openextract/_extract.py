@@ -51,6 +51,13 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
         pass
 
     try:
+        from anthropic import APIError as AnthropicAPIError
+
+        error_types.append(AnthropicAPIError)
+    except ImportError:  # pragma: no cover - anthropic extra is installed
+        pass
+
+    try:
         from google.genai.errors import APIError as GoogleAPIError
 
         error_types.append(GoogleAPIError)
