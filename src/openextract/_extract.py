@@ -85,6 +85,13 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
     except ImportError:  # pragma: no cover - huggingface extra is installed
         pass
 
+    try:
+        from groq import APIError as GroqAPIError
+
+        error_types.append(GroqAPIError)
+    except ImportError:  # pragma: no cover - groq extra is installed
+        pass
+
     return tuple(error_types)
 
 
