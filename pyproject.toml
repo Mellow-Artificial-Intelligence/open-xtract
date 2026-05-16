@@ -41,6 +41,7 @@ packages = ["src/openextract"]
 [dependency-groups]
 dev = [
     "pytest>=9.0.2",
+    "pytest-cov>=7.1.0",
     "pytest-mock>=3.15.1",
     "ruff>=0.14.10",
 ]
@@ -56,3 +57,11 @@ ignore = ["UP047"]  # TypeVar pattern is valid for pydantic-ai compatibility
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.coverage.run]
+branch = true
+source = ["openextract"]
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
