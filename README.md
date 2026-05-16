@@ -101,6 +101,25 @@ result = extract(
 
 `max_retries` defaults to `0` (single attempt). When set, `extract` retries only on `ModelError` and sleeps `retry_backoff * (2 ** attempt)` seconds (with up to 25% jitter) between attempts. `retry_backoff` defaults to `1.0` second.
 
+### Inspecting token usage
+
+Use `extract_with_usage` when you want token counts alongside the extracted output (for cost tracking, logging, etc.).
+
+```python
+from openextract import extract_with_usage
+
+result, usage = extract_with_usage(
+    schema=PdfInfo,
+    model="openai:gpt-5",
+    input_file="./reports/q4.pdf",
+)
+
+print(result.summary)
+print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.total_tokens} total")
+```
+
+`usage` is a frozen `Usage` dataclass with `input_tokens`, `output_tokens`, and `total_tokens` fields.
+
 
 ### Choosing a model
 

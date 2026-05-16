@@ -5,6 +5,7 @@ import mimetypes
 import random
 import time
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TypeVar
 
@@ -60,6 +61,15 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
 
 
 _MODEL_ERROR_TYPES: tuple[type[BaseException], ...] = _collect_model_error_types()
+
+
+@dataclass(frozen=True)
+class Usage:
+    """Token usage information for a single extraction call."""
+
+    input_tokens: int
+    output_tokens: int
+    total_tokens: int
 
 
 def _get_media_type(file_path: str) -> str:
@@ -144,6 +154,42 @@ def _map_exception(exc: BaseException) -> ExtractionError:
     return ExtractionError(f"Extraction failed: {exc}")
 
 
+def _usage_from_result(result) -> Usage:
+    """Build a ``Usage`` from a pydantic-ai run result."""
+    raw = result.usage()
+    return Usage(
+        input_tokens=getattr(raw, "input_tokens", 0) or 0,
+        output_tokens=getattr(raw, "output_tokens", 0) or 0,
+        total_tokens=getattr(raw, "total_tokens", 0) or 0,
+    )
+
+
+def _run_extraction(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None,
+    media_type: str | None,
+):
+    """Run a single sync extraction and return the raw pydantic-ai result.
+
+    Centralises agent build, exception mapping, and TypeError pass-through so it
+    can be reused by ``extract`` (which discards usage) and
+    ``extract_with_usage`` (which surfaces it).
+    """
+    try:
+        load_dotenv()
+        file_bytes, file_type = _get_media(input_file, media_type=media_type)
+        agent = _build_agent(schema, model, instructions)
+        return agent.run_sync(_build_run_inputs(file_bytes, file_type))
+    except TypeError:
+        raise
+    except ExtractionError:
+        raise
+    except Exception as e:
+        raise _map_exception(e) from e
+
+
 def _extract_once(
     schema: type[T],
     model: str,
@@ -151,19 +197,8 @@ def _extract_once(
     instructions: str | None,
     media_type: str | None,
 ) -> T:
-    """Perform a single sync extraction attempt, classifying exceptions on failure."""
-    try:
-        load_dotenv()
-        file_bytes, file_type = _get_media(input_file, media_type=media_type)
-        agent = _build_agent(schema, model, instructions)
-        result = agent.run_sync(_build_run_inputs(file_bytes, file_type))
-        return result.output
-    except TypeError:
-        raise
-    except ExtractionError:
-        raise
-    except Exception as e:
-        raise _map_exception(e) from e
+    """Perform a single sync extraction attempt; return the schema instance."""
+    return _run_extraction(schema, model, input_file, instructions, media_type).output
 
 
 def extract(
@@ -216,6 +251,23 @@ def extract(
             delay = retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
             time.sleep(delay)
             attempt += 1
+
+
+def extract_with_usage(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+) -> tuple[T, Usage]:
+    """Extract structured data and return ``(output, Usage)`` for token accounting.
+
+    Behaves identically to :func:`extract` (without retry) but additionally
+    returns a :class:`Usage` describing the tokens consumed by the model call.
+    """
+    result = _run_extraction(schema, model, input_file, instructions, media_type)
+    return result.output, _usage_from_result(result)
 
 
 async def extract_async(

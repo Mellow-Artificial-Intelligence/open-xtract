@@ -14,10 +14,12 @@ from openextract import (
     ModelError,
     SchemaValidationError,
     UrlFetchError,
+    Usage,
     extract,
     extract_async,
     extract_many,
     extract_many_async,
+    extract_with_usage,
 )
 from openextract._extract import _get_media, _get_media_type
 
@@ -50,6 +52,8 @@ def test_star_import_exposes_only_existing_names():
         "extract_async",
         "extract_many",
         "extract_many_async",
+        "extract_with_usage",
+        "Usage",
         "ExtractionError",
         "ModelError",
         "SchemaValidationError",
@@ -191,7 +195,7 @@ class _Person(BaseModel):
     age: int
 
 
-def _make_agent_mock(mocker, output=None, run_sync_side_effect=None):
+def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None):
     """Patch openextract._extract.Agent and return (AgentClass, instance, run_sync)."""
     agent_instance = MagicMock()
     if run_sync_side_effect is not None:
@@ -199,6 +203,8 @@ def _make_agent_mock(mocker, output=None, run_sync_side_effect=None):
     else:
         run_result = MagicMock()
         run_result.output = output
+        if usage is not None:
+            run_result.usage.return_value = usage
         agent_instance.run_sync.return_value = run_result
     agent_cls = mocker.patch("openextract._extract.Agent", return_value=agent_instance)
     return agent_cls, agent_instance
@@ -358,6 +364,19 @@ class TestExtract:
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
         assert exc_info.value is original
 
+    def test_extract_returns_only_model_instance(self, tmp_path, mocker):
+        """Regression: extract() still returns just the schema instance, not a tuple."""
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Grace", age=42)
+        usage_obj = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)
+        _make_agent_mock(mocker, output=expected, usage=usage_obj)
+
+        result = extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+        assert result is expected
+        assert not isinstance(result, tuple)
+
 
 # ---------------------------------------------------------------------------
 # extract: input_file polymorphism
@@ -460,6 +479,76 @@ class TestExtractInputs:
 
         with pytest.raises(TypeError, match="input_file must be"):
             extract(schema=_Person, model="openai:gpt-5", input_file=12345)  # type: ignore[arg-type]
+
+
+# ---------------------------------------------------------------------------
+# extract_with_usage
+# ---------------------------------------------------------------------------
+
+
+class TestExtractWithUsage:
+    def test_returns_output_and_usage_tuple(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Ada", age=36)
+        usage_obj = MagicMock(input_tokens=10, output_tokens=20, total_tokens=30)
+        _make_agent_mock(mocker, output=expected, usage=usage_obj)
+
+        output, usage = extract_with_usage(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+            instructions="pull the person",
+        )
+
+        assert output is expected
+        assert usage == Usage(input_tokens=10, output_tokens=20, total_tokens=30)
+
+    def test_missing_usage_fields_default_to_zero(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Linus", age=54)
+
+        class _BareUsage:
+            pass
+
+        _make_agent_mock(mocker, output=expected, usage=_BareUsage())
+
+        _, usage = extract_with_usage(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+        )
+
+        assert usage == Usage(input_tokens=0, output_tokens=0, total_tokens=0)
+
+    def test_none_usage_fields_default_to_zero(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Hedy", age=29)
+        usage_obj = MagicMock(input_tokens=None, output_tokens=None, total_tokens=None)
+        _make_agent_mock(mocker, output=expected, usage=usage_obj)
+
+        _, usage = extract_with_usage(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+        )
+
+        assert usage == Usage(input_tokens=0, output_tokens=0, total_tokens=0)
+
+    def test_propagates_runtime_error_as_extraction_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        _make_agent_mock(mocker, run_sync_side_effect=RuntimeError("kaboom"))
+
+        with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
+            extract_with_usage(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+    def test_usage_is_frozen_dataclass(self):
+        usage = Usage(input_tokens=1, output_tokens=2, total_tokens=3)
+        with pytest.raises(Exception):  # noqa: B017 - FrozenInstanceError varies by py version
+            usage.input_tokens = 99  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
