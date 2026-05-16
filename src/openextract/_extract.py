@@ -64,6 +64,13 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
     except ImportError:  # pragma: no cover - google extra is installed
         pass
 
+    try:
+        from botocore.exceptions import ClientError as BedrockClientError
+
+        error_types.append(BedrockClientError)
+    except ImportError:  # pragma: no cover - bedrock extra is installed
+        pass
+
     return tuple(error_types)
 
 

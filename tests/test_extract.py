@@ -335,6 +335,24 @@ class TestExtract:
         with pytest.raises(ModelError, match="Model API error"):
             extract(schema=_Person, model="anthropic:claude-sonnet-4", input_file=str(local))
 
+    def test_bedrock_client_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        from botocore.exceptions import ClientError as BedrockClientError
+
+        provider_error = BedrockClientError(
+            {"Error": {"Code": "ThrottlingException", "Message": "rate limited"}},
+            "InvokeModel",
+        )
+        _make_agent_mock(mocker, run_sync_side_effect=provider_error)
+
+        with pytest.raises(ModelError, match="Model API error"):
+            extract(
+                schema=_Person,
+                model="bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
+                input_file=str(local),
+            )
+
     def test_message_mentioning_model_is_wrapped_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
