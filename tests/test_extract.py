@@ -320,6 +320,21 @@ class TestExtract:
         with pytest.raises(ModelError, match="Model API error"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
 
+    def test_anthropic_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        from anthropic import APIError as AnthropicAPIError
+
+        class _FakeAnthropicError(AnthropicAPIError):
+            def __init__(self, message: str):
+                # Bypass AnthropicAPIError.__init__ to avoid constructing request/body objects.
+                Exception.__init__(self, message)
+
+        _make_agent_mock(mocker, run_sync_side_effect=_FakeAnthropicError("rate limited"))
+
+        with pytest.raises(ModelError, match="Model API error"):
+            extract(schema=_Person, model="anthropic:claude-sonnet-4", input_file=str(local))
+
     def test_message_mentioning_model_is_wrapped_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")

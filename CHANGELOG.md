@@ -3,6 +3,9 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+- Add Anthropic provider support (extra `pydantic-ai-slim[anthropic]`; provider errors wrapped as `ModelError`).
+
 ## [0.5.0] - 2026-05-16
 - Add `extract_async` for async extraction using `Agent.run`.
 - Add `extract_many` and `extract_many_async` for concurrent batch extraction with configurable concurrency and optional exception capture.
