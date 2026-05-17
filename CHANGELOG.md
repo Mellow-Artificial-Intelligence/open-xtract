@@ -3,16 +3,16 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-## [Unreleased]
-- Add Anthropic provider support (extra `pydantic-ai-slim[anthropic]`; provider errors wrapped as `ModelError`).
+## [0.6.0] - 2026-05-16
+- Add Anthropic provider support (extra `pydantic-ai-slim[anthropic]`; `anthropic.APIError` wrapped as `ModelError`).
 - Add AWS Bedrock provider support (extra `pydantic-ai-slim[bedrock]`; `botocore.exceptions.ClientError` wrapped as `ModelError`).
 - Add xAI (Grok) provider support (extra `pydantic-ai-slim[xai]`).
 - Add Cohere provider support (extra `pydantic-ai-slim[cohere]`; `cohere.core.api_error.ApiError` wrapped as `ModelError`).
 - Add Hugging Face provider support (extra `pydantic-ai-slim[huggingface]`; `huggingface_hub.errors.HfHubHTTPError` wrapped as `ModelError`).
 - Add Groq provider support (extra `pydantic-ai-slim[groq]`; `groq.APIError` wrapped as `ModelError`).
-- Add Cerebras provider support (model identifiers prefixed `cerebras:`, e.g. `cerebras:llama3.1-70b`). Uses the existing `openai` extra under the hood; set `CEREBRAS_API_KEY` in your environment.
-- Add OpenRouter provider support (extra `pydantic-ai-slim[openrouter]`; openai-compatible so existing exception classification applies).
 - Add Mistral provider support (extra `pydantic-ai-slim[mistral]`; `mistralai.client.errors.mistralerror.MistralError` wrapped as `ModelError`).
+- Add OpenRouter provider support (extra `pydantic-ai-slim[openrouter]`; openai-compatible, so the existing `openai.APIError` classification applies).
+- Document Cerebras provider support (`cerebras:` prefix; openai-compatible — no dedicated extra needed).
 - Document Outlines provider support (`outlines:` prefix; install separately with a backend extra such as `pydantic-ai-slim[outlines-transformers]`).
 - Clarify Ollama support: it works via the `openai`-compatible code path; `pydantic-ai-slim` does not publish a dedicated `ollama` extra, so no separate dependency is required.
 
@@ -54,7 +54,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.3.2...v0.4.0
 [0.3.2]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.3.1...v0.3.2
