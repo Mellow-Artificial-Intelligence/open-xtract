@@ -60,7 +60,7 @@ The policy is enforced via uv's `exclude-newer` setting in `pyproject.toml`:
 exclude-newer = "<YYYY-MM-DDTHH:MM:SSZ>"
 ```
 
-A scheduled GitHub Actions workflow (`.github/workflows/embargo-bump.yml`) runs daily at 03:00 UTC and opens a PR that advances the cutoff to "yesterday 00:00 UTC". Merge those PRs as part of normal review.
+A scheduled GitHub Actions workflow (`.github/workflows/embargo-bump.yml`) runs daily at 03:00 UTC and opens a PR that advances the cutoff to "yesterday 00:00 UTC". Merge those PRs as part of normal review. The workflow uses only first-party tooling (the `gh` CLI preinstalled on GitHub-hosted runners and `astral-sh/setup-uv`) — no third-party PR-creation actions, to keep the supply-chain surface for the embargo workflow itself minimal.
 
 If you need to add a dependency that was published in the last 24 hours, hold off and wait the embargo out rather than bumping `exclude-newer` past the rolling window.
 
