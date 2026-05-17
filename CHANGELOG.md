@@ -3,6 +3,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [Unreleased]
+### Security
+- URL fetching now refuses hosts that resolve to non-public addresses
+  (private/loopback/link-local/multicast/reserved, IPv4 and IPv6, including
+  IPv4-mapped IPv6 and the `169.254.169.254` cloud-metadata endpoint) to
+  reduce SSRF risk when callers pass untrusted URLs. The check is re-applied
+  at every redirect hop; set `OPENEXTRACT_ALLOW_PRIVATE_URLS=1` to opt out.
+  **Breaking** for callers that previously fetched `localhost`/internal
+  hosts via `extract()`.
+- Pinned all GitHub Actions to commit SHAs.
+
 ## [0.6.0] - 2026-05-16
 - Add Anthropic provider support (extra `pydantic-ai-slim[anthropic]`; `anthropic.APIError` wrapped as `ModelError`).
 - Add AWS Bedrock provider support (extra `pydantic-ai-slim[bedrock]`; `botocore.exceptions.ClientError` wrapped as `ModelError`).

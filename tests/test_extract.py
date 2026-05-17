@@ -2,6 +2,8 @@
 
 import asyncio
 import io
+import ipaddress
+import socket
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -21,18 +23,34 @@ from openextract import (
     extract_many_async,
     extract_with_usage,
 )
-from openextract._extract import _get_media, _get_media_type
+from openextract._extract import (
+    _fetch_url,
+    _get_media,
+    _get_media_type,
+    _is_public_ip,
+    _is_safe_host,
+)
 
 
 def _build_response(
     *,
     content: bytes = b"",
     content_type: str = "application/octet-stream",
+    is_redirect: bool = False,
+    status_code: int = 200,
+    location: str | None = None,
 ) -> MagicMock:
     """Build a MagicMock that behaves like an httpx.Response."""
     response = MagicMock()
     response.content = content
-    response.headers = {"content-type": content_type} if content_type else {}
+    headers: dict[str, str] = {}
+    if content_type:
+        headers["content-type"] = content_type
+    if location is not None:
+        headers["location"] = location
+    response.headers = headers
+    response.is_redirect = is_redirect
+    response.status_code = status_code
     response.raise_for_status.return_value = None
     return response
 
@@ -130,7 +148,9 @@ class TestGetMedia:
         mock_get.assert_called_once()
         args, kwargs = mock_get.call_args
         assert args[0] == "https://example.com/page.html"
-        assert kwargs["follow_redirects"] is True
+        # follow_redirects is disabled at the httpx layer; redirects are followed
+        # manually in _fetch_url so the SSRF host check runs at every hop.
+        assert kwargs["follow_redirects"] is False
         assert kwargs["timeout"] == 30.0
         assert media_bytes == b"<html>remote</html>"
         assert media_type == "text/html"
@@ -183,6 +203,154 @@ class TestGetMedia:
 
         with pytest.raises(httpx.HTTPStatusError):
             _get_media("https://example.com/missing.pdf")
+
+
+# ---------------------------------------------------------------------------
+# SSRF host validation
+# ---------------------------------------------------------------------------
+
+
+def _addrinfo(ip: str):
+    """Build a getaddrinfo-shaped tuple for ``ip``."""
+    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    return [(family, socket.SOCK_STREAM, 0, "", (ip, 0))]
+
+
+class TestIsPublicIp:
+    def test_public_ipv4_is_public(self):
+        assert _is_public_ip(ipaddress.ip_address("1.1.1.1")) is True
+
+    def test_private_ipv4_is_not_public(self):
+        assert _is_public_ip(ipaddress.ip_address("10.0.0.1")) is False
+
+    def test_loopback_ipv4_is_not_public(self):
+        assert _is_public_ip(ipaddress.ip_address("127.0.0.1")) is False
+
+    def test_aws_metadata_link_local_is_not_public(self):
+        assert _is_public_ip(ipaddress.ip_address("169.254.169.254")) is False
+
+    def test_ipv6_loopback_is_not_public(self):
+        assert _is_public_ip(ipaddress.ip_address("::1")) is False
+
+    def test_ipv4_mapped_ipv6_loopback_is_not_public(self):
+        # ::ffff:127.0.0.1 wraps an IPv4 loopback; must be unwrapped and rejected.
+        assert _is_public_ip(ipaddress.ip_address("::ffff:127.0.0.1")) is False
+
+
+class TestIsSafeHost:
+    def test_opt_out_env_var_bypasses_validation(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_ALLOW_PRIVATE_URLS", "1")
+        # Even a clearly private address is permitted when the opt-out is set.
+        assert _is_safe_host("127.0.0.1") is True
+
+    def test_opt_out_env_var_unset_does_not_bypass(self, monkeypatch):
+        monkeypatch.delenv("OPENEXTRACT_ALLOW_PRIVATE_URLS", raising=False)
+        assert _is_safe_host("127.0.0.1") is False
+
+    def test_empty_host_is_unsafe(self):
+        assert _is_safe_host("") is False
+        assert _is_safe_host(None) is False
+
+    def test_private_ip_literal_is_unsafe(self):
+        assert _is_safe_host("192.168.1.1") is False
+        assert _is_safe_host("169.254.169.254") is False
+
+    def test_public_ip_literal_is_safe(self):
+        assert _is_safe_host("1.1.1.1") is True
+
+    def test_ipv6_literal_in_brackets_is_handled(self):
+        # urlparse strips brackets, but defend in depth: _is_safe_host must too.
+        assert _is_safe_host("[::1]") is False
+
+    def test_hostname_resolving_to_private_ip_is_unsafe(self, monkeypatch):
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: _addrinfo("10.0.0.5"))
+        assert _is_safe_host("internal.example.com") is False
+
+    def test_hostname_with_dns_failure_is_unsafe(self, monkeypatch):
+        def boom(*args, **kwargs):
+            raise socket.gaierror("nope")
+
+        monkeypatch.setattr(socket, "getaddrinfo", boom)
+        assert _is_safe_host("nonexistent.invalid") is False
+
+    def test_hostname_with_empty_resolution_is_unsafe(self, monkeypatch):
+        monkeypatch.setattr(socket, "getaddrinfo", lambda *a, **k: [])
+        assert _is_safe_host("ghost.example.com") is False
+
+    def test_hostname_with_unparseable_resolved_address_is_unsafe(self, monkeypatch):
+        monkeypatch.setattr(
+            socket,
+            "getaddrinfo",
+            lambda *a, **k: [(socket.AF_INET, socket.SOCK_STREAM, 0, "", ("not-an-ip", 0))],
+        )
+        assert _is_safe_host("weird.example.com") is False
+
+
+class TestFetchUrl:
+    def test_refuses_private_host(self):
+        with pytest.raises(UrlFetchError, match="non-public host"):
+            _fetch_url("http://127.0.0.1/secret")
+
+    def test_refuses_aws_metadata_url(self):
+        with pytest.raises(UrlFetchError, match="non-public host"):
+            _fetch_url("http://169.254.169.254/latest/meta-data/")
+
+    def test_follows_safe_redirect(self, mocker):
+        redirect = _build_response(
+            content=b"", status_code=302, is_redirect=True, location="https://2.2.2.2/final.html"
+        )
+        final = _build_response(content=b"ok", content_type="text/html")
+        mock_get = mocker.patch("openextract._extract.httpx.get", side_effect=[redirect, final])
+
+        response = _fetch_url("https://1.1.1.1/start")
+
+        assert response is final
+        assert mock_get.call_count == 2
+        # Both hops must be issued with follow_redirects disabled so our host
+        # check runs each time.
+        for call in mock_get.call_args_list:
+            assert call.kwargs["follow_redirects"] is False
+
+    def test_blocks_redirect_to_private_host(self, mocker):
+        redirect = _build_response(
+            content=b"",
+            status_code=302,
+            is_redirect=True,
+            location="http://169.254.169.254/latest/meta-data/",
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=redirect)
+
+        with pytest.raises(UrlFetchError, match="non-public host"):
+            _fetch_url("https://1.1.1.1/start")
+
+    def test_redirect_without_location_raises_url_fetch_error(self, mocker):
+        no_location = _build_response(content=b"", status_code=302, is_redirect=True, location=None)
+        mocker.patch("openextract._extract.httpx.get", return_value=no_location)
+
+        with pytest.raises(UrlFetchError, match="missing Location"):
+            _fetch_url("https://1.1.1.1/start")
+
+    def test_too_many_redirects_raises(self, mocker):
+        redirect = _build_response(
+            content=b"", status_code=302, is_redirect=True, location="https://1.1.1.1/loop"
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=redirect)
+
+        with pytest.raises(UrlFetchError, match="Too many redirects"):
+            _fetch_url("https://1.1.1.1/loop")
+
+
+class TestSsrfIntegration:
+    def test_extract_with_private_url_raises_url_fetch_error(self, mocker):
+        # Agent should never be constructed when the URL is rejected.
+        agent_cls = mocker.patch("openextract._extract.Agent")
+        with pytest.raises(UrlFetchError):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="http://169.254.169.254/latest/meta-data/",
+            )
+        agent_cls.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
