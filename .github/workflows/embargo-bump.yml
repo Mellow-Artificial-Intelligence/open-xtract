@@ -1,0 +1,58 @@
+name: Embargo bump
+
+on:
+  schedule:
+    # Runs at 03:00 UTC daily. Bumps the supply-chain embargo cutoff in
+    # pyproject.toml forward to (today - 24h), then opens a PR with the
+    # refreshed uv.lock.
+    - cron: "0 3 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+
+      - name: Compute new cutoff (24h ago, UTC midnight)
+        id: cutoff
+        run: |
+          NEW_CUTOFF="$(date -u -d 'yesterday 00:00' +%Y-%m-%dT%H:%M:%SZ)"
+          echo "value=$NEW_CUTOFF" >> "$GITHUB_OUTPUT"
+
+      - name: Patch pyproject.toml exclude-newer
+        run: |
+          python - <<'PY'
+          import os, re, pathlib
+          new = os.environ["NEW_CUTOFF"]
+          path = pathlib.Path("pyproject.toml")
+          text = path.read_text()
+          updated = re.sub(
+              r'(exclude-newer\s*=\s*")[^"]+(")',
+              rf'\g<1>{new}\g<2>',
+              text,
+              count=1,
+          )
+          path.write_text(updated)
+          PY
+        env:
+          NEW_CUTOFF: ${{ steps.cutoff.outputs.value }}
+
+      - name: Re-lock dependencies
+        run: uv lock
+
+      - name: Open PR if anything changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: chore/embargo-bump
+          commit-message: "chore: bump dependency embargo to ${{ steps.cutoff.outputs.value }}"
+          title: "chore: bump dependency embargo to ${{ steps.cutoff.outputs.value }}"
+          body: |
+            Daily rolling 24h supply-chain embargo bump. Refuses any package version
+            published after `${{ steps.cutoff.outputs.value }}`.
+          delete-branch: true

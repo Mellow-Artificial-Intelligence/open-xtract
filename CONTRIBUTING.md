@@ -49,6 +49,21 @@ uv run ruff check . --fix
 uv run ruff format .
 ```
 
+## Dependency embargo (24h)
+
+We do **not** install any package version that has been published less than 24 hours ago. This protects against supply-chain attacks where a compromised release sits on PyPI for a few hours before being yanked.
+
+The policy is enforced via uv's `exclude-newer` setting in `pyproject.toml`:
+
+```toml
+[tool.uv]
+exclude-newer = "<YYYY-MM-DDTHH:MM:SSZ>"
+```
+
+A scheduled GitHub Actions workflow (`.github/workflows/embargo-bump.yml`) runs daily at 03:00 UTC and opens a PR that advances the cutoff to "yesterday 00:00 UTC". Merge those PRs as part of normal review.
+
+If you need to add a dependency that was published in the last 24 hours, hold off and wait the embargo out rather than bumping `exclude-newer` past the rolling window.
+
 ## Questions?
 
 Open an issue on GitHub.
