@@ -46,13 +46,26 @@ jobs:
       - name: Re-lock dependencies
         run: uv lock
 
-      - name: Open PR if anything changed
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: chore/embargo-bump
-          commit-message: "chore: bump dependency embargo to ${{ steps.cutoff.outputs.value }}"
-          title: "chore: bump dependency embargo to ${{ steps.cutoff.outputs.value }}"
-          body: |
-            Daily rolling 24h supply-chain embargo bump. Refuses any package version
-            published after `${{ steps.cutoff.outputs.value }}`.
-          delete-branch: true
+      - name: Open or update PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW_CUTOFF: ${{ steps.cutoff.outputs.value }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- pyproject.toml uv.lock; then
+            echo "No changes - embargo already current."
+            exit 0
+          fi
+          BRANCH=chore/embargo-bump
+          TITLE="chore: bump dependency embargo to ${NEW_CUTOFF}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add pyproject.toml uv.lock
+          git commit -m "$TITLE"
+          git push --force-with-lease origin "$BRANCH"
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --title "$TITLE" --body "Daily rolling 24h supply-chain embargo bump. Refuses any package version published after \`${NEW_CUTOFF}\`."
+          else
+            gh pr create --head "$BRANCH" --base main --title "$TITLE" --body "Daily rolling 24h supply-chain embargo bump. Refuses any package version published after \`${NEW_CUTOFF}\`."
+          fi
