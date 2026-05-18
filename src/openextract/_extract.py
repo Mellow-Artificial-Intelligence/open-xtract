@@ -1,13 +1,17 @@
 """Core extraction functionality."""
 
 import asyncio
+import ipaddress
 import mimetypes
+import os
 import random
+import socket
 import time
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TypeVar
+from urllib.parse import urlparse
 
 import httpx
 from dotenv import load_dotenv
@@ -22,6 +26,8 @@ T = TypeVar("T", bound=BaseModel)
 _DEFAULT_MEDIA_TYPE = "application/octet-stream"
 _URL_PREFIXES = ("http://", "https://")
 _URL_FETCH_TIMEOUT = 30.0
+_MAX_REDIRECTS = 10
+_ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
 _BYTES_MEDIA_TYPE_REQUIRED = (
     "media_type is required when input_file is bytes or a file-like object; "
     "pass it explicitly, e.g. extract(..., media_type='application/pdf')."
@@ -121,11 +127,78 @@ def _get_media_type(file_path: str) -> str:
     return media_type or _DEFAULT_MEDIA_TYPE
 
 
+def _allow_private_urls() -> bool:
+    """Return True when SSRF host validation is disabled via env var."""
+    return os.environ.get(_ALLOW_PRIVATE_URLS_ENV, "").lower() in ("1", "true", "yes")
+
+
+def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
+    """Return True only for globally routable public unicast addresses.
+
+    Treats IPv4-mapped IPv6 (``::ffff:a.b.c.d``) as its underlying IPv4 so
+    that e.g. ``::ffff:127.0.0.1`` is correctly classified as loopback.
+    """
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_global
+
+
+def _is_safe_host(host: str | None) -> bool:
+    """Return True when ``host`` resolves only to public IP addresses.
+
+    Refuses missing/empty hosts, IP literals in private/loopback/link-local/
+    multicast/reserved ranges (including AWS/GCP metadata at
+    ``169.254.169.254``), hostnames that resolve to any non-public IP, and
+    hostnames that fail to resolve. Bypassed by ``OPENEXTRACT_ALLOW_PRIVATE_URLS``.
+    """
+    if _allow_private_urls():
+        return True
+    if not host:
+        return False
+    bare = host.strip("[]")
+    try:
+        return _is_public_ip(ipaddress.ip_address(bare))
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(bare, None)
+    except OSError:
+        return False
+    if not infos:
+        return False
+    for info in infos:
+        try:
+            resolved = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            return False
+        if not _is_public_ip(resolved):
+            return False
+    return True
+
+
+def _fetch_url(url: str) -> httpx.Response:
+    """Fetch ``url`` with SSRF defenses; validate the host at every redirect hop."""
+    current = url
+    for _ in range(_MAX_REDIRECTS):
+        host = urlparse(current).hostname
+        if not _is_safe_host(host):
+            raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
+        response = httpx.get(current, follow_redirects=False, timeout=_URL_FETCH_TIMEOUT)
+        if response.is_redirect:
+            location = response.headers.get("location")
+            if not location:
+                raise UrlFetchError(f"Redirect from {current!r} missing Location header")
+            current = str(httpx.URL(current).join(location))
+            continue
+        response.raise_for_status()
+        return response
+    raise UrlFetchError(f"Too many redirects (>{_MAX_REDIRECTS})")
+
+
 def _read_from_path(file_path: str) -> tuple[bytes, str]:
     """Read bytes from a local path or http(s) URL; return (bytes, media_type)."""
     if file_path.startswith(_URL_PREFIXES):
-        response = httpx.get(file_path, follow_redirects=True, timeout=_URL_FETCH_TIMEOUT)
-        response.raise_for_status()
+        response = _fetch_url(file_path)
         media_bytes = response.content
         media_type = _get_media_type(file_path)
         # If the URL extension didn't tell us anything, trust the server's Content-Type.

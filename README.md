@@ -229,6 +229,35 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 Returns an instance of `schema`.
 
+## Security
+
+### URL fetching and SSRF
+
+When `input_file` is an `http://` or `https://` URL, `openextract` fetches it
+directly. To reduce server-side request forgery risk when callers pass
+untrusted URLs, the fetcher refuses any URL whose host resolves to a
+non-public address &mdash; private RFC 1918 ranges, loopback, link-local (including
+the `169.254.169.254` cloud-metadata endpoint), multicast, and reserved
+ranges, for both IPv4 and IPv6 (including IPv4-mapped IPv6 like
+`::ffff:127.0.0.1`). The host is re-validated at every redirect hop, so an
+attacker cannot use a public URL that redirects to an internal one.
+
+For workflows that legitimately need to fetch internal URLs (testing
+against `localhost`, on-prem services, etc.), set the
+`OPENEXTRACT_ALLOW_PRIVATE_URLS` environment variable to `1`, `true`, or
+`yes` to disable the check. If you need a one-off fetch from an internal
+host without disabling validation globally, fetch the bytes with your own
+HTTP client and pass them to `extract()` as `bytes`/file-like with an
+explicit `media_type`.
+
+> **Note:** host validation is best-effort; it does not defend against DNS
+> rebinding (where the host resolves to different IPs across calls). Treat
+> URL-based extraction of untrusted input as a privileged operation.
+
+### Reporting vulnerabilities
+
+See [SECURITY.md](SECURITY.md).
+
 ## Development
 
 ```bash
