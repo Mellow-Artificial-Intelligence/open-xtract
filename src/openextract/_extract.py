@@ -1,13 +1,15 @@
 """Core extraction functionality."""
 
 import asyncio
+import importlib
 import ipaddress
 import mimetypes
 import os
 import random
 import socket
 import time
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import BinaryIO, TypeVar
@@ -33,9 +35,24 @@ _BYTES_MEDIA_TYPE_REQUIRED = (
     "pass it explicitly, e.g. extract(..., media_type='application/pdf')."
 )
 
+# (module, attribute) pairs for provider/model error base classes we want to
+# classify as ``ModelError``. ``openai.APIError`` also covers OpenRouter and
+# Cerebras since both go through the openai SDK.
+_PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
+    ("pydantic_ai.exceptions", "ModelAPIError"),
+    ("openai", "APIError"),
+    ("anthropic", "APIError"),
+    ("google.genai.errors", "APIError"),
+    ("botocore.exceptions", "ClientError"),
+    ("cohere.core.api_error", "ApiError"),
+    ("huggingface_hub.errors", "HfHubHTTPError"),
+    ("groq", "APIError"),
+    ("mistralai.client.errors.mistralerror", "MistralError"),
+)
+
 
 def _collect_model_error_types() -> tuple[type[BaseException], ...]:
-    """Collect known provider/model error base classes that are importable.
+    """Resolve ``_PROVIDER_ERROR_PATHS`` to importable exception classes.
 
     Each import is guarded so a missing optional provider does not break the
     package. The returned tuple is suitable for use with ``isinstance``.
@@ -50,71 +67,12 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
         return _MODEL_ERROR_TYPES
 
     error_types: list[type[BaseException]] = []
-
-    try:
-        from pydantic_ai.exceptions import ModelAPIError
-
-        error_types.append(ModelAPIError)
-    except ImportError:  # pragma: no cover - pydantic-ai is a hard dependency
-        pass
-
-    try:
-        # Also covers OpenRouter, which uses the openai SDK under the hood.
-        from openai import APIError as OpenAIAPIError
-
-        error_types.append(OpenAIAPIError)
-    except ImportError:  # pragma: no cover - openai extra is installed
-        pass
-
-    try:
-        from anthropic import APIError as AnthropicAPIError
-
-        error_types.append(AnthropicAPIError)
-    except ImportError:  # pragma: no cover - anthropic extra is installed
-        pass
-
-    try:
-        from google.genai.errors import APIError as GoogleAPIError
-
-        error_types.append(GoogleAPIError)
-    except ImportError:  # pragma: no cover - google extra is installed
-        pass
-
-    try:
-        from botocore.exceptions import ClientError as BedrockClientError
-
-        error_types.append(BedrockClientError)
-    except ImportError:  # pragma: no cover - bedrock extra is installed
-        pass
-
-    try:
-        from cohere.core.api_error import ApiError as CohereApiError
-
-        error_types.append(CohereApiError)
-    except ImportError:  # pragma: no cover - cohere extra is installed
-        pass
-
-    try:
-        from huggingface_hub.errors import HfHubHTTPError
-
-        error_types.append(HfHubHTTPError)
-    except ImportError:  # pragma: no cover - huggingface extra is installed
-        pass
-
-    try:
-        from groq import APIError as GroqAPIError
-
-        error_types.append(GroqAPIError)
-    except ImportError:  # pragma: no cover - groq extra is installed
-        pass
-
-    try:
-        from mistralai.client.errors.mistralerror import MistralError
-
-        error_types.append(MistralError)
-    except ImportError:  # pragma: no cover - mistral extra is installed
-        pass
-
+    for module_name, attr in _PROVIDER_ERROR_PATHS:
+        try:
+            module = importlib.import_module(module_name)
+        except ImportError:  # pragma: no cover - all provider extras are installed
+            continue
+        error_types.append(getattr(module, attr))
     _MODEL_ERROR_TYPES = tuple(error_types)
     return _MODEL_ERROR_TYPES
 
@@ -296,6 +254,22 @@ def _map_exception(exc: BaseException) -> ExtractionError:
     return ExtractionError(f"Extraction failed: {exc}")
 
 
+@contextmanager
+def _extraction_errors() -> Iterator[None]:
+    """Map low-level extraction failures to the ``ExtractionError`` hierarchy.
+
+    ``TypeError`` (bad call) and already-mapped ``ExtractionError`` subclasses
+    pass through unchanged; everything else is routed through
+    :func:`_map_exception`.
+    """
+    try:
+        yield
+    except (TypeError, ExtractionError):
+        raise
+    except Exception as e:
+        raise _map_exception(e) from e
+
+
 def _usage_from_result(result) -> Usage:
     """Build a ``Usage`` from a pydantic-ai run result."""
     raw = result.usage()
@@ -304,6 +278,20 @@ def _usage_from_result(result) -> Usage:
         output_tokens=getattr(raw, "output_tokens", 0) or 0,
         total_tokens=getattr(raw, "total_tokens", 0) or 0,
     )
+
+
+def _prepare_run(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None,
+    media_type: str | None,
+) -> tuple[Agent, list]:
+    """Load env, resolve the media payload, and build the agent + run inputs."""
+    _ensure_dotenv_loaded()
+    file_bytes, file_type = _get_media(input_file, media_type=media_type)
+    agent = _build_agent(schema, model, instructions)
+    return agent, _build_run_inputs(file_bytes, file_type)
 
 
 def _run_extraction(
@@ -319,17 +307,9 @@ def _run_extraction(
     can be reused by ``extract`` (which discards usage) and
     ``extract_with_usage`` (which surfaces it).
     """
-    try:
-        _ensure_dotenv_loaded()
-        file_bytes, file_type = _get_media(input_file, media_type=media_type)
-        agent = _build_agent(schema, model, instructions)
-        return agent.run_sync(_build_run_inputs(file_bytes, file_type))
-    except TypeError:
-        raise
-    except ExtractionError:
-        raise
-    except Exception as e:
-        raise _map_exception(e) from e
+    with _extraction_errors():
+        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+        return agent.run_sync(inputs)
 
 
 def _extract_once(
@@ -421,18 +401,10 @@ async def extract_async(
     media_type: str | None = None,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
-    try:
-        _ensure_dotenv_loaded()
-        file_bytes, file_type = _get_media(input_file, media_type=media_type)
-        agent = _build_agent(schema, model, instructions)
-        result = await agent.run(_build_run_inputs(file_bytes, file_type))
+    with _extraction_errors():
+        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+        result = await agent.run(inputs)
         return result.output
-    except TypeError:
-        raise
-    except ExtractionError:
-        raise
-    except Exception as e:
-        raise _map_exception(e) from e
 
 
 async def _run_with_shared_agent(
@@ -445,16 +417,10 @@ async def _run_with_shared_agent(
     Mirrors ``extract_async``'s error mapping so callers get the same
     ``ExtractionError`` subclasses as the per-item path.
     """
-    try:
+    with _extraction_errors():
         file_bytes, file_type = _get_media(input_file, media_type=media_type)
         result = await agent.run(_build_run_inputs(file_bytes, file_type))
         return result.output
-    except TypeError:
-        raise
-    except ExtractionError:
-        raise
-    except Exception as e:
-        raise _map_exception(e) from e
 
 
 async def _gather_extractions(
