@@ -4,6 +4,7 @@ import asyncio
 import io
 import ipaddress
 import socket
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -363,6 +364,65 @@ class _Person(BaseModel):
     age: int
 
 
+def _make_bare_provider_error(module_name: str, attr: str, message: str) -> Exception:
+    """Build a subclass of a provider's API-error type that bypasses its __init__.
+
+    Most provider error classes require a constructed request/response object;
+    we only care about ``isinstance`` matching, so we skip straight to
+    ``Exception.__init__`` with the message.
+    """
+    import importlib
+
+    base = getattr(importlib.import_module(module_name), attr)
+
+    class _BareProviderError(base):
+        def __init__(self, msg: str):
+            Exception.__init__(self, msg)
+
+    return _BareProviderError(message)
+
+
+def _make_pydantic_ai_error(message: str) -> Exception:
+    from pydantic_ai.exceptions import ModelHTTPError
+
+    return ModelHTTPError(status_code=503, model_name="gpt-5", body=message)
+
+
+def _make_bedrock_error(message: str) -> Exception:
+    from botocore.exceptions import ClientError
+
+    return ClientError(
+        {"Error": {"Code": "ThrottlingException", "Message": message}},
+        "InvokeModel",
+    )
+
+
+def _make_cohere_error(message: str) -> Exception:
+    from cohere.core.api_error import ApiError
+
+    class _BareCohereError(ApiError):
+        def __init__(self, msg: str):
+            Exception.__init__(self, msg)
+            # ApiError.__str__ touches these attributes.
+            self.headers = None
+            self.status_code = 401
+            self.body = msg
+
+    return _BareCohereError(message)
+
+
+def _make_mistral_error(message: str) -> Exception:
+    from mistralai.client.errors.sdkerror import SDKError
+
+    class _BareMistralError(SDKError):
+        def __init__(self, msg: str):
+            Exception.__init__(self, msg)
+            # SDKError uses __slots__; bypass via object.__setattr__.
+            object.__setattr__(self, "message", msg)
+
+    return _BareMistralError(message)
+
+
 def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None):
     """Patch openextract._extract.Agent and return (AgentClass, instance, run_sync)."""
     agent_instance = MagicMock()
@@ -462,132 +522,52 @@ class TestExtract:
         with pytest.raises(SchemaValidationError, match="Model output did not match schema"):
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
 
-    def test_pydantic_ai_model_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
+    @pytest.mark.parametrize(
+        "factory,model_id",
+        [
+            (lambda msg: _make_pydantic_ai_error(msg), "openai:gpt-5"),
+            (lambda msg: _make_bare_provider_error("openai", "APIError", msg), "openai:gpt-5"),
+            (
+                lambda msg: _make_bare_provider_error("anthropic", "APIError", msg),
+                "anthropic:claude-sonnet-4",
+            ),
+            (
+                lambda msg: _make_bedrock_error(msg),
+                "bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
+            ),
+            (lambda msg: _make_cohere_error(msg), "cohere:command-r-plus"),
+            (
+                lambda msg: _make_bare_provider_error(
+                    "huggingface_hub.errors", "HfHubHTTPError", msg
+                ),
+                "huggingface:meta-llama/Llama-3.3-70B-Instruct",
+            ),
+            (
+                lambda msg: _make_bare_provider_error("groq", "APIError", msg),
+                "groq:llama-3.3-70b-versatile",
+            ),
+            (lambda msg: _make_mistral_error(msg), "mistral:mistral-large-latest"),
+        ],
+        ids=[
+            "pydantic_ai_ModelHTTPError",
+            "openai_APIError",
+            "anthropic_APIError",
+            "bedrock_ClientError",
+            "cohere_ApiError",
+            "huggingface_HfHubHTTPError",
+            "groq_APIError",
+            "mistral_SDKError",
+        ],
+    )
+    def test_provider_api_error_is_wrapped_as_model_error(
+        self, tmp_path, mocker, factory, model_id
+    ):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
-        from pydantic_ai.exceptions import ModelHTTPError
-
-        provider_error = ModelHTTPError(status_code=503, model_name="gpt-5", body="upstream down")
-        _make_agent_mock(mocker, run_sync_side_effect=provider_error)
+        _make_agent_mock(mocker, run_sync_side_effect=factory("rate limited"))
 
         with pytest.raises(ModelError, match="Model API error"):
-            extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
-
-    def test_openai_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from openai import APIError as OpenAIAPIError
-
-        class _FakeOpenAIError(OpenAIAPIError):
-            def __init__(self, message: str):
-                # Bypass OpenAIAPIError.__init__ to avoid constructing request/body objects.
-                Exception.__init__(self, message)
-
-        _make_agent_mock(mocker, run_sync_side_effect=_FakeOpenAIError("rate limited"))
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
-
-    def test_anthropic_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from anthropic import APIError as AnthropicAPIError
-
-        class _FakeAnthropicError(AnthropicAPIError):
-            def __init__(self, message: str):
-                # Bypass AnthropicAPIError.__init__ to avoid constructing request/body objects.
-                Exception.__init__(self, message)
-
-        _make_agent_mock(mocker, run_sync_side_effect=_FakeAnthropicError("rate limited"))
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(schema=_Person, model="anthropic:claude-sonnet-4", input_file=str(local))
-
-    def test_bedrock_client_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from botocore.exceptions import ClientError as BedrockClientError
-
-        provider_error = BedrockClientError(
-            {"Error": {"Code": "ThrottlingException", "Message": "rate limited"}},
-            "InvokeModel",
-        )
-        _make_agent_mock(mocker, run_sync_side_effect=provider_error)
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(
-                schema=_Person,
-                model="bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
-                input_file=str(local),
-            )
-
-    def test_cohere_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from cohere.core.api_error import ApiError as CohereApiError
-
-        class _FakeCohereError(CohereApiError):
-            def __init__(self, message: str):
-                # Bypass CohereApiError.__init__; populate the attributes its __str__ needs.
-                Exception.__init__(self, message)
-                self.headers = None
-                self.status_code = 401
-                self.body = message
-
-        _make_agent_mock(mocker, run_sync_side_effect=_FakeCohereError("unauthorized"))
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(schema=_Person, model="cohere:command-r-plus", input_file=str(local))
-
-    def test_huggingface_http_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from huggingface_hub.errors import HfHubHTTPError
-
-        class _FakeHfHubHTTPError(HfHubHTTPError):
-            def __init__(self, message: str):
-                # Bypass HfHubHTTPError.__init__ to avoid constructing a Response object.
-                Exception.__init__(self, message)
-
-        _make_agent_mock(mocker, run_sync_side_effect=_FakeHfHubHTTPError("hf upstream down"))
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(
-                schema=_Person,
-                model="huggingface:meta-llama/Llama-3.3-70B-Instruct",
-                input_file=str(local),
-            )
-
-    def test_groq_api_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from groq import APIError as GroqAPIError
-
-        class _FakeGroqError(GroqAPIError):
-            def __init__(self, message: str):
-                # Bypass GroqAPIError.__init__ to avoid constructing request/body objects.
-                Exception.__init__(self, message)
-
-        _make_agent_mock(mocker, run_sync_side_effect=_FakeGroqError("rate limited"))
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(schema=_Person, model="groq:llama-3.3-70b-versatile", input_file=str(local))
-
-    def test_mistral_sdk_error_is_wrapped_as_model_error(self, tmp_path, mocker):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hello")
-        from mistralai.client.errors.sdkerror import SDKError as MistralSDKError
-
-        class _FakeMistralError(MistralSDKError):
-            def __init__(self, message: str):
-                # Bypass SDKError.__init__ to avoid constructing httpx response objects.
-                Exception.__init__(self, message)
-                object.__setattr__(self, "message", message)
-
-        _make_agent_mock(mocker, run_sync_side_effect=_FakeMistralError("rate limited"))
-
-        with pytest.raises(ModelError, match="Model API error"):
-            extract(schema=_Person, model="mistral:mistral-large-latest", input_file=str(local))
+            extract(schema=_Person, model=model_id, input_file=str(local))
 
     def test_message_mentioning_model_is_wrapped_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
@@ -1071,8 +1051,6 @@ class TestExtractMany:
     def test_max_concurrency_is_respected(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(10)]
         for f in files:
-            from pathlib import Path
-
             Path(f).write_bytes(b"x")
 
         in_flight = 0
