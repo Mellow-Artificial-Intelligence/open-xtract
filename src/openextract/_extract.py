@@ -56,7 +56,16 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
 
     Each import is guarded so a missing optional provider does not break the
     package. The returned tuple is suitable for use with ``isinstance``.
+
+    Cached after the first call. Deferred (rather than run at module import)
+    because importing every provider SDK eagerly added ~2 s to cold start —
+    ``google.genai`` alone is over a second — and is wasted work unless we
+    actually need to classify an exception.
     """
+    global _MODEL_ERROR_TYPES
+    if _MODEL_ERROR_TYPES is not None:
+        return _MODEL_ERROR_TYPES
+
     error_types: list[type[BaseException]] = []
     for module_name, attr in _PROVIDER_ERROR_PATHS:
         try:
@@ -64,10 +73,27 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
         except ImportError:  # pragma: no cover - all provider extras are installed
             continue
         error_types.append(getattr(module, attr))
-    return tuple(error_types)
+    _MODEL_ERROR_TYPES = tuple(error_types)
+    return _MODEL_ERROR_TYPES
 
 
-_MODEL_ERROR_TYPES: tuple[type[BaseException], ...] = _collect_model_error_types()
+_MODEL_ERROR_TYPES: tuple[type[BaseException], ...] | None = None
+
+
+_DOTENV_LOADED = False
+
+
+def _ensure_dotenv_loaded() -> None:
+    """Run ``load_dotenv()`` at most once per process.
+
+    Re-scanning the filesystem on every extract added ~50 µs/call and changed
+    nothing — the loaded env vars persist after the first call.
+    """
+    global _DOTENV_LOADED
+    if _DOTENV_LOADED:
+        return
+    load_dotenv()
+    _DOTENV_LOADED = True
 
 
 @dataclass(frozen=True)
@@ -223,7 +249,7 @@ def _map_exception(exc: BaseException) -> ExtractionError:
         return UrlFetchError(f"Failed to fetch URL: {exc}")
     if isinstance(exc, ValidationError):
         return SchemaValidationError(f"Model output did not match schema: {exc}")
-    if isinstance(exc, _MODEL_ERROR_TYPES):
+    if isinstance(exc, _collect_model_error_types()):
         return ModelError(f"Model API error: {exc}")
     return ExtractionError(f"Extraction failed: {exc}")
 
@@ -262,7 +288,7 @@ def _prepare_run(
     media_type: str | None,
 ) -> tuple[Agent, list]:
     """Load env, resolve the media payload, and build the agent + run inputs."""
-    load_dotenv()
+    _ensure_dotenv_loaded()
     file_bytes, file_type = _get_media(input_file, media_type=media_type)
     agent = _build_agent(schema, model, instructions)
     return agent, _build_run_inputs(file_bytes, file_type)
@@ -381,6 +407,22 @@ async def extract_async(
         return result.output
 
 
+async def _run_with_shared_agent(
+    agent: Agent,
+    input_file: str | bytes | BinaryIO,
+    media_type: str | None,
+) -> object:
+    """Run a single extraction reusing a pre-built ``Agent``.
+
+    Mirrors ``extract_async``'s error mapping so callers get the same
+    ``ExtractionError`` subclasses as the per-item path.
+    """
+    with _extraction_errors():
+        file_bytes, file_type = _get_media(input_file, media_type=media_type)
+        result = await agent.run(_build_run_inputs(file_bytes, file_type))
+        return result.output
+
+
 async def _gather_extractions(
     schema: type[T],
     model: str,
@@ -390,11 +432,18 @@ async def _gather_extractions(
     return_exceptions: bool,
 ) -> list:
     files = list(input_files)
+    if not files:
+        return []
+    _ensure_dotenv_loaded()
+    # Building the Agent (and its provider HTTP client) is ~32 ms; sharing one
+    # across the batch saves ~32 ms × (N-1) per call. The Agent is stateless
+    # between runs and stays inside this event loop, so this is safe.
+    agent = _build_agent(schema, model, instructions)
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _bounded(item):
         async with semaphore:
-            return await extract_async(schema, model, item, instructions)
+            return await _run_with_shared_agent(agent, item, None)
 
     tasks = [_bounded(item) for item in files]
     return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
