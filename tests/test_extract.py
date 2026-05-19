@@ -29,6 +29,7 @@ from openextract._extract import (
     _get_media_type,
     _is_public_ip,
     _is_safe_host,
+    _run_with_shared_agent,
 )
 
 
@@ -1041,8 +1042,72 @@ class TestExtractAsync:
 
 
 # ---------------------------------------------------------------------------
+# _run_with_shared_agent (per-item runner used by the batch path)
+# ---------------------------------------------------------------------------
+
+
+class TestRunWithSharedAgent:
+    async def test_runs_agent_and_returns_output(self, tmp_path):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        expected = _Person(name="Ada", age=36)
+        agent = MagicMock()
+        result = MagicMock()
+        result.output = expected
+        agent.run = AsyncMock(return_value=result)
+
+        out = await _run_with_shared_agent(agent, str(local), None)
+
+        assert out is expected
+        agent.run.assert_awaited_once()
+
+    async def test_type_error_propagates_unchanged(self):
+        """bytes without media_type must raise TypeError, not ExtractionError."""
+        agent = MagicMock()
+        agent.run = AsyncMock()
+
+        with pytest.raises(TypeError, match="media_type is required"):
+            await _run_with_shared_agent(agent, b"abc", None)
+        agent.run.assert_not_awaited()
+
+    async def test_existing_extraction_error_passes_through(self, tmp_path):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        original = SchemaValidationError("already mapped")
+        agent = MagicMock()
+        agent.run = AsyncMock(side_effect=original)
+
+        with pytest.raises(SchemaValidationError) as exc_info:
+            await _run_with_shared_agent(agent, str(local), None)
+        assert exc_info.value is original
+
+    async def test_generic_exception_is_wrapped(self, tmp_path):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        agent = MagicMock()
+        agent.run = AsyncMock(side_effect=RuntimeError("kaboom"))
+
+        with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
+            await _run_with_shared_agent(agent, str(local), None)
+
+
+# ---------------------------------------------------------------------------
 # extract_many
 # ---------------------------------------------------------------------------
+
+
+def _stub_shared_agent(mocker, side_effect):
+    """Stub the batch-path agent build + per-item runner used by extract_many.
+
+    extract_many now builds a single Agent and reuses it across items via
+    ``_run_with_shared_agent``. Tests just need a no-op Agent and to drive
+    per-item behavior through the runner.
+    """
+    mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+    mocker.patch(
+        "openextract._extract._run_with_shared_agent",
+        side_effect=side_effect,
+    )
 
 
 class TestExtractMany:
@@ -1054,15 +1119,14 @@ class TestExtractMany:
             files.append(str(p))
 
         people = [_Person(name=f"n{i}", age=i) for i in range(4)]
-        # Map each path to its expected person via side_effect.
         path_to_person = dict(zip(files, people, strict=True))
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             # Tiny await yields control so tasks can interleave.
             await asyncio.sleep(0)
             return path_to_person[input_file]
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         results = extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
 
@@ -1079,7 +1143,7 @@ class TestExtractMany:
         peak = 0
         lock = asyncio.Lock()
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             nonlocal in_flight, peak
             async with lock:
                 in_flight += 1
@@ -1089,7 +1153,7 @@ class TestExtractMany:
                 in_flight -= 1
             return _Person(name=input_file, age=1)
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         results = extract_many(
             schema=_Person,
@@ -1105,13 +1169,13 @@ class TestExtractMany:
     def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             if input_file.endswith("f1.txt"):
                 raise ModelError("boom on f1")
             await asyncio.sleep(0.01)
             return _Person(name=input_file, age=1)
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         with pytest.raises(ModelError, match="boom on f1"):
             extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
@@ -1119,12 +1183,12 @@ class TestExtractMany:
     def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             if input_file.endswith("f1.txt"):
                 raise ModelError("boom on f1")
             return _Person(name=input_file, age=1)
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         results = extract_many(
             schema=_Person,
@@ -1137,6 +1201,25 @@ class TestExtractMany:
         assert isinstance(results[1], ModelError)
         assert isinstance(results[2], _Person)
 
+    def test_agent_is_built_once_per_batch(self, tmp_path, mocker):
+        """The whole point of the batch path: one Agent for N items."""
+        files = [str(tmp_path / f"f{i}.txt") for i in range(8)]
+
+        async def fake_run(agent, input_file, media_type):
+            return _Person(name=input_file, age=1)
+
+        build_mock = mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+        mocker.patch("openextract._extract._run_with_shared_agent", side_effect=fake_run)
+
+        extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
+
+        assert build_mock.call_count == 1
+
+    def test_empty_input_returns_empty_list_without_building_agent(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+        assert extract_many(schema=_Person, model="openai:gpt-5", input_files=[]) == []
+        build_mock.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # extract_many_async
@@ -1147,13 +1230,13 @@ class TestExtractManyAsync:
     async def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             if input_file.endswith("f0.txt"):
                 raise ModelError("boom first")
             await asyncio.sleep(0.01)
             return _Person(name=input_file, age=1)
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         with pytest.raises(ModelError, match="boom first"):
             await extract_many_async(
@@ -1165,12 +1248,12 @@ class TestExtractManyAsync:
     async def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             if input_file.endswith("f1.txt"):
                 raise SchemaValidationError("bad schema")
             return _Person(name=input_file, age=1)
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         results = await extract_many_async(
             schema=_Person,
@@ -1188,11 +1271,11 @@ class TestExtractManyAsync:
         expected = [_Person(name=f, age=i) for i, f in enumerate(files)]
         mapping = dict(zip(files, expected, strict=True))
 
-        async def fake_extract_async(schema, model, input_file, instructions=None):
+        async def fake_run(agent, input_file, media_type):
             await asyncio.sleep(0)
             return mapping[input_file]
 
-        mocker.patch("openextract._extract.extract_async", side_effect=fake_extract_async)
+        _stub_shared_agent(mocker, fake_run)
 
         results = await extract_many_async(
             schema=_Person,
