@@ -9,6 +9,7 @@ from ._extract import (
     extract_many,
     extract_many_async,
     extract_with_usage,
+    extract_with_usage_async,
 )
 from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
 
@@ -18,6 +19,7 @@ __all__ = [
     "extract_many",
     "extract_many_async",
     "extract_with_usage",
+    "extract_with_usage_async",
     "Usage",
     "ExtractionError",
     "ModelError",

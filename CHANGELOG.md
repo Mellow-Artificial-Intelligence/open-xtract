@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
+
+## [0.7.0] - 2026-05-22
+### Added
+- Add `extract_with_usage_async`: async counterpart to `extract_with_usage` that
+  returns `(output, Usage)` alongside the token counts for the model call.
+- Add `media_type` keyword argument to `extract_many` and `extract_many_async`:
+  the batch functions previously hard-coded `None`, making it impossible to process
+  `bytes` or file-like inputs that require an explicit MIME type; the new parameter
+  is applied uniformly to every item in the batch.
+- Add `--max-retries` and `--retry-backoff` flags to the `openextract` CLI:
+  exposes the existing retry logic (already available via the Python API) to
+  command-line users.
+
 ### Security
 - URL fetching now refuses hosts that resolve to non-public addresses
   (private/loopback/link-local/multicast/reserved, IPv4 and IPv6, including
@@ -65,7 +78,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.3.2...v0.4.0

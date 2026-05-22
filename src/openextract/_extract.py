@@ -392,6 +392,21 @@ def extract_with_usage(
     return result.output, _usage_from_result(result)
 
 
+async def extract_with_usage_async(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+) -> tuple[T, Usage]:
+    """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
+    with _extraction_errors():
+        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+        result = await agent.run(inputs)
+        return result.output, _usage_from_result(result)
+
+
 async def extract_async(
     schema: type[T],
     model: str,
@@ -430,6 +445,7 @@ async def _gather_extractions(
     instructions: str | None,
     max_concurrency: int,
     return_exceptions: bool,
+    media_type: str | None,
 ) -> list:
     files = list(input_files)
     if not files:
@@ -443,7 +459,7 @@ async def _gather_extractions(
 
     async def _bounded(item):
         async with semaphore:
-            return await _run_with_shared_agent(agent, item, None)
+            return await _run_with_shared_agent(agent, item, media_type)
 
     tasks = [_bounded(item) for item in files]
     return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
@@ -455,6 +471,7 @@ def extract_many(
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None = None,
     *,
+    media_type: str | None = None,
     max_concurrency: int = 5,
     return_exceptions: bool = False,
 ) -> list:
@@ -465,6 +482,9 @@ def extract_many(
         model: The model identifier.
         input_files: Iterable of paths, URLs, or already-resolved bytes.
         instructions: Optional natural-language guidance.
+        media_type: Optional MIME type applied uniformly to every item.  Required
+            when ``input_files`` contains ``bytes`` or file-like objects; optional
+            override for path/URL items.
         max_concurrency: Maximum number of in-flight extractions.
         return_exceptions: If True, exceptions are returned in-place instead of raised
             (mirrors :func:`asyncio.gather`).
@@ -480,6 +500,7 @@ def extract_many(
             instructions,
             max_concurrency,
             return_exceptions,
+            media_type,
         )
     )
 
@@ -490,6 +511,7 @@ async def extract_many_async(
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None = None,
     *,
+    media_type: str | None = None,
     max_concurrency: int = 5,
     return_exceptions: bool = False,
 ) -> list:
@@ -501,4 +523,5 @@ async def extract_many_async(
         instructions,
         max_concurrency,
         return_exceptions,
+        media_type,
     )

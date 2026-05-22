@@ -142,6 +142,8 @@ class TestMainSuccess:
             model="openai:gpt-5",
             input_file="input.txt",
             instructions="find the person",
+            max_retries=0,
+            retry_backoff=1.0,
         )
         captured = capsys.readouterr()
         assert '"name": "Ada"' in captured.out
@@ -184,6 +186,46 @@ class TestMainSuccess:
 
         assert exit_code == 0
         assert mock_extract.call_args.kwargs["instructions"] is None
+
+    def test_max_retries_and_retry_backoff_defaults(self, mocker):
+        fake = MagicMock()
+        fake.model_dump_json.return_value = "{}"
+        mock_extract = _patch_extract(mocker, return_value=fake)
+
+        main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+            ]
+        )
+
+        assert mock_extract.call_args.kwargs["max_retries"] == 0
+        assert mock_extract.call_args.kwargs["retry_backoff"] == 1.0
+
+    def test_max_retries_and_retry_backoff_custom(self, mocker):
+        fake = MagicMock()
+        fake.model_dump_json.return_value = "{}"
+        mock_extract = _patch_extract(mocker, return_value=fake)
+
+        main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+                "--max-retries",
+                "3",
+                "--retry-backoff",
+                "2.5",
+            ]
+        )
+
+        assert mock_extract.call_args.kwargs["max_retries"] == 3
+        assert mock_extract.call_args.kwargs["retry_backoff"] == 2.5
 
 
 # ---------------------------------------------------------------------------

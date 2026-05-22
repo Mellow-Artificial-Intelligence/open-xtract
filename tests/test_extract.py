@@ -23,6 +23,7 @@ from openextract import (
     extract_many,
     extract_many_async,
     extract_with_usage,
+    extract_with_usage_async,
 )
 from openextract._extract import (
     _fetch_url,
@@ -73,6 +74,7 @@ def test_star_import_exposes_only_existing_names():
         "extract_many",
         "extract_many_async",
         "extract_with_usage",
+        "extract_with_usage_async",
         "Usage",
         "ExtractionError",
         "ModelError",
@@ -904,7 +906,7 @@ class TestExtractRetry:
 # ---------------------------------------------------------------------------
 
 
-def _make_async_agent_mock(mocker, output=None, run_side_effect=None):
+def _make_async_agent_mock(mocker, output=None, run_side_effect=None, usage=None):
     """Patch openextract._extract.Agent and stub the async ``run`` method."""
     agent_instance = MagicMock()
     if run_side_effect is not None:
@@ -912,6 +914,8 @@ def _make_async_agent_mock(mocker, output=None, run_side_effect=None):
     else:
         run_result = MagicMock()
         run_result.output = output
+        if usage is not None:
+            run_result.usage.return_value = usage
         agent_instance.run = AsyncMock(return_value=run_result)
     agent_cls = mocker.patch("openextract._extract.Agent", return_value=agent_instance)
     return agent_cls, agent_instance
@@ -1019,6 +1023,66 @@ class TestExtractAsync:
         with pytest.raises(SchemaValidationError) as exc_info:
             await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
         assert exc_info.value is original
+
+
+# ---------------------------------------------------------------------------
+# extract_with_usage_async
+# ---------------------------------------------------------------------------
+
+
+class TestExtractWithUsageAsync:
+    async def test_returns_output_and_usage_tuple(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Ada", age=36)
+        usage_obj = MagicMock(input_tokens=10, output_tokens=20, total_tokens=30)
+        _make_async_agent_mock(mocker, output=expected, usage=usage_obj)
+
+        output, usage = await extract_with_usage_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+            instructions="pull the person",
+        )
+
+        assert output is expected
+        assert usage == Usage(input_tokens=10, output_tokens=20, total_tokens=30)
+
+    async def test_missing_usage_fields_default_to_zero(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Linus", age=54)
+
+        class _BareUsage:
+            pass
+
+        _make_async_agent_mock(mocker, output=expected, usage=_BareUsage())
+
+        _, usage = await extract_with_usage_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+        )
+
+        assert usage == Usage(input_tokens=0, output_tokens=0, total_tokens=0)
+
+    async def test_propagates_runtime_error_as_extraction_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        _make_async_agent_mock(mocker, run_side_effect=RuntimeError("kaboom"))
+
+        with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
+            await extract_with_usage_async(
+                schema=_Person, model="openai:gpt-5", input_file=str(local)
+            )
+
+    async def test_missing_media_type_for_bytes_raises_type_error(self, mocker):
+        _make_async_agent_mock(mocker, output=_Person(name="x", age=1))
+
+        with pytest.raises(TypeError, match="media_type is required"):
+            await extract_with_usage_async(
+                schema=_Person, model="openai:gpt-5", input_file=b"abc"
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -1197,6 +1261,31 @@ class TestExtractMany:
         build_mock = mocker.patch("openextract._extract._build_agent")
         assert extract_many(schema=_Person, model="openai:gpt-5", input_files=[]) == []
         build_mock.assert_not_called()
+
+    def test_media_type_forwarded_to_runner(self, tmp_path, mocker):
+        """media_type kwarg is passed through to every per-item runner call."""
+        files = [str(tmp_path / f"f{i}.txt") for i in range(2)]
+        for f in files:
+            from pathlib import Path
+            Path(f).write_bytes(b"x")
+
+        received_types: list[str | None] = []
+
+        async def fake_run(agent, input_file, media_type):
+            received_types.append(media_type)
+            return _Person(name=input_file, age=1)
+
+        _stub_shared_agent(mocker, fake_run)
+
+        extract_many(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+            media_type="application/pdf",
+        )
+
+        assert all(mt == "application/pdf" for mt in received_types)
+        assert len(received_types) == 2
 
 
 # ---------------------------------------------------------------------------
