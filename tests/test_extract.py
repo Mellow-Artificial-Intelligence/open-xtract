@@ -1080,9 +1080,7 @@ class TestExtractWithUsageAsync:
         _make_async_agent_mock(mocker, output=_Person(name="x", age=1))
 
         with pytest.raises(TypeError, match="media_type is required"):
-            await extract_with_usage_async(
-                schema=_Person, model="openai:gpt-5", input_file=b"abc"
-            )
+            await extract_with_usage_async(schema=_Person, model="openai:gpt-5", input_file=b"abc")
 
 
 # ---------------------------------------------------------------------------
@@ -1267,6 +1265,7 @@ class TestExtractMany:
         files = [str(tmp_path / f"f{i}.txt") for i in range(2)]
         for f in files:
             from pathlib import Path
+
             Path(f).write_bytes(b"x")
 
         received_types: list[str | None] = []
