@@ -68,6 +68,20 @@ def _build_parser() -> argparse.ArgumentParser:
         default="json",
         help="Output format: 'json' (default) prints model_dump_json; 'repr' prints repr().",
     )
+    parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Retry up to N times on ModelError with exponential backoff (default 0).",
+    )
+    parser.add_argument(
+        "--retry-backoff",
+        type=float,
+        default=1.0,
+        metavar="SECONDS",
+        help="Base backoff in seconds for retry (default 1.0).",
+    )
     return parser
 
 
@@ -88,6 +102,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             model=args.model,
             input_file=args.input_file,
             instructions=args.instructions,
+            max_retries=args.max_retries,
+            retry_backoff=args.retry_backoff,
         )
     except UrlFetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
