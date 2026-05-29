@@ -1350,3 +1350,152 @@ class TestExtractManyAsync:
         )
 
         assert results == expected
+
+
+# ---------------------------------------------------------------------------
+# Usage arithmetic
+# ---------------------------------------------------------------------------
+
+
+class TestUsageArithmetic:
+    def test_add_two_usages(self):
+        u1 = Usage(input_tokens=10, output_tokens=20, total_tokens=30)
+        u2 = Usage(input_tokens=5, output_tokens=8, total_tokens=13)
+        result = u1 + u2
+        assert result == Usage(input_tokens=15, output_tokens=28, total_tokens=43)
+
+    def test_add_returns_new_instance(self):
+        u1 = Usage(input_tokens=10, output_tokens=20, total_tokens=30)
+        u2 = Usage(input_tokens=5, output_tokens=8, total_tokens=13)
+        result = u1 + u2
+        assert result is not u1
+        assert result is not u2
+
+    def test_sum_of_usages(self):
+        usages = [
+            Usage(input_tokens=10, output_tokens=20, total_tokens=30),
+            Usage(input_tokens=5, output_tokens=8, total_tokens=13),
+            Usage(input_tokens=1, output_tokens=2, total_tokens=3),
+        ]
+        total = sum(usages)
+        assert total == Usage(input_tokens=16, output_tokens=30, total_tokens=46)
+
+    def test_add_non_usage_returns_not_implemented(self):
+        u = Usage(input_tokens=1, output_tokens=2, total_tokens=3)
+        assert u.__add__(42) is NotImplemented
+
+    def test_radd_from_zero_returns_self(self):
+        u = Usage(input_tokens=5, output_tokens=10, total_tokens=15)
+        result = u.__radd__(0)
+        assert result is u
+
+    def test_radd_non_zero_returns_not_implemented(self):
+        u = Usage(input_tokens=1, output_tokens=2, total_tokens=3)
+        assert u.__radd__(42) is NotImplemented
+
+
+# ---------------------------------------------------------------------------
+# extract_async retry behavior
+# ---------------------------------------------------------------------------
+
+
+class TestExtractAsyncRetry:
+    async def test_no_retry_by_default_raises_immediately(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        sleep_mock = mocker.patch("openextract._extract.asyncio.sleep")
+        agent_instance = MagicMock()
+        agent_instance.run = AsyncMock(side_effect=ModelError("upstream down"))
+        mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+
+        with pytest.raises(ModelError, match="upstream down"):
+            await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+        assert agent_instance.run.await_count == 1
+        sleep_mock.assert_not_called()
+
+    async def test_retry_succeeds_after_transient_model_errors(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        sleep_mock = mocker.patch("openextract._extract.asyncio.sleep")
+        expected = _Person(name="Grace", age=85)
+        success_result = MagicMock()
+        success_result.output = expected
+        agent_instance = MagicMock()
+        agent_instance.run = AsyncMock(
+            side_effect=[ModelError("flaky"), ModelError("flaky"), success_result]
+        )
+        mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+
+        result = await extract_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+            max_retries=2,
+        )
+
+        assert result is expected
+        assert agent_instance.run.await_count == 3
+        assert sleep_mock.await_count == 2
+
+    async def test_retry_exhausted_raises_last_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        sleep_mock = mocker.patch("openextract._extract.asyncio.sleep")
+        agent_instance = MagicMock()
+        agent_instance.run = AsyncMock(side_effect=ModelError("persistent"))
+        mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+
+        with pytest.raises(ModelError, match="persistent"):
+            await extract_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=str(local),
+                max_retries=2,
+            )
+
+        assert agent_instance.run.await_count == 3
+        assert sleep_mock.await_count == 2
+
+    async def test_backoff_schedule_uses_exponential_jitter(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        sleep_mock = mocker.patch("openextract._extract.asyncio.sleep")
+        agent_instance = MagicMock()
+        agent_instance.run = AsyncMock(side_effect=ModelError("nope"))
+        mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+
+        with pytest.raises(ModelError):
+            await extract_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=str(local),
+                max_retries=3,
+                retry_backoff=1.0,
+            )
+
+        delays = [call.args[0] for call in sleep_mock.call_args_list]
+        assert len(delays) == 3
+        assert delays == sorted(delays)
+        assert 1.0 <= delays[0] <= 1.25
+        assert 2.0 <= delays[1] <= 2.5
+        assert 4.0 <= delays[2] <= 5.0
+
+    async def test_schema_validation_error_is_not_retried(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        sleep_mock = mocker.patch("openextract._extract.asyncio.sleep")
+        agent_instance = MagicMock()
+        agent_instance.run = AsyncMock(side_effect=SchemaValidationError("bad shape"))
+        mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+
+        with pytest.raises(SchemaValidationError, match="bad shape"):
+            await extract_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=str(local),
+                max_retries=3,
+            )
+
+        assert agent_instance.run.await_count == 1
+        sleep_mock.assert_not_called()

@@ -1,5 +1,6 @@
 """Tests for openextract._cli."""
 
+import importlib.metadata
 from unittest.mock import MagicMock
 
 import pytest
@@ -110,6 +111,14 @@ class TestArgparse:
         assert exc_info.value.code != 0
         captured = capsys.readouterr()
         assert "output" in captured.err.lower()
+
+    def test_version_flag_prints_version_and_exits_zero(self, capsys):
+        expected_version = importlib.metadata.version("openextract")
+        with pytest.raises(SystemExit) as exc_info:
+            main(["--version"])
+        assert exc_info.value.code == 0
+        captured = capsys.readouterr()
+        assert expected_version in captured.out
 
 
 # ---------------------------------------------------------------------------
