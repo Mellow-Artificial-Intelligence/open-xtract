@@ -104,6 +104,20 @@ class Usage:
     output_tokens: int
     total_tokens: int
 
+    def __add__(self, other: object) -> "Usage":
+        if not isinstance(other, Usage):
+            return NotImplemented  # type: ignore[return-value]
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            output_tokens=self.output_tokens + other.output_tokens,
+            total_tokens=self.total_tokens + other.total_tokens,
+        )
+
+    def __radd__(self, other: object) -> "Usage":
+        if isinstance(other, int) and other == 0:
+            return self
+        return NotImplemented  # type: ignore[return-value]
+
 
 def _get_media_type(file_path: str) -> str:
     """Return the MIME type for a file path (e.g. 'application/pdf')."""
@@ -414,12 +428,33 @@ async def extract_async(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> T:
-    """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
-    with _extraction_errors():
-        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
-        result = await agent.run(inputs)
-        return result.output
+    """Async sibling of :func:`extract`; uses ``Agent.run`` with optional retry.
+
+    Args:
+        schema: A Pydantic model class defining the expected output structure.
+        model: The model identifier.
+        input_file: A local file path, URL, raw bytes, or binary file-like object.
+        instructions: Optional natural-language guidance for the LLM.
+        media_type: Optional MIME type.
+        max_retries: Retry up to this many additional times on ``ModelError``.
+        retry_backoff: Base backoff in seconds (exponential with up to 25% jitter).
+    """
+    attempt = 0
+    while True:
+        try:
+            with _extraction_errors():
+                agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+                result = await agent.run(inputs)
+                return result.output
+        except ModelError:
+            if attempt >= max_retries:
+                raise
+            delay = retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
+            await asyncio.sleep(delay)
+            attempt += 1
 
 
 async def _run_with_shared_agent(

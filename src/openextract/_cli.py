@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import importlib.metadata
 import sys
 from collections.abc import Sequence
 
@@ -42,6 +43,11 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="openextract",
         description="Extract structured data from a file or URL using an LLM.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"%(prog)s {importlib.metadata.version('openextract')}",
     )
     parser.add_argument(
         "input_file",
