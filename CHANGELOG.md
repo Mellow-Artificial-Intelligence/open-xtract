@@ -5,6 +5,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-05-29
+### Added
+- `Usage` now supports addition: `u1 + u2` returns a new `Usage` with summed
+  token fields, and `sum(usages)` works without a custom start value (Python's
+  built-in `sum()` seeds with integer `0`, which `__radd__` handles).
+- `extract_async` now accepts `max_retries` and `retry_backoff` keyword
+  arguments, matching the retry behaviour of `extract()`. Uses
+  `asyncio.sleep` between attempts so the event loop is not blocked.
+- `openextract --version` prints the installed package version and exits 0.
+
 ## [0.7.0] - 2026-05-22
 ### Added
 - Add `extract_with_usage_async`: async counterpart to `extract_with_usage` that
@@ -78,7 +88,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.4.0...v0.5.0
