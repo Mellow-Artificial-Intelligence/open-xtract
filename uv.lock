@@ -1233,12 +1233,51 @@ version = "0.7.0"
 source = { editable = "." }
 dependencies = [
     { name = "pydantic" },
-    { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "mistral", "openai", "openrouter", "xai"] },
+    { name = "pydantic-ai-slim" },
     { name = "python-dotenv" },
+]
+
+[package.optional-dependencies]
+all = [
+    { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "mistral", "openai", "openrouter", "xai"] },
+]
+anthropic = [
+    { name = "pydantic-ai-slim", extra = ["anthropic"] },
+]
+bedrock = [
+    { name = "pydantic-ai-slim", extra = ["bedrock"] },
+]
+cohere = [
+    { name = "pydantic-ai-slim", extra = ["cohere"] },
+]
+google = [
+    { name = "pydantic-ai-slim", extra = ["google"] },
+]
+groq = [
+    { name = "pydantic-ai-slim", extra = ["groq"] },
+]
+huggingface = [
+    { name = "pydantic-ai-slim", extra = ["huggingface"] },
+]
+logfire = [
+    { name = "pydantic-ai-slim", extra = ["logfire"] },
+]
+mistral = [
+    { name = "pydantic-ai-slim", extra = ["mistral"] },
+]
+openai = [
+    { name = "pydantic-ai-slim", extra = ["openai"] },
+]
+openrouter = [
+    { name = "pydantic-ai-slim", extra = ["openrouter"] },
+]
+xai = [
+    { name = "pydantic-ai-slim", extra = ["xai"] },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "pydantic-ai-slim", extra = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "mistral", "openai", "openrouter", "xai"] },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
@@ -1250,12 +1289,26 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
-    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "mistral", "openai", "openrouter", "xai"], specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "mistral", "openai", "openrouter", "xai"], marker = "extra == 'all'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["bedrock"], marker = "extra == 'bedrock'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["cohere"], marker = "extra == 'cohere'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["google"], marker = "extra == 'google'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["groq"], marker = "extra == 'groq'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["huggingface"], marker = "extra == 'huggingface'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["logfire"], marker = "extra == 'logfire'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["mistral"], marker = "extra == 'mistral'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["openai"], marker = "extra == 'openai'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["openrouter"], marker = "extra == 'openrouter'", specifier = ">=1.37.0" },
+    { name = "pydantic-ai-slim", extras = ["xai"], marker = "extra == 'xai'", specifier = ">=1.37.0" },
     { name = "python-dotenv", specifier = ">=1.2.2" },
 ]
+provides-extras = ["openai", "anthropic", "google", "bedrock", "cohere", "groq", "huggingface", "mistral", "openrouter", "xai", "logfire", "all"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "pydantic-ai-slim", extras = ["anthropic", "bedrock", "cohere", "google", "groq", "huggingface", "logfire", "mistral", "openai", "openrouter", "xai"], specifier = ">=1.37.0" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-asyncio", specifier = ">=1.3.0" },
     { name = "pytest-cov", specifier = ">=7.1.0" },

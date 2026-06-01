@@ -10,7 +10,7 @@ Thanks for your interest in contributing to openextract!
    cd openextract
    ```
 
-2. Install dependencies with uv:
+2. Install dependencies with uv (includes all provider extras for tests):
    ```bash
    uv sync --dev
    ```

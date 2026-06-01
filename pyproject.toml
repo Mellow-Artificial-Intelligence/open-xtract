@@ -20,8 +20,24 @@ classifiers = [
 ]
 dependencies = [
     "pydantic>=2.12.5",
-    "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,mistral,openai,openrouter,xai]>=1.37.0",
+    "pydantic-ai-slim>=1.37.0",
     "python-dotenv>=1.2.2",
+]
+
+[project.optional-dependencies]
+openai = ["pydantic-ai-slim[openai]>=1.37.0"]
+anthropic = ["pydantic-ai-slim[anthropic]>=1.37.0"]
+google = ["pydantic-ai-slim[google]>=1.37.0"]
+bedrock = ["pydantic-ai-slim[bedrock]>=1.37.0"]
+cohere = ["pydantic-ai-slim[cohere]>=1.37.0"]
+groq = ["pydantic-ai-slim[groq]>=1.37.0"]
+huggingface = ["pydantic-ai-slim[huggingface]>=1.37.0"]
+mistral = ["pydantic-ai-slim[mistral]>=1.37.0"]
+openrouter = ["pydantic-ai-slim[openrouter]>=1.37.0"]
+xai = ["pydantic-ai-slim[xai]>=1.37.0"]
+logfire = ["pydantic-ai-slim[logfire]>=1.37.0"]
+all = [
+    "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,mistral,openai,openrouter,xai]>=1.37.0",
 ]
 
 [project.scripts]
@@ -49,6 +65,7 @@ dev = [
     "pytest-mock>=3.15.1",
     "ruff>=0.14.10",
     "ty>=0.0.35",
+    "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,mistral,openai,openrouter,xai]>=1.37.0",
 ]
 
 [tool.ty]

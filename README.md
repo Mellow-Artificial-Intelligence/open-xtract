@@ -32,14 +32,16 @@
 ## Installation
 
 ```bash
-uv add openextract
+uv add openextract[openai]
 ```
 
 Or with pip:
 
 ```bash
-pip install openextract
+pip install openextract[openai]
 ```
+
+Install additional providers via optional extras, e.g. `openextract[anthropic]`, `openextract[google]`, or every provider with `openextract[all]`. The base package includes `pydantic-ai-slim` without provider SDKs; you need at least one provider extra for model calls.
 
 Requires Python 3.12+.
 
