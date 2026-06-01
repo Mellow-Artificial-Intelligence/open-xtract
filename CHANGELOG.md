@@ -10,6 +10,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   to configure HTTP timeout and redirect limits when fetching URLs.
 - Ship `py.typed` for PEP 561 type checker support.
 - Run [ty](https://docs.astral.sh/ty/) on `src/openextract` in CI (Astral toolchain with uv and ruff).
+- `max_retries` and `retry_backoff` on `extract_async`, `extract_with_usage`,
+  `extract_with_usage_async`, `extract_many`, and `extract_many_async` (per-item
+  for batch), matching sync `extract()` retry semantics.
 
 ### Changed
 - Expand README API reference to document `extract_async`, `extract_many`,

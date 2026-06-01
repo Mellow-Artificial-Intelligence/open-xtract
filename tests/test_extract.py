@@ -946,6 +946,57 @@ class TestExtractRetry:
         sleep_mock.assert_not_called()
 
 
+class TestExtractWithUsageRetry:
+    def test_retries_on_model_error(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        expected = _Person(name="Ada", age=36)
+        usage = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)
+        run_result = MagicMock(output=expected)
+        run_result.usage.return_value = usage
+        run_extraction = mocker.patch(
+            "openextract._extract._run_extraction",
+            side_effect=[ModelError("flaky"), run_result],
+        )
+
+        output, got_usage = extract_with_usage(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file="ignored",
+            max_retries=1,
+        )
+
+        assert output is expected
+        assert got_usage.input_tokens == 1
+        assert run_extraction.call_count == 2
+        sleep_mock.assert_called_once()
+
+
+class TestExtractAsyncRetry:
+    async def test_retries_on_model_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        sleep_mock = mocker.patch(
+            "openextract._extract.asyncio.sleep",
+            new_callable=AsyncMock,
+        )
+        expected = _Person(name="Ada", age=36)
+        run_result = MagicMock()
+        run_result.output = expected
+        _, agent_instance = _make_async_agent_mock(mocker)
+        agent_instance.run = AsyncMock(side_effect=[ModelError("flaky"), run_result])
+
+        result = await extract_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+            max_retries=1,
+        )
+
+        assert result is expected
+        assert agent_instance.run.await_count == 2
+        sleep_mock.assert_awaited_once()
+
+
 # ---------------------------------------------------------------------------
 # Async helpers and shared mock builder
 # ---------------------------------------------------------------------------
