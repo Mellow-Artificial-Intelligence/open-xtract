@@ -8,7 +8,7 @@ import os
 import random
 import socket
 import time
-from collections.abc import Iterable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -362,6 +362,46 @@ def _extract_once(
     return cast(T, result.output)
 
 
+def _retry_delay(retry_backoff: float, attempt: int) -> float:
+    return retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
+
+
+def _run_with_retries_sync[R](
+    fn: Callable[[], R],
+    *,
+    max_retries: int,
+    retry_backoff: float,
+) -> R:
+    """Run ``fn`` until it succeeds or ``ModelError`` retries are exhausted."""
+    attempt = 0
+    while True:
+        try:
+            return fn()
+        except ModelError:
+            if attempt >= max_retries:
+                raise
+            time.sleep(_retry_delay(retry_backoff, attempt))
+            attempt += 1
+
+
+async def _run_with_retries_async[R](
+    fn: Callable[[], Awaitable[R]],
+    *,
+    max_retries: int,
+    retry_backoff: float,
+) -> R:
+    """Async counterpart to :func:`_run_with_retries_sync`."""
+    attempt = 0
+    while True:
+        try:
+            return await fn()
+        except ModelError:
+            if attempt >= max_retries:
+                raise
+            await asyncio.sleep(_retry_delay(retry_backoff, attempt))
+            attempt += 1
+
+
 def extract(
     schema: type[T],
     model: str,
@@ -402,16 +442,11 @@ def extract(
         ModelError: If retries (if any) are exhausted.
         ExtractionError: For other extraction failures.
     """
-    attempt = 0
-    while True:
-        try:
-            return _extract_once(schema, model, input_file, instructions, media_type)
-        except ModelError:
-            if attempt >= max_retries:
-                raise
-            delay = retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
-            time.sleep(delay)
-            attempt += 1
+    return _run_with_retries_sync(
+        lambda: _extract_once(schema, model, input_file, instructions, media_type),
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+    )
 
 
 def extract_with_usage(
@@ -421,14 +456,19 @@ def extract_with_usage(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> tuple[T, Usage]:
     """Extract structured data and return ``(output, Usage)`` for token accounting.
 
-    Behaves identically to :func:`extract` (without retry) but additionally
-    returns a :class:`Usage` describing the tokens consumed by the model call.
+    Same retry semantics as :func:`extract`. Returns a :class:`Usage` describing
+    the tokens consumed by the successful model call.
     """
-    result = _run_extraction(schema, model, input_file, instructions, media_type)
-    return cast(T, result.output), _usage_from_result(result)
+    def _once() -> tuple[T, Usage]:
+        result = _run_extraction(schema, model, input_file, instructions, media_type)
+        return cast(T, result.output), _usage_from_result(result)
+
+    return _run_with_retries_sync(_once, max_retries=max_retries, retry_backoff=retry_backoff)
 
 
 async def extract_with_usage_async(
@@ -438,12 +478,21 @@ async def extract_with_usage_async(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
-    with _extraction_errors():
-        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
-        result = await agent.run(inputs)
-        return cast(T, result.output), _usage_from_result(result)
+    async def _once() -> tuple[T, Usage]:
+        with _extraction_errors():
+            agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+            result = await agent.run(inputs)
+            return cast(T, result.output), _usage_from_result(result)
+
+    return await _run_with_retries_async(
+        _once,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+    )
 
 
 async def extract_async(
@@ -453,12 +502,21 @@ async def extract_async(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
-    with _extraction_errors():
-        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
-        result = await agent.run(inputs)
-        return cast(T, result.output)
+    async def _once() -> T:
+        with _extraction_errors():
+            agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+            result = await agent.run(inputs)
+            return cast(T, result.output)
+
+    return await _run_with_retries_async(
+        _once,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+    )
 
 
 async def _run_with_shared_agent(
@@ -485,6 +543,8 @@ async def _gather_extractions(
     max_concurrency: int,
     return_exceptions: bool,
     media_type: str | None,
+    max_retries: int,
+    retry_backoff: float,
 ) -> list:
     files = list(input_files)
     if not files:
@@ -497,8 +557,15 @@ async def _gather_extractions(
     semaphore = asyncio.Semaphore(max_concurrency)
 
     async def _bounded(item):
-        async with semaphore:
+        async def _once():
             return await _run_with_shared_agent(agent, item, media_type)
+
+        async with semaphore:
+            return await _run_with_retries_async(
+                _once,
+                max_retries=max_retries,
+                retry_backoff=retry_backoff,
+            )
 
     tasks = [_bounded(item) for item in files]
     return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
@@ -513,6 +580,8 @@ def extract_many(
     media_type: str | None = None,
     max_concurrency: int = 5,
     return_exceptions: bool = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> list:
     """Run :func:`extract_async` over many inputs concurrently from sync code.
 
@@ -527,6 +596,9 @@ def extract_many(
         max_concurrency: Maximum number of in-flight extractions.
         return_exceptions: If True, exceptions are returned in-place instead of raised
             (mirrors :func:`asyncio.gather`).
+        max_retries: Per-item retries after ``ModelError`` (same semantics as
+            :func:`extract`).
+        retry_backoff: Base backoff seconds between per-item retries.
 
     Returns:
         A list of results (or exceptions, when ``return_exceptions=True``) in input order.
@@ -540,6 +612,8 @@ def extract_many(
             max_concurrency,
             return_exceptions,
             media_type,
+            max_retries,
+            retry_backoff,
         )
     )
 
@@ -553,6 +627,8 @@ async def extract_many_async(
     media_type: str | None = None,
     max_concurrency: int = 5,
     return_exceptions: bool = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
 ) -> list:
     """Async sibling of :func:`extract_many`."""
     return await _gather_extractions(
@@ -563,4 +639,6 @@ async def extract_many_async(
         max_concurrency,
         return_exceptions,
         media_type,
+        max_retries,
+        retry_backoff,
     )
