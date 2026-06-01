@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed
+- Expand README API reference to document `extract_async`, `extract_many`,
+  `extract_with_usage`, and related public APIs.
+
 ## [0.7.0] - 2026-05-22
 ### Added
 - Add `extract_with_usage_async`: async counterpart to `extract_with_usage` that
