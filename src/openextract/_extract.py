@@ -27,8 +27,10 @@ T = TypeVar("T", bound=BaseModel)
 
 _DEFAULT_MEDIA_TYPE = "application/octet-stream"
 _URL_PREFIXES = ("http://", "https://")
-_URL_FETCH_TIMEOUT = 30.0
-_MAX_REDIRECTS = 10
+_DEFAULT_URL_FETCH_TIMEOUT = 30.0
+_DEFAULT_MAX_REDIRECTS = 10
+_URL_TIMEOUT_ENV = "OPENEXTRACT_URL_TIMEOUT"
+_MAX_REDIRECTS_ENV = "OPENEXTRACT_MAX_REDIRECTS"
 _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
 _BYTES_MEDIA_TYPE_REQUIRED = (
     "media_type is required when input_file is bytes or a file-like object; "
@@ -116,6 +118,40 @@ def _allow_private_urls() -> bool:
     return os.environ.get(_ALLOW_PRIVATE_URLS_ENV, "").lower() in ("1", "true", "yes")
 
 
+def _env_positive_float(name: str, default: float) -> float:
+    """Parse a positive float from ``name``; return ``default`` when unset or invalid."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = float(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _env_positive_int(name: str, default: int) -> int:
+    """Parse a positive int from ``name``; return ``default`` when unset or invalid."""
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
+
+
+def _url_fetch_timeout() -> float:
+    """HTTP timeout in seconds for URL fetches (``OPENEXTRACT_URL_TIMEOUT``)."""
+    return _env_positive_float(_URL_TIMEOUT_ENV, _DEFAULT_URL_FETCH_TIMEOUT)
+
+
+def _max_redirects() -> int:
+    """Maximum redirect hops when fetching URLs (``OPENEXTRACT_MAX_REDIRECTS``)."""
+    return _env_positive_int(_MAX_REDIRECTS_ENV, _DEFAULT_MAX_REDIRECTS)
+
+
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True only for globally routable public unicast addresses.
 
@@ -163,11 +199,13 @@ def _is_safe_host(host: str | None) -> bool:
 def _fetch_url(url: str) -> httpx.Response:
     """Fetch ``url`` with SSRF defenses; validate the host at every redirect hop."""
     current = url
-    for _ in range(_MAX_REDIRECTS):
+    limit = _max_redirects()
+    timeout = _url_fetch_timeout()
+    for _ in range(limit):
         host = urlparse(current).hostname
         if not _is_safe_host(host):
             raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
-        response = httpx.get(current, follow_redirects=False, timeout=_URL_FETCH_TIMEOUT)
+        response = httpx.get(current, follow_redirects=False, timeout=timeout)
         if response.is_redirect:
             location = response.headers.get("location")
             if not location:
@@ -176,7 +214,7 @@ def _fetch_url(url: str) -> httpx.Response:
             continue
         response.raise_for_status()
         return response
-    raise UrlFetchError(f"Too many redirects (>{_MAX_REDIRECTS})")
+    raise UrlFetchError(f"Too many redirects (>{limit})")
 
 
 def _read_from_path(file_path: str) -> tuple[bytes, str]:

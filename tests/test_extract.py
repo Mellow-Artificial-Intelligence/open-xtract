@@ -31,7 +31,9 @@ from openextract._extract import (
     _get_media_type,
     _is_public_ip,
     _is_safe_host,
+    _max_redirects,
     _run_with_shared_agent,
+    _url_fetch_timeout,
 )
 
 
@@ -342,6 +344,49 @@ class TestFetchUrl:
 
         with pytest.raises(UrlFetchError, match="Too many redirects"):
             _fetch_url("https://1.1.1.1/loop")
+
+
+class TestUrlFetchConfiguration:
+    def test_default_timeout_and_redirects(self, monkeypatch):
+        monkeypatch.delenv("OPENEXTRACT_URL_TIMEOUT", raising=False)
+        monkeypatch.delenv("OPENEXTRACT_MAX_REDIRECTS", raising=False)
+        assert _url_fetch_timeout() == 30.0
+        assert _max_redirects() == 10
+
+    def test_custom_timeout_from_env(self, monkeypatch, mocker):
+        monkeypatch.setenv("OPENEXTRACT_URL_TIMEOUT", "45")
+        fake_response = _build_response(content=b"ok")
+        mock_get = mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+
+        _fetch_url("https://1.1.1.1/doc.pdf")
+
+        assert mock_get.call_args.kwargs["timeout"] == 45.0
+
+    def test_invalid_timeout_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_URL_TIMEOUT", "not-a-number")
+        assert _url_fetch_timeout() == 30.0
+
+    def test_non_positive_timeout_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_URL_TIMEOUT", "0")
+        assert _url_fetch_timeout() == 30.0
+
+    def test_custom_max_redirects_from_env(self, monkeypatch, mocker):
+        monkeypatch.setenv("OPENEXTRACT_MAX_REDIRECTS", "2")
+        redirect = _build_response(
+            content=b"", status_code=302, is_redirect=True, location="https://1.1.1.1/loop"
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=redirect)
+
+        with pytest.raises(UrlFetchError, match="Too many redirects \\(>2\\)"):
+            _fetch_url("https://1.1.1.1/loop")
+
+    def test_invalid_max_redirects_falls_back_to_default(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_REDIRECTS", "-1")
+        assert _max_redirects() == 10
+
+    def test_invalid_redirect_count_string_falls_back(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_REDIRECTS", "not-a-number")
+        assert _max_redirects() == 10
 
 
 class TestSsrfIntegration:

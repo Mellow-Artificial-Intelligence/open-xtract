@@ -286,7 +286,14 @@ attacker cannot use a public URL that redirects to an internal one.
 For workflows that legitimately need to fetch internal URLs (testing
 against `localhost`, on-prem services, etc.), set the
 `OPENEXTRACT_ALLOW_PRIVATE_URLS` environment variable to `1`, `true`, or
-`yes` to disable the check. If you need a one-off fetch from an internal
+`yes` to disable the check.
+
+Tune fetch behavior with:
+
+- `OPENEXTRACT_URL_TIMEOUT` &mdash; HTTP timeout in seconds (default `30`)
+- `OPENEXTRACT_MAX_REDIRECTS` &mdash; maximum redirect hops (default `10`)
+
+Invalid or non-positive values fall back to the defaults. If you need a one-off fetch from an internal
 host without disabling validation globally, fetch the bytes with your own
 HTTP client and pass them to `extract()` as `bytes`/file-like with an
 explicit `media_type`.
