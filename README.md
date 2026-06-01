@@ -163,11 +163,40 @@ openextract ./reports/q4.pdf \
   --output json
 ```
 
-- `<input_file>` is a positional argument; a local path or `https://` URL.
+Batch multiple files (JSON array output):
+
+```bash
+openextract ./invoices/a.pdf ./invoices/b.pdf \
+  --schema mypkg.schemas:Invoice \
+  --model openai:gpt-5
+```
+
+Token usage (single file):
+
+```bash
+openextract ./reports/q4.pdf \
+  --schema mypkg.schemas:Invoice \
+  --model openai:gpt-5 \
+  --usage
+```
+
+Read from stdin:
+
+```bash
+cat ./reports/q4.pdf | openextract - \
+  --schema mypkg.schemas:Invoice \
+  --model openai:gpt-5 \
+  --media-type application/pdf
+```
+
+- `input_file` accepts one or more paths/URLs, or `-` for stdin (`--media-type` required for stdin).
 - `--schema` is a Python import path of the form `module:ClassName` resolving to a Pydantic model.
 - `--model` is a `pydantic-ai` model identifier.
 - `--instructions` is optional natural-language guidance.
-- `--output` is `json` (default; prints `model_dump_json(indent=2)`) or `repr`.
+- `--media-type` sets MIME type for stdin or overrides guessing for paths/URLs.
+- `--usage` prints a JSON object with `result` and `usage` (single input only).
+- `--output` is `json` (default) or `repr`.
+- `--max-retries` / `--retry-backoff` match the Python API retry behavior.
 
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
 `5` other extraction error, `1` any other failure (including bad `--schema` paths).
