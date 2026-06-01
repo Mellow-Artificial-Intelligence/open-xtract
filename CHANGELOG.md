@@ -16,6 +16,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Optional dependency extras: `openai`, `anthropic`, `google`, `bedrock`,
   `cohere`, `groq`, `huggingface`, `mistral`, `openrouter`, `xai`, `logfire`,
   and `all`.
+- Examples `batch_invoices.py` and `extract_with_usage.py` for concurrent batch
+  extraction and token usage reporting.
 
 ### Changed
 - **Breaking:** Core dependencies no longer install every `pydantic-ai-slim`
