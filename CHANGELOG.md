@@ -24,9 +24,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--usage`, `--media-type`, and stdin (`-`) support on the `openextract` command.
 
 ### Changed
-- **Breaking:** Core dependencies no longer install every `pydantic-ai-slim`
-  provider extra by default. Install the providers you need, e.g.
-  `pip install openextract[openai]` or `openextract[all]`.
+- **Breaking:** `pip install openextract` no longer bundles every provider SDK.
+  Install a provider extra for model calls (e.g. `openextract[openai]` or `openextract[all]`).
 - Expand README API reference to document `extract_async`, `extract_many`,
   `extract_with_usage`, and related public APIs.
 
