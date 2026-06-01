@@ -26,6 +26,11 @@ Thanks for your interest in contributing to openextract!
    uv run ruff format --check .
    ```
 
+5. Run type checking:
+   ```bash
+   uv run pyright src/openextract
+   ```
+
 ## Making Changes
 
 1. Create a new branch from `main`
