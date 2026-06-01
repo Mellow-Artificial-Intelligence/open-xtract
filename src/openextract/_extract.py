@@ -464,6 +464,7 @@ def extract_with_usage(
     Same retry semantics as :func:`extract`. Returns a :class:`Usage` describing
     the tokens consumed by the successful model call.
     """
+
     def _once() -> tuple[T, Usage]:
         result = _run_extraction(schema, model, input_file, instructions, media_type)
         return cast(T, result.output), _usage_from_result(result)
@@ -482,6 +483,7 @@ async def extract_with_usage_async(
     retry_backoff: float = 1.0,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
+
     async def _once() -> tuple[T, Usage]:
         with _extraction_errors():
             agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
@@ -506,6 +508,7 @@ async def extract_async(
     retry_backoff: float = 1.0,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
+
     async def _once() -> T:
         with _extraction_errors():
             agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)

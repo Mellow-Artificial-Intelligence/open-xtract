@@ -32,6 +32,24 @@ def _patch_extract(mocker, return_value=None, side_effect=None):
     return mock_extract
 
 
+def _patch_extract_with_usage(mocker, return_value=None, side_effect=None):
+    mock_fn = mocker.patch("openextract._cli.extract_with_usage")
+    if side_effect is not None:
+        mock_fn.side_effect = side_effect
+    else:
+        mock_fn.return_value = return_value
+    return mock_fn
+
+
+def _patch_extract_many(mocker, return_value=None, side_effect=None):
+    mock_fn = mocker.patch("openextract._cli.extract_many")
+    if side_effect is not None:
+        mock_fn.side_effect = side_effect
+    else:
+        mock_fn.return_value = return_value
+    return mock_fn
+
+
 # ---------------------------------------------------------------------------
 # _resolve_schema
 # ---------------------------------------------------------------------------
@@ -119,8 +137,7 @@ class TestArgparse:
 
 class TestMainSuccess:
     def test_json_output_default(self, mocker, capsys):
-        fake = MagicMock()
-        fake.model_dump_json.return_value = '{\n  "name": "Ada",\n  "age": 36\n}'
+        fake = _FixtureSchema(name="Ada", age=36)
         mock_extract = _patch_extract(mocker, return_value=fake)
 
         exit_code = main(
@@ -136,17 +153,17 @@ class TestMainSuccess:
         )
 
         assert exit_code == 0
-        fake.model_dump_json.assert_called_once_with(indent=2)
+        captured = capsys.readouterr()
+        assert '"name": "Ada"' in captured.out
         mock_extract.assert_called_once_with(
             schema=_FixtureSchema,
             model="openai:gpt-5",
             input_file="input.txt",
             instructions="find the person",
+            media_type=None,
             max_retries=0,
             retry_backoff=1.0,
         )
-        captured = capsys.readouterr()
-        assert '"name": "Ada"' in captured.out
 
     def test_repr_output(self, mocker, capsys):
         fake = MagicMock()
@@ -287,3 +304,124 @@ class TestMainErrorCodes:
         )
         assert exit_code == 1
         assert "BaseModel" in capsys.readouterr().err
+
+
+# ---------------------------------------------------------------------------
+# batch, usage, stdin
+# ---------------------------------------------------------------------------
+
+
+class TestMainBatchAndUsage:
+    def test_multiple_files_use_extract_many(self, mocker, capsys):
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        mock_many = _patch_extract_many(mocker, return_value=[fake, fake])
+
+        exit_code = main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+            ]
+        )
+
+        assert exit_code == 0
+        mock_many.assert_called_once()
+        captured = capsys.readouterr()
+        assert '"name": "Ada"' in captured.out
+
+    def test_usage_flag_calls_extract_with_usage(self, mocker, capsys):
+        from openextract import Usage
+
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        usage = Usage(input_tokens=10, output_tokens=5, total_tokens=15)
+        mock_usage = _patch_extract_with_usage(mocker, return_value=(fake, usage))
+
+        exit_code = main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+                "--usage",
+            ]
+        )
+
+        assert exit_code == 0
+        mock_usage.assert_called_once()
+        captured = capsys.readouterr()
+        assert '"usage"' in captured.out
+        assert captured.out.count("input_tokens") >= 1
+
+    def test_usage_with_multiple_inputs_returns_1(self, capsys):
+        exit_code = main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+                "--usage",
+            ]
+        )
+        assert exit_code == 1
+        assert "exactly one" in capsys.readouterr().err
+
+    def test_stdin_without_media_type_returns_1(self, capsys, mocker):
+        mocker.patch("sys.stdin")
+        exit_code = main(
+            [
+                "-",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+            ]
+        )
+        assert exit_code == 1
+        assert "media-type" in capsys.readouterr().err.lower()
+
+    def test_stdin_with_other_paths_returns_1(self, capsys):
+        exit_code = main(
+            [
+                "-",
+                "other.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+                "--media-type",
+                "application/pdf",
+            ]
+        )
+        assert exit_code == 1
+        assert "stdin" in capsys.readouterr().err.lower()
+
+    def test_stdin_reads_buffer(self, mocker, capsys):
+        fake = MagicMock()
+        fake.model_dump_json.return_value = "{}"
+        mock_extract = _patch_extract(mocker, return_value=fake)
+        stdin = mocker.patch("openextract._cli.sys.stdin")
+        stdin.buffer.read.return_value = b"%PDF-bytes"
+
+        exit_code = main(
+            [
+                "-",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+                "--media-type",
+                "application/pdf",
+            ]
+        )
+
+        assert exit_code == 0
+        assert mock_extract.call_args.kwargs["input_file"] == b"%PDF-bytes"
+        assert mock_extract.call_args.kwargs["media_type"] == "application/pdf"

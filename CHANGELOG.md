@@ -18,6 +18,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   and `all`.
 - Examples `batch_invoices.py` and `extract_with_usage.py` for concurrent batch
   extraction and token usage reporting.
+- CLI accepts multiple `input_file` arguments for batch extraction via `extract_many`.
+- `--usage`, `--media-type`, and stdin (`-`) support on the `openextract` command.
 
 ### Changed
 - **Breaking:** Core dependencies no longer install every `pydantic-ai-slim`
