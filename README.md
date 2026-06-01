@@ -229,6 +229,47 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 Returns an instance of `schema`.
 
+### `extract_async(schema, model, input_file, instructions=None, *, media_type=None)`
+
+Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync`. Accepts the same `schema`, `model`, `input_file`, `instructions`, and `media_type` arguments.
+
+Returns an instance of `schema`.
+
+### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None)`
+
+Like `extract`, but returns `(output, Usage)` where `Usage` is a frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. Useful for cost tracking and logging. Does not retry on `ModelError` (single attempt).
+
+### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None)`
+
+Async sibling of `extract_with_usage`; returns `(output, Usage)`.
+
+### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False)`
+
+Run concurrent extractions from synchronous code. Each item in `input_files` is a path, URL, `bytes`, or file-like object (same rules as `extract`). Results are returned in input order.
+
+| Argument             | Type                         | Description                                                                 |
+| -------------------- | ---------------------------- | --------------------------------------------------------------------------- |
+| `input_files`        | `Iterable[str \| bytes \| BinaryIO]` | One input per extraction.                                          |
+| `media_type`         | `str \| None` (keyword-only) | Applied uniformly to every item; required if any item is `bytes`/file-like. |
+| `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions (default `5`).                                |
+| `return_exceptions`  | `bool` (keyword-only)        | If `True`, exceptions appear in the result list instead of being raised.    |
+
+Returns a `list` of schema instances (or exceptions when `return_exceptions=True`).
+
+### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False)`
+
+Async sibling of `extract_many`; same arguments and return shape.
+
+### `Usage`
+
+Frozen dataclass returned by `extract_with_usage` / `extract_with_usage_async`:
+
+| Field            | Type  | Description              |
+| ---------------- | ----- | ------------------------ |
+| `input_tokens`   | `int` | Prompt tokens consumed.  |
+| `output_tokens`  | `int` | Completion tokens.       |
+| `total_tokens`   | `int` | Total tokens for the call. |
+
 ## Security
 
 ### URL fetching and SSRF
