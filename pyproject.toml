@@ -48,7 +48,16 @@ dev = [
     "pytest-cov>=7.1.0",
     "pytest-mock>=3.15.1",
     "ruff>=0.14.10",
+    "ty>=0.0.35",
 ]
+
+[tool.ty]
+# Type-check library code only; tests intentionally use invalid types for error paths.
+[tool.ty.src]
+include = ["src/openextract"]
+
+[tool.ty.environment]
+python-version = "3.12"
 
 [tool.uv]
 # Supply-chain embargo: refuse any package version published less than 24 hours ago.

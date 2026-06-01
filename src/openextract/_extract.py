@@ -12,7 +12,7 @@ from collections.abc import Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import BinaryIO, TypeVar
+from typing import BinaryIO, TypeVar, cast
 from urllib.parse import urlparse
 
 import httpx
@@ -358,7 +358,8 @@ def _extract_once(
     media_type: str | None,
 ) -> T:
     """Perform a single sync extraction attempt; return the schema instance."""
-    return _run_extraction(schema, model, input_file, instructions, media_type).output
+    result = _run_extraction(schema, model, input_file, instructions, media_type)
+    return cast(T, result.output)
 
 
 def extract(
@@ -427,7 +428,7 @@ def extract_with_usage(
     returns a :class:`Usage` describing the tokens consumed by the model call.
     """
     result = _run_extraction(schema, model, input_file, instructions, media_type)
-    return result.output, _usage_from_result(result)
+    return cast(T, result.output), _usage_from_result(result)
 
 
 async def extract_with_usage_async(
@@ -442,7 +443,7 @@ async def extract_with_usage_async(
     with _extraction_errors():
         agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
         result = await agent.run(inputs)
-        return result.output, _usage_from_result(result)
+        return cast(T, result.output), _usage_from_result(result)
 
 
 async def extract_async(
@@ -457,7 +458,7 @@ async def extract_async(
     with _extraction_errors():
         agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
         result = await agent.run(inputs)
-        return result.output
+        return cast(T, result.output)
 
 
 async def _run_with_shared_agent(

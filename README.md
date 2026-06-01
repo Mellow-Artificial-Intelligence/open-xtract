@@ -314,8 +314,9 @@ cd openextract
 uv sync --dev
 
 uv run pytest --cov=openextract            # tests + coverage
-uv run ruff check .                        # lint
+uv run ruff check .                        # lint (Astral ruff)
 uv run ruff format --check .               # format check
+uv run ty check                            # types (Astral ty)
 ```
 
 CI runs the test suite on every PR and fails if total coverage drops below 100%.

@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - Environment variables `OPENEXTRACT_URL_TIMEOUT` and `OPENEXTRACT_MAX_REDIRECTS`
   to configure HTTP timeout and redirect limits when fetching URLs.
+- Ship `py.typed` for PEP 561 type checker support.
+- Run [ty](https://docs.astral.sh/ty/) on `src/openextract` in CI (Astral toolchain with uv and ruff).
 
 ### Changed
 - Expand README API reference to document `extract_async`, `extract_many`,
