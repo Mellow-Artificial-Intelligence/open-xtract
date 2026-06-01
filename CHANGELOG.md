@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- Environment variables `OPENEXTRACT_URL_TIMEOUT` and `OPENEXTRACT_MAX_REDIRECTS`
+  to configure HTTP timeout and redirect limits when fetching URLs.
+
 ### Changed
 - Expand README API reference to document `extract_async`, `extract_many`,
   `extract_with_usage`, and related public APIs.
