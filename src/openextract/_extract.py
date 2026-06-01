@@ -264,13 +264,10 @@ def _get_media(
 
 def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent:
     """Construct the pydantic_ai Agent, handling the ollama output-type quirk."""
-    return cast(
-        Agent,
-        Agent(
-            model,
-            instructions=instructions,
-            output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
-        ),
+    return Agent(
+        model,
+        instructions=instructions,
+        output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
     )
 
 

@@ -20,15 +20,11 @@ Thanks for your interest in contributing to openextract!
    uv run pytest
    ```
 
-4. Run linting:
+4. Run linting and type checking ([Astral](https://astral.sh) toolchain: [uv](https://docs.astral.sh/uv/), [ruff](https://docs.astral.sh/ruff/), [ty](https://docs.astral.sh/ty/)):
    ```bash
    uv run ruff check .
    uv run ruff format --check .
-   ```
-
-5. Run type checking:
-   ```bash
-   uv run pyright src/openextract
+   uv run ty check
    ```
 
 ## Making Changes
@@ -47,11 +43,18 @@ Thanks for your interest in contributing to openextract!
 
 ## Code Style
 
-This project uses [ruff](https://docs.astral.sh/ruff/) for linting and formatting. Run before submitting:
+This project uses the Astral toolchain for Python quality:
+
+- [uv](https://docs.astral.sh/uv/) — dependency and environment management
+- [ruff](https://docs.astral.sh/ruff/) — linting and formatting
+- [ty](https://docs.astral.sh/ty/) — type checking (`src/openextract` only)
+
+Run before submitting:
 
 ```bash
 uv run ruff check . --fix
 uv run ruff format .
+uv run ty check
 ```
 
 ## Dependency embargo (24h)
