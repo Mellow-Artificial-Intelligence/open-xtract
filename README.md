@@ -181,6 +181,8 @@ Runnable scripts live in the [`examples/`](examples/) directory. Each one takes 
 | `invoice_extraction.py`   | PDF invoice -> structured line items                    |
 | `receipt_extraction.py`   | receipt image -> merchant, items, totals                |
 | `meeting_notes.py`        | audio -> summary, decisions, action items               |
+| `batch_invoices.py`       | many PDFs -> concurrent `extract_many` over a directory |
+| `extract_with_usage.py`   | single file -> result plus token usage counts           |
 
 Run any example with `uv` once your provider credentials (e.g. `OPENAI_API_KEY`) are set:
 
