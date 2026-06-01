@@ -13,8 +13,14 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `max_retries` and `retry_backoff` on `extract_async`, `extract_with_usage`,
   `extract_with_usage_async`, `extract_many`, and `extract_many_async` (per-item
   for batch), matching sync `extract()` retry semantics.
+- Optional dependency extras: `openai`, `anthropic`, `google`, `bedrock`,
+  `cohere`, `groq`, `huggingface`, `mistral`, `openrouter`, `xai`, `logfire`,
+  and `all`.
 
 ### Changed
+- **Breaking:** Core dependencies no longer install every `pydantic-ai-slim`
+  provider extra by default. Install the providers you need, e.g.
+  `pip install openextract[openai]` or `openextract[all]`.
 - Expand README API reference to document `extract_async`, `extract_many`,
   `extract_with_usage`, and related public APIs.
 
