@@ -417,7 +417,7 @@ def extract(
 
     Args:
         schema: A Pydantic model class defining the expected output structure.
-        model: The model identifier (e.g., 'openai:gpt-5').
+        model: The model identifier (e.g., 'xai:grok-4').
         input_file: A local file path, an ``http(s)://`` URL, raw ``bytes``, or
             a binary file-like object with a ``.read()`` method. For ``bytes``
             and file-like inputs, ``media_type`` must be provided.

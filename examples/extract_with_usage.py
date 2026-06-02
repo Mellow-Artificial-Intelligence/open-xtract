@@ -21,7 +21,7 @@ def main() -> None:
 
     result, usage = extract_with_usage(
         schema=PdfInfo,
-        model="openai:gpt-5",
+        model="xai:grok-4",
         input_file=input_file,
         instructions="Return a two-sentence summary and the document's primary language.",
     )
