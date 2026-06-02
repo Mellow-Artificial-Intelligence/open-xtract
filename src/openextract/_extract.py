@@ -21,7 +21,13 @@ from pydantic import BaseModel, ValidationError
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.output import NativeOutput
 
-from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
+from .exceptions import (
+    ExtractionError,
+    ModelError,
+    ProviderNotInstalledError,
+    SchemaValidationError,
+    UrlFetchError,
+)
 
 T = TypeVar("T", bound=BaseModel)
 
@@ -52,6 +58,26 @@ _PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
     ("mistralai.client.errors.mistralerror", "MistralError"),
     ("grpc", "RpcError"),  # xAI SDK uses gRPC; pydantic-ai may surface this directly
 )
+
+# pydantic-ai model-id prefix -> the openextract optional-dependency extra that
+# installs that provider's SDK. OpenAI-compatible providers (Cerebras, Ollama)
+# ship through the openai SDK, so they map to the ``openai`` extra. Prefixes not
+# listed here fall back to suggesting ``openextract[all]``.
+_PROVIDER_EXTRAS: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "google-gla": "google",
+    "google-vertex": "google",
+    "bedrock": "bedrock",
+    "cohere": "cohere",
+    "groq": "groq",
+    "huggingface": "huggingface",
+    "mistral": "mistral",
+    "openrouter": "openrouter",
+    "xai": "xai",
+    "cerebras": "openai",
+    "ollama": "openai",
+}
 
 
 def _collect_model_error_types() -> tuple[type[BaseException], ...]:
@@ -263,13 +289,33 @@ def _get_media(
     )
 
 
+def _install_hint(model: str) -> str:
+    """Return the ``pip install`` command that provides ``model``'s provider."""
+    prefix = model.split(":", 1)[0]
+    extra = _PROVIDER_EXTRAS.get(prefix)
+    target = f"openextract[{extra}]" if extra else "openextract[all]"
+    return f"pip install '{target}'"
+
+
 def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent:
-    """Construct the pydantic_ai Agent, handling the ollama output-type quirk."""
-    return Agent(
-        model,
-        instructions=instructions,
-        output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
-    )
+    """Construct the pydantic_ai Agent, handling the ollama output-type quirk.
+
+    A missing provider SDK surfaces here as ``ImportError`` (pydantic-ai infers
+    the model eagerly); translate it into an actionable
+    :class:`ProviderNotInstalledError`.
+    """
+    try:
+        return Agent(
+            model,
+            instructions=instructions,
+            output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
+        )
+    except ImportError as exc:
+        raise ProviderNotInstalledError(
+            f"Model {model!r} needs a provider SDK that is not installed. "
+            f"Install it with: {_install_hint(model)} "
+            f"(or 'pip install openextract[all]'). Original error: {exc}"
+        ) from exc
 
 
 def _build_run_inputs(file_bytes: bytes, file_type: str) -> list:

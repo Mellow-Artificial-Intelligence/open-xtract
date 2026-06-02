@@ -5,6 +5,11 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+- `ProviderNotInstalledError` (a subclass of `ExtractionError`) raised with an
+  actionable `pip install openextract[...]` hint when a model is requested whose
+  provider extra is not installed. The CLI reports it with exit code `6`.
+
 ## [0.8.0] - 2026-06-02
 
 ### Added

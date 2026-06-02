@@ -12,7 +12,13 @@ from typing import Any, cast
 from pydantic import BaseModel
 
 from ._extract import extract, extract_many, extract_with_usage
-from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
+from .exceptions import (
+    ExtractionError,
+    ModelError,
+    ProviderNotInstalledError,
+    SchemaValidationError,
+    UrlFetchError,
+)
 
 
 def _resolve_schema(schema_path: str) -> type[BaseModel]:
@@ -198,6 +204,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ModelError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 4
+    except ProviderNotInstalledError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 6
     except ExtractionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 5
