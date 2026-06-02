@@ -80,6 +80,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - Add `extract_with_usage` and a `Usage` dataclass that surface model token counts (input, output, total) alongside the extracted output.
 - Add `openextract` command-line interface (`openextract <file> --schema module:Class --model openai:gpt-5`) with structured exit codes.
 - Add `examples/` directory with runnable scripts for invoice, receipt, and meeting-notes extraction.
+- Reorganize `examples/` into use-case folders (basic, images, documents, batch, async, advanced, audio, CLI), add bundled fixtures, `run_all.py`, and smoke tests.
 - Replace the substring-based exception classifier in `extract()` with typed provider-error matching against `pydantic_ai.exceptions.ModelAPIError`, `openai.APIError`, and `google.genai.errors.APIError`. Behavior change: an arbitrary exception whose message merely mentions "model" is no longer promoted to `ModelError`; it is now wrapped as `ExtractionError` unless the exception type is a subclass of a known provider error.
 
 ## [0.4.0] - 2026-05-16
