@@ -207,20 +207,14 @@ Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` m
 
 ## Examples
 
-Runnable scripts live in the [`examples/`](examples/) directory. Each one takes the input path as the first argument and prints a JSON dump of the validated result:
-
-| Script                    | What it does                                            |
-| ------------------------- | ------------------------------------------------------- |
-| `invoice_extraction.py`   | PDF invoice -> structured line items                    |
-| `receipt_extraction.py`   | receipt image -> merchant, items, totals                |
-| `meeting_notes.py`        | audio -> summary, decisions, action items               |
-| `batch_invoices.py`       | many PDFs -> concurrent `extract_many` over a directory |
-| `extract_with_usage.py`   | single file -> result plus token usage counts           |
-
-Run any example with `uv` once your provider credentials (e.g. `XAI_API_KEY`) are set:
+Runnable scripts live in [`examples/`](examples/), grouped by use case (local files, bytes, URLs, images, batch, async, retries, CLI, and more). See [examples/README.md](examples/README.md) for the full table.
 
 ```bash
-uv run python examples/invoice_extraction.py ./invoices/q4.pdf
+# Run all fixture-based examples (set OPENEXTRACT_MODEL or a provider API key)
+uv run python examples/run_all.py
+
+# Single example with the bundled sample image
+uv run python examples/basic/local_file.py --fixture
 ```
 
 [See the examples/ directory](examples/) for the full source.

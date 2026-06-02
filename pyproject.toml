@@ -96,6 +96,9 @@ ignore = ["UP047"]  # TypeVar pattern is valid for pydantic-ai compatibility
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
+markers = [
+    "integration: live model/API calls (set OPENEXTRACT_RUN_EXAMPLES=1)",
+]
 
 [tool.coverage.run]
 branch = true
