@@ -33,7 +33,7 @@ def main() -> None:
 
     receipt = extract(
         schema=Receipt,
-        model="xai:grok-4",
+        model="xai:grok-4.3",
         input_file=input_file,
         instructions=(
             "Read the receipt image and extract the merchant, transaction date, "

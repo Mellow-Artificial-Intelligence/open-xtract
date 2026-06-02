@@ -100,7 +100,7 @@ class TestArgparse:
 
     def test_missing_schema_exits_nonzero(self, capsys):
         with pytest.raises(SystemExit) as exc_info:
-            main(["input.txt", "--model", "openai:gpt-5"])
+            main(["input.txt", "--model", "xai:grok-4.3"])
         assert exc_info.value.code != 0
         captured = capsys.readouterr()
         assert "schema" in captured.err.lower()
@@ -120,7 +120,7 @@ class TestArgparse:
                     "--schema",
                     "tests.test_cli:_FixtureSchema",
                     "--model",
-                    "openai:gpt-5",
+                    "xai:grok-4.3",
                     "--output",
                     "yaml",
                 ]
@@ -146,7 +146,7 @@ class TestMainSuccess:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--instructions",
                 "find the person",
             ]
@@ -157,7 +157,7 @@ class TestMainSuccess:
         assert '"name": "Ada"' in captured.out
         mock_extract.assert_called_once_with(
             schema=_FixtureSchema,
-            model="openai:gpt-5",
+            model="xai:grok-4.3",
             input_file="input.txt",
             instructions="find the person",
             media_type=None,
@@ -176,7 +176,7 @@ class TestMainSuccess:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--output",
                 "repr",
             ]
@@ -197,7 +197,7 @@ class TestMainSuccess:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
 
@@ -215,7 +215,7 @@ class TestMainSuccess:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
 
@@ -233,7 +233,7 @@ class TestMainSuccess:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--max-retries",
                 "3",
                 "--retry-backoff",
@@ -259,7 +259,7 @@ class TestMainErrorCodes:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
 
@@ -286,7 +286,7 @@ class TestMainErrorCodes:
                 "--schema",
                 "definitely_not_a_real_module_xyz:Thing",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
         assert exit_code == 1
@@ -299,7 +299,7 @@ class TestMainErrorCodes:
                 "--schema",
                 "tests.test_cli:_NotASchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
         assert exit_code == 1
@@ -324,7 +324,7 @@ class TestMainBatchAndUsage:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
 
@@ -347,7 +347,7 @@ class TestMainBatchAndUsage:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--usage",
             ]
         )
@@ -366,7 +366,7 @@ class TestMainBatchAndUsage:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--usage",
             ]
         )
@@ -381,7 +381,7 @@ class TestMainBatchAndUsage:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
             ]
         )
         assert exit_code == 1
@@ -395,7 +395,7 @@ class TestMainBatchAndUsage:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--media-type",
                 "application/pdf",
             ]
@@ -416,7 +416,7 @@ class TestMainBatchAndUsage:
                 "--schema",
                 "tests.test_cli:_FixtureSchema",
                 "--model",
-                "openai:gpt-5",
+                "xai:grok-4.3",
                 "--media-type",
                 "application/pdf",
             ]

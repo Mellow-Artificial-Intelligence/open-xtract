@@ -471,6 +471,20 @@ def _make_mistral_error(message: str) -> Exception:
     return _BareMistralError(message)
 
 
+def _make_grpc_error(message: str) -> Exception:
+    import grpc
+    from grpc import StatusCode
+
+    class _BareGrpcError(grpc.RpcError):
+        def code(self) -> grpc.StatusCode:
+            return StatusCode.RESOURCE_EXHAUSTED
+
+        def details(self) -> str:
+            return message
+
+    return _BareGrpcError()
+
+
 def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None):
     """Patch openextract._extract.Agent and return (AgentClass, instance, run_sync)."""
     agent_instance = MagicMock()
@@ -595,6 +609,7 @@ class TestExtract:
                 "groq:llama-3.3-70b-versatile",
             ),
             (lambda msg: _make_mistral_error(msg), "mistral:mistral-large-latest"),
+            (lambda msg: _make_grpc_error(msg), "xai:grok-4.3"),
         ],
         ids=[
             "pydantic_ai_ModelHTTPError",
@@ -605,6 +620,7 @@ class TestExtract:
             "huggingface_HfHubHTTPError",
             "groq_APIError",
             "mistral_SDKError",
+            "xai_grpc_RpcError",
         ],
     )
     def test_provider_api_error_is_wrapped_as_model_error(

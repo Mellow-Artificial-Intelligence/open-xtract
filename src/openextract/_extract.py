@@ -50,6 +50,7 @@ _PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
     ("huggingface_hub.errors", "HfHubHTTPError"),
     ("groq", "APIError"),
     ("mistralai.client.errors.mistralerror", "MistralError"),
+    ("grpc", "RpcError"),  # xAI SDK uses gRPC; pydantic-ai may surface this directly
 )
 
 
@@ -417,7 +418,7 @@ def extract(
 
     Args:
         schema: A Pydantic model class defining the expected output structure.
-        model: The model identifier (e.g., 'xai:grok-4').
+        model: The model identifier (e.g., 'xai:grok-4.3').
         input_file: A local file path, an ``http(s)://`` URL, raw ``bytes``, or
             a binary file-like object with a ``.read()`` method. For ``bytes``
             and file-like inputs, ``media_type`` must be provided.
