@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import default_model
+from _shared import xai_model
 from pydantic import BaseModel
 
 from openextract import extract
@@ -30,7 +30,7 @@ def main() -> None:
 
     result = extract(
         schema=ImageInfo,
-        model=default_model(),
+        model=xai_model(),
         input_file=input_file,
         instructions=(
             "Describe what you see in the image and whether it appears to use transparency."

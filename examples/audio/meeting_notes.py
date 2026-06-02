@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import default_model, require_input
+from _shared import require_input, xai_model
 from pydantic import BaseModel
 
 from openextract import extract
@@ -34,7 +34,7 @@ def main() -> None:
 
     meeting = extract(
         schema=Meeting,
-        model=default_model(),
+        model=xai_model(),
         input_file=input_file,
         instructions=(
             "Listen to the meeting audio and produce structured notes. Include "

@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, default_model, require_input
+from _shared import DOCUMENT_PAGE, require_input, xai_model
 from pydantic import BaseModel
 
 from openextract import extract_with_usage
@@ -26,7 +26,7 @@ def main() -> None:
 
     result, usage = extract_with_usage(
         schema=DocumentInfo,
-        model=default_model(),
+        model=xai_model(),
         input_file=input_file,
         instructions="Return a two-sentence summary and the document's primary language.",
     )

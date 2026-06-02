@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, default_model
+from _shared import DOCUMENT_PAGE, openai_model
 from pydantic import BaseModel
 
 from openextract import extract
@@ -18,7 +18,7 @@ class DocumentInfo(BaseModel):
 def main() -> None:
     result = extract(
         schema=DocumentInfo,
-        model=default_model(),
+        model=openai_model(),
         input_file=str(DOCUMENT_PAGE),
         instructions="Return a one-sentence summary.",
         max_retries=2,

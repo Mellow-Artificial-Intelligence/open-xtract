@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, default_model, require_input
+from _shared import DOCUMENT_PAGE, anthropic_model, require_input
 from pydantic import BaseModel
 
 from openextract import extract
@@ -40,7 +40,7 @@ def main() -> None:
 
     invoice = extract(
         schema=Invoice,
-        model=default_model(),
+        model=anthropic_model(),
         input_file=input_file,
         instructions=(
             "Extract invoice metadata, parties, every line item, and totals when present. "

@@ -45,7 +45,10 @@ def main() -> None:
     for script in NO_API_EXAMPLES:
         run_script(script)
 
-    print("\nRunning examples that call a model (set OPENEXTRACT_MODEL or provider API keys)...")
+    print(
+        "\nRunning examples that call a model "
+        "(OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY — or OPENEXTRACT_MODEL to override all)..."
+    )
     for script, args in API_EXAMPLES:
         run_script(script, args)
 

@@ -210,7 +210,7 @@ Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` m
 Runnable scripts live in [`examples/`](examples/), grouped by use case (local files, bytes, URLs, images, batch, async, retries, CLI, and more). See [examples/README.md](examples/README.md) for the full table.
 
 ```bash
-# Run all fixture-based examples (set OPENEXTRACT_MODEL or a provider API key)
+# Run all fixture-based examples (uses OpenAI, Anthropic, and xAI — see examples/README.md)
 uv run python examples/run_all.py
 
 # Single example with the bundled sample image

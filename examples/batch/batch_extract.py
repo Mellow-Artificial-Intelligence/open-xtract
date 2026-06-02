@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, default_model
+from _shared import DOCUMENT_PAGE, openai_model
 from pydantic import BaseModel
 
 from openextract import extract_many
@@ -21,7 +21,7 @@ def main() -> None:
 
     results = extract_many(
         schema=DocumentInfo,
-        model=default_model(),
+        model=openai_model(),
         input_files=paths,
         max_concurrency=2,
         instructions="Return a short title and one-sentence summary.",

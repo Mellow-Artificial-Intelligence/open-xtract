@@ -1,5 +1,11 @@
 """Demonstrate catching openextract's typed exceptions (no API call for URL guard)."""
 
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import _bootstrap  # noqa: F401
+from _shared import openai_model
 from pydantic import BaseModel
 
 from openextract import ExtractionError, UrlFetchError, extract
@@ -14,7 +20,7 @@ def main() -> None:
     try:
         extract(
             schema=DocumentInfo,
-            model="openai:gpt-4o-mini",
+            model=openai_model(),
             input_file="http://127.0.0.1/internal.pdf",
         )
     except UrlFetchError as exc:

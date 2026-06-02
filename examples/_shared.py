@@ -13,22 +13,26 @@ load_dotenv()
 FIXTURES_DIR = Path(__file__).resolve().parent / "fixtures"
 DOCUMENT_PAGE = FIXTURES_DIR / "document_page.png"
 
+OPENAI_MODEL = "openai:gpt-4o-mini"
+ANTHROPIC_MODEL = "anthropic:claude-sonnet-4"
+XAI_MODEL = "xai:grok-4.3"
 
-def default_model() -> str:
-    """Pick a model from OPENEXTRACT_MODEL or whichever provider key is set."""
-    if model := os.environ.get("OPENEXTRACT_MODEL"):
-        return model
-    if os.environ.get("XAI_API_KEY"):
-        return "xai:grok-4.3"
-    if os.environ.get("OPENROUTER_API_KEY"):
-        return "openrouter:openai/gpt-4o-mini"
-    if os.environ.get("OPENAI_API_KEY"):
-        return "openai:gpt-4o-mini"
-    if os.environ.get("ANTHROPIC_API_KEY"):
-        return "anthropic:claude-sonnet-4"
-    if os.environ.get("GOOGLE_API_KEY"):
-        return "google-gla:gemini-2.5-flash"
-    return "xai:grok-4.3"
+
+def _resolve_model(default: str) -> str:
+    """Use OPENEXTRACT_MODEL when set; otherwise the example's default provider."""
+    return os.environ.get("OPENEXTRACT_MODEL", default)
+
+
+def openai_model() -> str:
+    return _resolve_model(OPENAI_MODEL)
+
+
+def anthropic_model() -> str:
+    return _resolve_model(ANTHROPIC_MODEL)
+
+
+def xai_model() -> str:
+    return _resolve_model(XAI_MODEL)
 
 
 def require_input(argv: list[str], usage: str) -> str:

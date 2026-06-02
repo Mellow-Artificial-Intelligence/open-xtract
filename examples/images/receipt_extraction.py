@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, default_model, require_input
+from _shared import DOCUMENT_PAGE, anthropic_model, require_input
 from pydantic import BaseModel
 
 from openextract import extract
@@ -38,7 +38,7 @@ def main() -> None:
 
     receipt = extract(
         schema=Receipt,
-        model=default_model(),
+        model=anthropic_model(),
         input_file=input_file,
         instructions=(
             "If this is a receipt, extract merchant, date, line items, and totals. "

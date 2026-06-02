@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, default_model
+from _shared import DOCUMENT_PAGE, xai_model
 from pydantic import BaseModel
 
 from openextract import extract
@@ -20,7 +20,7 @@ class PageSummary(BaseModel):
 def main() -> None:
     result = extract(
         schema=PageSummary,
-        model=default_model(),
+        model=xai_model(),
         input_file=str(DOCUMENT_PAGE),
         instructions=(
             "Summarize the page: a short headline, 3-5 bullet points of key content, "

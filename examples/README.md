@@ -2,18 +2,23 @@
 
 Runnable scripts showing common ways to use openextract. Each example prints JSON from a validated Pydantic model.
 
+Examples use **OpenAI**, **Anthropic**, and **xAI** so you can see how provider identifiers map to real calls. Set the matching API keys in `.env` (openextract loads them automatically).
+
+| Provider   | Model identifier              | Environment variable   |
+| ---------- | ----------------------------- | ---------------------- |
+| OpenAI     | `openai:gpt-4o-mini`          | `OPENAI_API_KEY`       |
+| Anthropic  | `anthropic:claude-sonnet-4`   | `ANTHROPIC_API_KEY`    |
+| xAI        | `xai:grok-4.3`                | `XAI_API_KEY`          |
+
+Install provider extras as needed: `openextract[openai]`, `openextract[anthropic]`, `openextract[xai]`, or `openextract[all]`.
+
+Set `OPENEXTRACT_MODEL` to override every example with a single model (useful for CI or one-off testing).
+
 ## Prerequisites
 
 ```bash
 uv sync --dev
 ```
-
-Set credentials for your provider (openextract loads `.env` automatically). Examples pick a model automatically:
-
-1. `OPENEXTRACT_MODEL` if set (e.g. `openrouter:openai/gpt-4o-mini`)
-2. Otherwise the first detected API key (`XAI_API_KEY`, `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, …)
-
-Install the matching extra when needed, e.g. `uv add 'openextract[openai]'`.
 
 ## Run everything
 
@@ -21,48 +26,48 @@ Install the matching extra when needed, e.g. `uv add 'openextract[openai]'`.
 uv run python examples/run_all.py
 ```
 
-`advanced/error_handling.py` runs without API keys. The rest call your configured model against bundled fixtures in `fixtures/`.
+`advanced/error_handling.py` runs without API keys. The rest need the API key for their assigned provider (see table below), or set `OPENEXTRACT_MODEL` to run all with one model.
 
 ## Examples by use case
 
-| Directory | Script | What it demonstrates |
-| --------- | ------ | -------------------- |
-| `basic/` | `local_file.py` | `extract()` with a local path (`--fixture` uses the sample image) |
-| `basic/` | `bytes_input.py` | `extract()` with `bytes` + `media_type` |
-| `basic/` | `url_extract.py` | `extract()` with a public HTTPS URL |
-| `images/` | `document_summary.py` | Summarize a document page image |
-| `images/` | `receipt_extraction.py` | Receipt-style fields from an image |
-| `documents/` | `invoice_extraction.py` | Invoice schema from PDF or image (`--fixture`) |
-| `batch/` | `batch_extract.py` | Concurrent `extract_many()` |
-| `async/` | `async_extract.py` | `extract_async()` |
-| `advanced/` | `extract_with_usage.py` | `extract_with_usage()` and token counts |
-| `advanced/` | `retry_extract.py` | `max_retries` / `retry_backoff` |
-| `advanced/` | `error_handling.py` | Catching `UrlFetchError` (no model call) |
-| `audio/` | `meeting_notes.py` | Audio → structured meeting notes (bring your own file) |
-| `cli/` | `schemas.py` | Pydantic models for CLI `--schema` |
+| Directory | Script | Provider | What it demonstrates |
+| --------- | ------ | -------- | -------------------- |
+| `basic/` | `local_file.py` | OpenAI | `extract()` with a local path (`--fixture` uses the sample image) |
+| `basic/` | `bytes_input.py` | Anthropic | `extract()` with `bytes` + `media_type` |
+| `basic/` | `url_extract.py` | xAI | `extract()` with a public HTTPS URL |
+| `images/` | `document_summary.py` | xAI | Summarize a document page image |
+| `images/` | `receipt_extraction.py` | Anthropic | Receipt-style fields from an image |
+| `documents/` | `invoice_extraction.py` | Anthropic | Invoice schema from PDF or image (`--fixture`) |
+| `batch/` | `batch_extract.py` | OpenAI | Concurrent `extract_many()` |
+| `async/` | `async_extract.py` | Anthropic | `extract_async()` |
+| `advanced/` | `extract_with_usage.py` | xAI | `extract_with_usage()` and token counts |
+| `advanced/` | `retry_extract.py` | OpenAI | `max_retries` / `retry_backoff` |
+| `advanced/` | `error_handling.py` | — | Catching `UrlFetchError` (no model call) |
+| `audio/` | `meeting_notes.py` | xAI | Audio → structured meeting notes (bring your own file) |
+| `cli/` | `schemas.py` | — | Pydantic models for CLI `--schema` |
 
 ### Quick commands
 
 ```bash
-# Local file (default: pass your own path)
+# OpenAI — local file
 uv run python examples/basic/local_file.py --fixture
 
-# Bytes + explicit media type (uses bundled fixture internally)
+# Anthropic — bytes + explicit media type
 uv run python examples/basic/bytes_input.py
 
-# Public URL
+# xAI — public URL
 uv run python examples/basic/url_extract.py
 
-# Token usage
+# xAI — token usage
 uv run python examples/advanced/extract_with_usage.py --fixture
 
-# Batch
+# OpenAI — batch
 uv run python examples/batch/batch_extract.py
 
-# CLI (from repo root; PYTHONPATH so examples.cli.schemas resolves)
+# Anthropic via CLI (from repo root)
 PYTHONPATH=. uv run openextract examples/fixtures/document_page.png \
   --schema examples.cli.schemas:DocumentInfo \
-  --model "${OPENEXTRACT_MODEL:-openrouter:openai/gpt-4o-mini}" \
+  --model anthropic:claude-sonnet-4 \
   --instructions "Two-sentence summary and primary language."
 ```
 
@@ -72,10 +77,12 @@ PYTHONPATH=. uv run openextract examples/fixtures/document_page.png \
 uv run python examples/audio/meeting_notes.py /path/to/meeting.mp3
 ```
 
+Requires `XAI_API_KEY` (or override with `OPENEXTRACT_MODEL`).
+
 ### Your own PDF invoice
 
 ```bash
 uv run python examples/documents/invoice_extraction.py ./invoices/acme-q4.pdf
 ```
 
-Some providers require minimum balance for PDF uploads; image fixtures work with vision-capable chat models such as `openrouter:openai/gpt-4o-mini`.
+Uses Anthropic by default. Vision-capable models work with the image fixture; PDFs may need provider-specific balance or limits.
