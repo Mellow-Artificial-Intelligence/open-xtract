@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `ProviderNotInstalledError` (a subclass of `ExtractionError`) raised with an
   actionable `pip install openextract[...]` hint when a model is requested whose
   provider extra is not installed. The CLI reports it with exit code `6`.
+- `--continue-on-error` flag on the `openextract` CLI: in batch mode, keep
+  processing remaining inputs when one fails, emit per-item errors inline, and
+  exit `7` if any input failed (default remains abort-on-first-failure).
 
 ## [0.8.0] - 2026-06-02
 

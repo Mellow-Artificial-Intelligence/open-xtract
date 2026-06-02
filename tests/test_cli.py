@@ -339,6 +339,87 @@ class TestMainBatchAndUsage:
         captured = capsys.readouterr()
         assert '"name": "Ada"' in captured.out
 
+    def test_batch_defaults_to_abort_on_first_failure(self, mocker):
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        mock_many = _patch_extract_many(mocker, return_value=[fake, fake])
+
+        main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+            ]
+        )
+
+        assert mock_many.call_args.kwargs["return_exceptions"] is False
+
+    def test_continue_on_error_passes_return_exceptions(self, mocker):
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        mock_many = _patch_extract_many(mocker, return_value=[fake, fake])
+
+        main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--continue-on-error",
+            ]
+        )
+
+        assert mock_many.call_args.kwargs["return_exceptions"] is True
+
+    def test_continue_on_error_reports_failures_and_exits_7(self, mocker, capsys):
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        _patch_extract_many(mocker, return_value=[fake, ModelError("boom")])
+
+        exit_code = main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--continue-on-error",
+            ]
+        )
+
+        assert exit_code == 7
+        captured = capsys.readouterr()
+        assert '"name": "Ada"' in captured.out  # the successful item is still emitted
+        assert '"error_type": "ModelError"' in captured.out
+        assert '"input": "b.pdf"' in captured.out
+        assert "1 of 2 input(s) failed" in captured.err
+
+    def test_continue_on_error_all_success_exits_0(self, mocker, capsys):
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        _patch_extract_many(mocker, return_value=[fake, fake])
+
+        exit_code = main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--continue-on-error",
+            ]
+        )
+
+        assert exit_code == 0
+        assert capsys.readouterr().err == ""
+
     def test_usage_flag_calls_extract_with_usage(self, mocker, capsys):
         from openextract import Usage
 

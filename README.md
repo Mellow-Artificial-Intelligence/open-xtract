@@ -197,9 +197,13 @@ cat ./reports/q4.pdf | openextract - \
 - `--usage` prints a JSON object with `result` and `usage` (single input only).
 - `--output` is `json` (default) or `repr`.
 - `--max-retries` / `--retry-backoff` match the Python API retry behavior.
+- `--continue-on-error` (batch only) keeps processing when an input fails; each
+  failure is emitted inline as `{"input", "error", "error_type"}` and the command
+  exits `7` if any input failed. Without it, a batch aborts on the first failure.
 
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
-`5` other extraction error, `1` any other failure (including bad `--schema` paths).
+`5` other extraction error, `7` partial batch failure (`--continue-on-error`),
+`1` any other failure (including bad `--schema` paths).
 
 ## Examples
 
