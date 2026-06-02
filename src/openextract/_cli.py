@@ -64,6 +64,30 @@ def _usage_payload(usage) -> dict[str, int]:
     }
 
 
+def _batch_payload(results: list, inputs: list[str | bytes]) -> tuple[list[Any], int]:
+    """Build the JSON entries for a batch run and count per-item failures.
+
+    Successful items serialize to their model dump. Failed items (only present
+    when ``--continue-on-error`` runs the batch with ``return_exceptions=True``)
+    become an error object tagged with the originating input.
+    """
+    payload: list[Any] = []
+    failures = 0
+    for item, result in zip(inputs, results, strict=True):
+        if isinstance(result, BaseException):
+            failures += 1
+            payload.append(
+                {
+                    "input": item if isinstance(item, str) else "<bytes>",
+                    "error": str(result),
+                    "error_type": type(result).__name__,
+                }
+            )
+        else:
+            payload.append(result.model_dump())
+    return payload, failures
+
+
 def _print_json(payload: Any, *, as_repr: bool) -> None:
     if as_repr:
         print(repr(payload))
@@ -107,6 +131,14 @@ def _build_parser() -> argparse.ArgumentParser:
         "--usage",
         action="store_true",
         help="Print token usage (single input only).",
+    )
+    parser.add_argument(
+        "--continue-on-error",
+        action="store_true",
+        help=(
+            "Batch only: keep going when an input fails; report per-item errors "
+            "inline and exit 7 if any failed (default: abort on first failure)."
+        ),
     )
     parser.add_argument(
         "--output",
@@ -153,6 +185,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     media_type = args.media_type
+    batch_failures = 0
 
     try:
         if len(input_files) == 1:
@@ -187,8 +220,9 @@ def main(argv: Sequence[str] | None = None) -> int:
                 media_type=media_type,
                 max_retries=args.max_retries,
                 retry_backoff=args.retry_backoff,
+                return_exceptions=args.continue_on_error,
             )
-            payload = [r.model_dump() for r in results]
+            payload, batch_failures = _batch_payload(results, input_files)
     except UrlFetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -208,6 +242,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(payload.model_dump_json(indent=2))
     else:
         _print_json(payload, as_repr=False)
+
+    if batch_failures:
+        print(
+            f"warning: {batch_failures} of {len(input_files)} input(s) failed; "
+            "see output for details",
+            file=sys.stderr,
+        )
+        return 7  # partial batch failure under --continue-on-error
     return 0
 
 
