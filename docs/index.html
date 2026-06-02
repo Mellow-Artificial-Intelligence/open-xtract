@@ -98,9 +98,9 @@
           <!-- Badge -->
           <a href="#whats-new" class="animate-slide-up opacity-0 inline-flex items-center gap-2.5 px-3 py-1.5 border border-black/10 bg-white text-xs mb-8 hover:border-black/30 transition-colors">
             <span class="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-            <span class="font-mono text-black/50">v0.6.0</span>
+            <span class="font-mono text-black/50">v0.8.0</span>
             <span class="text-black/30">|</span>
-            <span class="text-black/50">11 providers, typed errors</span>
+            <span class="text-black/50">optional extras, CLI batch, retry parity</span>
           </a>
 
           <!-- Headline -->
@@ -206,15 +206,15 @@
         </div>
       </section>
 
-      <!-- What's new in 0.6.0 -->
+      <!-- What's new in 0.8.0 -->
       <section id="whats-new" class="py-16 sm:py-24 border-t border-black/5 scroll-mt-14">
         <div class="max-w-5xl mx-auto px-4 sm:px-6">
           <div class="flex items-baseline justify-between mb-8 sm:mb-10 flex-wrap gap-3">
             <div>
               <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mb-2">What&rsquo;s new</p>
-              <h2 class="text-2xl sm:text-3xl font-bold text-black/90">v0.6.0</h2>
+              <h2 class="text-2xl sm:text-3xl font-bold text-black/90">v0.8.0</h2>
             </div>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md" class="font-mono text-xs text-black/40 hover:text-black/70 transition-colors inline-flex items-center gap-1.5">
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#080---2026-06-02" class="font-mono text-xs text-black/40 hover:text-black/70 transition-colors inline-flex items-center gap-1.5">
               Full changelog <i data-lucide="arrow-up-right" class="w-3 h-3"></i>
             </a>
           </div>
@@ -222,32 +222,75 @@
           <div class="p-6 border border-black/10 bg-white mb-3 sm:mb-4">
             <div class="flex items-center gap-3 mb-3">
               <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                <i data-lucide="layers" class="w-4 h-4 text-black/50"></i>
+                <i data-lucide="package" class="w-4 h-4 text-black/50"></i>
               </div>
-              <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">v0.6.0 &middot; Providers</span>
+              <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">v0.8.0 &middot; Install</span>
             </div>
-            <h3 class="font-mono text-base font-medium text-black/80 mb-2">11 model providers, one model string</h3>
+            <h3 class="font-mono text-base font-medium text-black/80 mb-2">Slim core, optional provider extras</h3>
             <p class="text-sm text-black/40 leading-relaxed mb-4">
-              v0.6.0 wires every provider that <code class="font-mono text-black/60 text-xs">pydantic-ai</code> ships. Each provider&rsquo;s native error type is wrapped into <code class="font-mono text-black/60 text-xs">ModelError</code> automatically &mdash; no provider-specific catch blocks.
+              <code class="font-mono text-black/60 text-xs">pip install openextract</code> and <code class="font-mono text-black/60 text-xs">uv add openextract</code> ship a lean dependency set. Add the SDK you need for model calls &mdash; for example <code class="font-mono text-black/60 text-xs">openextract[openai]</code> or <code class="font-mono text-black/60 text-xs">openextract[all]</code>.
             </p>
             <div class="flex flex-wrap gap-1.5">
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">openai</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">anthropic</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">google</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">bedrock</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">xai</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">cohere</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">huggingface</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">groq</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">cerebras</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">mistral</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">openrouter</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">outlines</span>
-              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">ollama</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[openai]</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[anthropic]</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[google]</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[bedrock]</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[groq]</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[mistral]</span>
+              <span class="font-mono text-[11px] text-black/60 border border-black/10 px-2 py-1">[all]</span>
             </div>
           </div>
 
-          <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mt-8 mb-3">Carried forward from v0.5.0</p>
+          <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mt-8 mb-3">Also in v0.8.0</p>
+
+          <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4 mb-8">
+
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
+                  <i data-lucide="refresh-cw" class="w-4 h-4 text-black/50"></i>
+                </div>
+                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Reliability</span>
+              </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Retry everywhere</h3>
+              <p class="text-sm text-black/40 leading-relaxed mb-3">
+                <code class="font-mono text-black/60 text-xs">max_retries</code> and <code class="font-mono text-black/60 text-xs">retry_backoff</code> on async, usage, and batch extract APIs &mdash; same semantics as <code class="font-mono text-black/60 text-xs">extract()</code>.
+              </p>
+            </div>
+
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
+                  <i data-lucide="terminal" class="w-4 h-4 text-black/50"></i>
+                </div>
+                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">CLI</span>
+              </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Batch, usage, stdin</h3>
+              <p class="text-sm text-black/40 leading-relaxed mb-3">
+                Multiple files per run, <code class="font-mono text-black/60 text-xs">--usage</code>, <code class="font-mono text-black/60 text-xs">--media-type</code>, and pipe from <code class="font-mono text-black/60 text-xs">-</code>.
+              </p>
+              <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code><span class="text-black/40">$</span> openextract a.pdf b.pdf \
+    --schema mypkg:Invoice \
+    --model <span class="text-emerald-600">openai:gpt-5</span> \
+    --usage</code></pre>
+            </div>
+
+            <div class="p-5 border border-black/10 bg-white">
+              <div class="flex items-center gap-3 mb-3">
+                <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
+                  <i data-lucide="globe" class="w-4 h-4 text-black/50"></i>
+                </div>
+                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">URLs</span>
+              </div>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Fetch tuning</h3>
+              <p class="text-sm text-black/40 leading-relaxed mb-3">
+                Configure HTTP timeout and redirect limits with <code class="font-mono text-black/60 text-xs">OPENEXTRACT_URL_TIMEOUT</code> and <code class="font-mono text-black/60 text-xs">OPENEXTRACT_MAX_REDIRECTS</code>.
+              </p>
+            </div>
+
+          </div>
+
+          <p class="font-mono text-[11px] text-black/30 uppercase tracking-wider mt-8 mb-3">Carried forward from earlier releases</p>
 
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
 
@@ -330,17 +373,14 @@
             <div class="p-5 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="terminal" class="w-4 h-4 text-black/50"></i>
+                  <i data-lucide="layers" class="w-4 h-4 text-black/50"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">CLI</span>
+                <span class="font-mono text-[10px] text-black/30 uppercase tracking-wider">Providers</span>
               </div>
-              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Shell-friendly</h3>
+              <h3 class="font-mono text-sm font-medium text-black/80 mb-2">11 providers</h3>
               <p class="text-sm text-black/40 leading-relaxed mb-3">
-                Drive extractions from the shell with structured exit codes.
+                OpenAI, Anthropic, Google, Bedrock, xAI, Cohere, Groq, Mistral, OpenRouter, Ollama, and more via one model string.
               </p>
-              <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code><span class="text-black/40">$</span> openextract doc.pdf \
-    --schema mypkg:Invoice \
-    --model <span class="text-emerald-600">openai:gpt-5</span></code></pre>
             </div>
 
             <div class="p-5 border border-black/10 bg-white">
@@ -352,7 +392,7 @@
               </div>
               <h3 class="font-mono text-sm font-medium text-black/80 mb-2">Typed classifier</h3>
               <p class="text-sm text-black/40 leading-relaxed mb-3">
-                Provider errors (<code class="font-mono text-black/60 text-xs">openai.APIError</code>, Google, pydantic-ai) become <code class="font-mono text-black/60 text-xs">ModelError</code> by type, not substring.
+                Native provider errors become <code class="font-mono text-black/60 text-xs">ModelError</code> by type, not substring matching.
               </p>
               <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code><span class="text-black/40">try:</span>
     extract(...)
