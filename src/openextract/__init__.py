@@ -11,7 +11,13 @@ from ._extract import (
     extract_with_usage,
     extract_with_usage_async,
 )
-from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
+from .exceptions import (
+    ExtractionError,
+    ModelError,
+    ProviderNotInstalledError,
+    SchemaValidationError,
+    UrlFetchError,
+)
 
 __all__ = [
     "extract",
@@ -23,6 +29,7 @@ __all__ = [
     "Usage",
     "ExtractionError",
     "ModelError",
+    "ProviderNotInstalledError",
     "SchemaValidationError",
     "UrlFetchError",
 ]

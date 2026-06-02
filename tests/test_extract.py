@@ -15,6 +15,7 @@ from pydantic_ai import BinaryContent
 from openextract import (
     ExtractionError,
     ModelError,
+    ProviderNotInstalledError,
     SchemaValidationError,
     UrlFetchError,
     Usage,
@@ -29,6 +30,7 @@ from openextract._extract import (
     _fetch_url,
     _get_media,
     _get_media_type,
+    _install_hint,
     _is_public_ip,
     _is_safe_host,
     _max_redirects,
@@ -80,6 +82,7 @@ def test_star_import_exposes_only_existing_names():
         "Usage",
         "ExtractionError",
         "ModelError",
+        "ProviderNotInstalledError",
         "SchemaValidationError",
         "UrlFetchError",
     }
@@ -689,6 +692,46 @@ class TestExtract:
 
         assert result is expected
         assert not isinstance(result, tuple)
+
+
+# ---------------------------------------------------------------------------
+# Provider-not-installed guardrail
+# ---------------------------------------------------------------------------
+
+
+class TestProviderNotInstalled:
+    @pytest.mark.parametrize(
+        ("model", "expected"),
+        [
+            ("openai:gpt-4o", "openextract[openai]"),
+            ("anthropic:claude-sonnet-4-20250514", "openextract[anthropic]"),
+            ("google-gla:gemini-2.5-flash", "openextract[google]"),
+            ("xai:grok-4.3", "openextract[xai]"),
+            ("cerebras:llama-3.3-70b", "openextract[openai]"),
+            ("ollama:llama3.2", "openextract[openai]"),
+            ("madeup:model", "openextract[all]"),
+        ],
+    )
+    def test_install_hint_maps_prefix_to_extra(self, model, expected):
+        assert _install_hint(model) == f"pip install '{expected}'"
+
+    def test_missing_provider_raises_provider_not_installed_error(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        mocker.patch(
+            "openextract._extract.Agent",
+            side_effect=ImportError("No module named 'openai'"),
+        )
+
+        with pytest.raises(ProviderNotInstalledError) as exc_info:
+            extract(schema=_Person, model="openai:gpt-4o", input_file=str(local))
+
+        message = str(exc_info.value)
+        assert "openextract[openai]" in message
+        assert "No module named 'openai'" in message
+
+    def test_provider_not_installed_is_extraction_error(self):
+        assert issubclass(ProviderNotInstalledError, ExtractionError)
 
 
 # ---------------------------------------------------------------------------
