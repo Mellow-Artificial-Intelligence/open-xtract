@@ -609,7 +609,7 @@ class TestExtract:
                 "groq:llama-3.3-70b-versatile",
             ),
             (lambda msg: _make_mistral_error(msg), "mistral:mistral-large-latest"),
-            (lambda msg: _make_grpc_error(msg), "xai:grok-4"),
+            (lambda msg: _make_grpc_error(msg), "xai:grok-4.3"),
         ],
         ids=[
             "pydantic_ai_ModelHTTPError",

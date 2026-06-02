@@ -110,7 +110,7 @@ def bench_build_agent() -> None:
     print("\n[_build_agent] constructing a pydantic_ai.Agent")
     _bench(
         "_build_agent(non-ollama)",
-        lambda: _build_agent(_Person, "xai:grok-4", "extract"),
+        lambda: _build_agent(_Person, "xai:grok-4.3", "extract"),
         iters=200,
     )
     _bench(
@@ -137,8 +137,8 @@ def bench_extract_end_to_end(tmp: Path) -> None:
     print("\n[extract] sync extract() with Agent mocked (all-local cost per call)")
     with patch("openextract._extract.Agent", return_value=agent_instance):
         _bench(
-            "extract(path, xai:grok-4)",
-            lambda: extract(_Person, "xai:grok-4", str(src)),
+            "extract(path, xai:grok-4.3)",
+            lambda: extract(_Person, "xai:grok-4.3", str(src)),
             iters=500,
         )
 
@@ -156,7 +156,7 @@ def bench_extract_end_to_end(tmp: Path) -> None:
     with patch("openextract._extract.Agent", return_value=async_agent_instance):
         _bench(
             "extract_many(20 files, conc=5)",
-            lambda: extract_many(_Person, "xai:grok-4", files, max_concurrency=5),
+            lambda: extract_many(_Person, "xai:grok-4.3", files, max_concurrency=5),
             iters=20,
         )
 

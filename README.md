@@ -59,7 +59,7 @@ class PdfInfo(BaseModel):
 
 result = extract(
     schema=PdfInfo,
-    model="xai:grok-4",
+    model="xai:grok-4.3",
     input_file="https://example.com/document.pdf",
     instructions="Return a two-sentence summary and the document's primary language.",
 )
@@ -77,7 +77,7 @@ print(result.language)
 ```python
 result = extract(
     schema=PdfInfo,
-    model="xai:grok-4",
+    model="xai:grok-4.3",
     input_file="./reports/q4.pdf",
 )
 ```
@@ -85,9 +85,9 @@ result = extract(
 ### Bytes or file-like objects
 
 ```python
-result = extract(schema=PdfInfo, model="xai:grok-4", input_file=pdf_bytes, media_type="application/pdf")
+result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=pdf_bytes, media_type="application/pdf")
 # A file-like object with .read() works too; pass media_type explicitly:
-result = extract(schema=PdfInfo, model="xai:grok-4", input_file=open("q4.pdf", "rb"), media_type="application/pdf")
+result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=open("q4.pdf", "rb"), media_type="application/pdf")
 ```
 
 ### Retry on transient model errors
@@ -95,7 +95,7 @@ result = extract(schema=PdfInfo, model="xai:grok-4", input_file=open("q4.pdf", "
 ```python
 result = extract(
     schema=PdfInfo,
-    model="xai:grok-4",
+    model="xai:grok-4.3",
     input_file="./reports/q4.pdf",
     max_retries=3,
 )
@@ -112,7 +112,7 @@ from openextract import extract_with_usage
 
 result, usage = extract_with_usage(
     schema=PdfInfo,
-    model="xai:grok-4",
+    model="xai:grok-4.3",
     input_file="./reports/q4.pdf",
 )
 
@@ -133,7 +133,7 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 | Anthropic    | `anthropic:claude-sonnet-4`                              |
 | Google       | `google-gla:gemini-2.5-pro`                              |
 | AWS Bedrock  | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`        |
-| xAI          | `xai:grok-4`                                             |
+| xAI          | `xai:grok-4.3`                                             |
 | Cohere       | `cohere:command-r-plus`                                  |
 | Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`          |
 | Groq         | `groq:llama-3.3-70b-versatile`                           |
@@ -158,7 +158,7 @@ Outlines runs models locally (via HuggingFace transformers, llama-cpp, MLX, vLLM
 ```bash
 openextract ./reports/q4.pdf \
   --schema mypkg.schemas:Invoice \
-  --model xai:grok-4 \
+  --model xai:grok-4.3 \
   --instructions "Pull totals and line items." \
   --output json
 ```
@@ -168,7 +168,7 @@ Batch multiple files (JSON array output):
 ```bash
 openextract ./invoices/a.pdf ./invoices/b.pdf \
   --schema mypkg.schemas:Invoice \
-  --model xai:grok-4
+  --model xai:grok-4.3
 ```
 
 Token usage (single file):
@@ -176,7 +176,7 @@ Token usage (single file):
 ```bash
 openextract ./reports/q4.pdf \
   --schema mypkg.schemas:Invoice \
-  --model xai:grok-4 \
+  --model xai:grok-4.3 \
   --usage
 ```
 
@@ -185,7 +185,7 @@ Read from stdin:
 ```bash
 cat ./reports/q4.pdf | openextract - \
   --schema mypkg.schemas:Invoice \
-  --model xai:grok-4 \
+  --model xai:grok-4.3 \
   --media-type application/pdf
 ```
 
@@ -233,7 +233,7 @@ from openextract import (
 )
 
 try:
-    result = extract(schema=PdfInfo, model="xai:grok-4", input_file=url)
+    result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=url)
 except UrlFetchError:
     ...  # The URL could not be fetched
 except SchemaValidationError:
@@ -253,7 +253,7 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 | Argument        | Type                          | Description                                                                                                       |
 | --------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
 | `schema`        | `type[BaseModel]`             | A Pydantic model class describing the desired output shape.                                                       |
-| `model`         | `str`                         | A `pydantic-ai` model identifier (e.g. `"xai:grok-4"`).                                                         |
+| `model`         | `str`                         | A `pydantic-ai` model identifier (e.g. `"xai:grok-4.3"`).                                                         |
 | `input_file`    | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
 | `instructions`  | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
 | `media_type`    | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |

@@ -31,7 +31,7 @@ def main() -> None:
 
     meeting = extract(
         schema=Meeting,
-        model="xai:grok-4",
+        model="xai:grok-4.3",
         input_file=input_file,
         instructions=(
             "Listen to the meeting audio and produce structured notes. Include "

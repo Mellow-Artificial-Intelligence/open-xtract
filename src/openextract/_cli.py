@@ -90,7 +90,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--model",
         required=True,
-        help="pydantic-ai model identifier (e.g. 'xai:grok-4').",
+        help="pydantic-ai model identifier (e.g. 'xai:grok-4.3').",
     )
     parser.add_argument(
         "--instructions",
