@@ -50,6 +50,7 @@ _PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
     ("huggingface_hub.errors", "HfHubHTTPError"),
     ("groq", "APIError"),
     ("mistralai.client.errors.mistralerror", "MistralError"),
+    ("grpc", "RpcError"),  # xAI SDK uses gRPC; pydantic-ai may surface this directly
 )
 
 
