@@ -6,8 +6,8 @@ Examples use **OpenAI**, **Anthropic**, and **xAI** so you can see how provider 
 
 | Provider   | Model identifier              | Environment variable   |
 | ---------- | ----------------------------- | ---------------------- |
-| OpenAI     | `openai:gpt-4o-mini`          | `OPENAI_API_KEY`       |
-| Anthropic  | `anthropic:claude-sonnet-4`   | `ANTHROPIC_API_KEY`    |
+| OpenAI     | `openai:gpt-5.5`              | `OPENAI_API_KEY`       |
+| Anthropic  | `anthropic:claude-opus-4-8`  | `ANTHROPIC_API_KEY`    |
 | xAI        | `xai:grok-4.3`                | `XAI_API_KEY`          |
 
 Install provider extras as needed: `openextract[openai]`, `openextract[anthropic]`, `openextract[xai]`, or `openextract[all]`.
@@ -67,7 +67,7 @@ uv run python examples/batch/batch_extract.py
 # Anthropic via CLI (from repo root)
 PYTHONPATH=. uv run openextract examples/fixtures/document_page.png \
   --schema examples.cli.schemas:DocumentInfo \
-  --model anthropic:claude-sonnet-4 \
+  --model anthropic:claude-opus-4-8 \
   --instructions "Two-sentence summary and primary language."
 ```
 
