@@ -233,6 +233,7 @@ from openextract import (
     UrlFetchError,
     SchemaValidationError,
     ModelError,
+    ProviderNotInstalledError,
     ExtractionError,
 )
 
@@ -242,6 +243,8 @@ except UrlFetchError:
     ...  # The URL could not be fetched
 except SchemaValidationError:
     ...  # The model's output did not match your schema
+except ProviderNotInstalledError:
+    ...  # The provider extra isn't installed (e.g. pip install openextract[xai])
 except ModelError:
     ...  # The model provider returned an error
 except ExtractionError:

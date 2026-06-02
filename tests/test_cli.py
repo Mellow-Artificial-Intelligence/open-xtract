@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from openextract import (
     ExtractionError,
     ModelError,
+    ProviderNotInstalledError,
     SchemaValidationError,
     UrlFetchError,
 )
@@ -278,6 +279,11 @@ class TestMainErrorCodes:
     def test_extraction_error_returns_5(self, mocker, capsys):
         assert self._invoke(mocker, ExtractionError("misc")) == 5
         assert "misc" in capsys.readouterr().err
+
+    def test_provider_not_installed_error_returns_6(self, mocker, capsys):
+        exc = ProviderNotInstalledError("install openextract[openai]")
+        assert self._invoke(mocker, exc) == 6
+        assert "openextract[openai]" in capsys.readouterr().err
 
     def test_bad_schema_module_returns_1(self, capsys):
         exit_code = main(
