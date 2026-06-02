@@ -141,7 +141,7 @@
 
 <span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
     <span class="text-black/40">schema=</span><span class="text-black/70">Invoice</span>,
-    <span class="text-black/40">model=</span><span class="text-emerald-600">"openai:gpt-5"</span>,
+    <span class="text-black/40">model=</span><span class="text-emerald-600">"xai:grok-4"</span>,
     <span class="text-black/40">input_file=</span><span class="text-emerald-600">"https://example.com/doc.pdf"</span>,
     <span class="text-black/40">instructions=</span><span class="text-emerald-600">"Extract invoice data"</span>,
 )</code></pre>
@@ -271,7 +271,7 @@
               </p>
               <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code><span class="text-black/40">$</span> openextract a.pdf b.pdf \
     --schema mypkg:Invoice \
-    --model <span class="text-emerald-600">openai:gpt-5</span> \
+    --model <span class="text-emerald-600">xai:grok-4</span> \
     --usage</code></pre>
             </div>
 
@@ -307,7 +307,7 @@
               </p>
               <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code>results = extract_many(
     schema=Invoice,
-    model=<span class="text-emerald-600">"openai:gpt-5"</span>,
+    model=<span class="text-emerald-600">"xai:grok-4"</span>,
     input_files=paths,
     max_concurrency=<span class="text-emerald-600">5</span>,
 )</code></pre>
@@ -326,7 +326,7 @@
               </p>
               <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code>extract(
     schema=Invoice,
-    model=<span class="text-emerald-600">"openai:gpt-5"</span>,
+    model=<span class="text-emerald-600">"xai:grok-4"</span>,
     input_file=pdf_bytes,
     media_type=<span class="text-emerald-600">"application/pdf"</span>,
 )</code></pre>
@@ -345,7 +345,7 @@
               </p>
               <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code>extract(
     schema=Invoice,
-    model=<span class="text-emerald-600">"openai:gpt-5"</span>,
+    model=<span class="text-emerald-600">"xai:grok-4"</span>,
     input_file=path,
     max_retries=<span class="text-emerald-600">3</span>,
 )</code></pre>
@@ -364,7 +364,7 @@
               </p>
               <pre class="text-[11px] font-mono leading-relaxed text-black/60 bg-black/5 p-2.5 overflow-x-auto"><code>output, usage = extract_with_usage(
     schema=Invoice,
-    model=<span class="text-emerald-600">"openai:gpt-5"</span>,
+    model=<span class="text-emerald-600">"xai:grok-4"</span>,
     input_file=path,
 )
 <span class="text-black/40">print(usage.total_tokens)</span></code></pre>
@@ -461,7 +461,7 @@
 
 <span class="text-black/70">result</span> <span class="text-black/40">=</span> <span class="text-black/70">extract</span>(
     <span class="text-black/40">schema=</span><span class="text-black/70">Report</span>,
-    <span class="text-black/40">model=</span><span class="text-emerald-600">"openai:gpt-5"</span>,
+    <span class="text-black/40">model=</span><span class="text-emerald-600">"xai:grok-4"</span>,
     <span class="text-black/40">input_file=</span><span class="text-emerald-600">"https://example.com/report.pdf"</span>,
     <span class="text-black/40">instructions=</span><span class="text-emerald-600">"Extract findings"</span>,
 )</code></pre>

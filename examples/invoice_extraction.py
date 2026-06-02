@@ -35,7 +35,7 @@ def main() -> None:
 
     invoice = extract(
         schema=Invoice,
-        model="openai:gpt-5",
+        model="xai:grok-4",
         input_file=input_file,
         instructions=(
             "Extract the invoice metadata, parties, every line item, and the "

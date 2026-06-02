@@ -46,7 +46,7 @@ def main() -> None:
 
     results = extract_many(
         schema=Invoice,
-        model="openai:gpt-5",
+        model="xai:grok-4",
         input_files=paths,
         max_concurrency=5,
         instructions=(
