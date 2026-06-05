@@ -5,6 +5,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-06-05
+
 ### Added
 - `ProviderNotInstalledError` (a subclass of `ExtractionError`) raised with an
   actionable `pip install openextract[...]` hint when a model is requested whose
@@ -12,6 +14,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--continue-on-error` flag on the `openextract` CLI: in batch mode, keep
   processing remaining inputs when one fails, emit per-item errors inline, and
   exit `7` if any input failed (default remains abort-on-first-failure).
+- Reorganized `examples/` into dedicated use-case folders (`basic/`, `images/`,
+  `documents/`, `audio/`, `batch/`, `async/`, `advanced/`, `cli/`) with shared
+  bootstrap helpers, bundled fixtures, and a `run_all.py` runner.
+- xAI gRPC error classification: `grpc.aio.AioRpcError` from xAI model calls is
+  now caught and re-raised as `ModelError` (consistent with other providers).
+- Updated all examples and docs to use the `xai:` model string prefix (e.g.
+  `xai:grok-4.3`) matching pydantic-ai conventions.
 
 ## [0.8.0] - 2026-06-02
 
@@ -111,7 +120,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.9.0...HEAD
+[0.9.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.5.0...v0.6.0
