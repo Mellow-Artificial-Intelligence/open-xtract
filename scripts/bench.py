@@ -21,7 +21,10 @@ from unittest.mock import MagicMock, patch
 from pydantic import BaseModel
 
 # Stub credentials so pydantic-ai provider clients can be instantiated locally.
+# These are never used for real calls: the extract benchmarks mock the Agent,
+# and the agent-construction benchmark only needs the provider to initialize.
 os.environ.setdefault("OPENAI_API_KEY", "sk-bench-dummy")
+os.environ.setdefault("XAI_API_KEY", "xai-bench-dummy")
 os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
 
