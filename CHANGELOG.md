@@ -12,6 +12,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - `--continue-on-error` flag on the `openextract` CLI: in batch mode, keep
   processing remaining inputs when one fails, emit per-item errors inline, and
   exit `7` if any input failed (default remains abort-on-first-failure).
+- README public API stability audit covering every symbol exported from
+  `openextract.__all__`, plus CLI stability notes and pre-1.0 follow-ups.
 
 ## [0.8.0] - 2026-06-02
 

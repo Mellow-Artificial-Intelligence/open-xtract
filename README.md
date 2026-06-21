@@ -202,8 +202,8 @@ cat ./reports/q4.pdf | openextract - \
   exits `7` if any input failed. Without it, a batch aborts on the first failure.
 
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
-`5` other extraction error, `7` partial batch failure (`--continue-on-error`),
-`1` any other failure (including bad `--schema` paths).
+`5` other extraction error, `6` missing provider extra, `7` partial batch failure
+(`--continue-on-error`), `1` any other failure (including bad `--schema` paths).
 
 ## Examples
 
@@ -263,21 +263,21 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 Returns an instance of `schema`.
 
-### `extract_async(schema, model, input_file, instructions=None, *, media_type=None)`
+### `extract_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
 
-Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync`. Accepts the same `schema`, `model`, `input_file`, `instructions`, and `media_type` arguments.
+Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync`. Accepts the same `schema`, `model`, `input_file`, `instructions`, `media_type`, `max_retries`, and `retry_backoff` arguments.
 
 Returns an instance of `schema`.
 
-### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None)`
+### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
 
-Like `extract`, but returns `(output, Usage)` where `Usage` is a frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. Useful for cost tracking and logging. Does not retry on `ModelError` (single attempt).
+Like `extract`, but returns `(output, Usage)` where `Usage` is a frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. Useful for cost tracking and logging. Uses the same `ModelError` retry behavior as `extract`.
 
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None)`
+### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
 
 Async sibling of `extract_with_usage`; returns `(output, Usage)`.
 
-### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False)`
+### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0)`
 
 Run concurrent extractions from synchronous code. Each item in `input_files` is a path, URL, `bytes`, or file-like object (same rules as `extract`). Results are returned in input order.
 
@@ -287,10 +287,12 @@ Run concurrent extractions from synchronous code. Each item in `input_files` is 
 | `media_type`         | `str \| None` (keyword-only) | Applied uniformly to every item; required if any item is `bytes`/file-like. |
 | `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions (default `5`).                                |
 | `return_exceptions`  | `bool` (keyword-only)        | If `True`, exceptions appear in the result list instead of being raised.    |
+| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a `ModelError`. Defaults to `0`.              |
+| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter.                  |
 
 Returns a `list` of schema instances (or exceptions when `return_exceptions=True`).
 
-### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False)`
+### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0)`
 
 Async sibling of `extract_many`; same arguments and return shape.
 
@@ -303,6 +305,34 @@ Frozen dataclass returned by `extract_with_usage` / `extract_with_usage_async`:
 | `input_tokens`   | `int` | Prompt tokens consumed.  |
 | `output_tokens`  | `int` | Completion tokens.       |
 | `total_tokens`   | `int` | Total tokens for the call. |
+
+## Public API stability
+
+`openextract.__all__` is the public Python API surface. Modules and helpers whose
+names start with `_`, including `openextract._extract` and `openextract._cli`, are
+internal implementation details. The CLI command is also user-facing and follows
+the compatibility notes below even though it is not exported from `__all__`.
+
+| API | Status for 1.0 | Notes |
+| --- | --- | --- |
+| `extract` | Stable | Primary synchronous API. Signature, return type, media input forms, retry behavior, and public exception categories are intended to carry into 1.0 unchanged. |
+| `extract_async` | Stable | Async sibling of `extract`; same input contract and retry behavior, with `Agent.run` instead of `run_sync`. |
+| `extract_with_usage` | Stable | Usage-returning sync API. The `(output, Usage)` tuple shape is stable; exact token values depend on provider reporting. |
+| `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |
+| `extract_many` | Provisional | Batch return ordering and `return_exceptions` semantics are intended to remain, but pre-1.0 work should validate retry/concurrency options and clarify behavior when called inside an active event loop. |
+| `extract_many_async` | Provisional | Async batch API with the same return shape as `extract_many`; pre-1.0 work should validate retry/concurrency options. |
+| `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
+| `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
+| `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
+| `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
+| `ModelError` | Stable | Raised for provider/model API failures. Provider-specific classifiers may expand without changing the public type. |
+| `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
+| `openextract` CLI | Provisional | The command, core flags, JSON output, and documented exit-code categories are intended to remain, but provider-install and partial-batch failure behavior should finish release validation before 0.9. |
+
+No pre-1.0 signature changes are currently proposed for stable symbols. Known
+pre-1.0 follow-ups are limited to validation and documentation around batch
+concurrency, retry option constraints, active-event-loop behavior, and final CLI
+release readiness.
 
 ## Security
 
