@@ -387,6 +387,10 @@ CI runs the test suite on every PR and fails if total coverage drops below 100%.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
+## Roadmap
+
+The project roadmap lives in the [GitHub Wiki](https://github.com/Mellow-Artificial-Intelligence/openextract/wiki/Roadmap).
+
 ## License
 
 [MIT](LICENSE) &copy; Cole McIntosh
