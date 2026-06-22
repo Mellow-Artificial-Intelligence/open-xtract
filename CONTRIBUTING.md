@@ -72,6 +72,16 @@ A scheduled GitHub Actions workflow (`.github/workflows/embargo-bump.yml`) runs 
 
 If you need to add a dependency that was published in the last 24 hours, hold off and wait the embargo out rather than bumping `exclude-newer` past the rolling window.
 
+## Performance benchmarking (maintainers)
+
+`scripts/bench.py` microbenchmarks openextract's local hot path — import cost, media loading, agent construction, and mocked extraction. Run it on the same machine before and after performance-sensitive changes:
+
+```bash
+uv run python scripts/bench.py
+```
+
+It deliberately does **not** measure model or network latency. See [docs/benchmarking.md](docs/benchmarking.md) for what it measures, when to run it, and how to read the output without overfitting to local noise.
+
 ## Questions?
 
 Open an issue on GitHub.
