@@ -2,10 +2,16 @@
 All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Breaking changes are called out explicitly in the relevant release section.
+Deprecations should be listed with the replacement path and expected removal
+timing when that is known.
 
 ## [Unreleased]
 
 ### Added
+- Compatibility and deprecation policy documenting the public API surface,
+  pre-1.0 breaking-change expectations, provider compatibility limits, and
+  Python version support policy.
 - `ProviderNotInstalledError` (a subclass of `ExtractionError`) raised with an
   actionable `pip install openextract[...]` hint when a model is requested whose
   provider extra is not installed. The CLI reports it with exit code `6`.

@@ -334,6 +334,44 @@ pre-1.0 follow-ups are limited to validation and documentation around batch
 concurrency, retry option constraints, active-event-loop behavior, and final CLI
 release readiness.
 
+## Compatibility and deprecation policy
+
+`openextract` follows semantic-versioning intent, with extra care while the
+project is still pre-1.0:
+
+- **Public API:** `openextract.__all__` is the public Python API. The documented
+  CLI arguments and exit codes, supported optional extras, documented environment
+  variables, and documented input/output behavior are also user-facing
+  compatibility surfaces.
+- **Private API:** modules, functions, classes, and constants whose names start
+  with `_` are internal unless they are explicitly documented here. They may
+  change without a deprecation period.
+- **Patch releases:** should fix bugs, documentation, packaging, provider error
+  classification, or security issues without intentionally breaking public API.
+- **Minor releases before 1.0:** may make breaking public API changes when they
+  are needed for correctness, security, or a clearer long-term contract. These
+  changes must be called out in `CHANGELOG.md` as breaking changes.
+- **Major releases after 1.0:** are the normal place for breaking public API
+  removals or incompatible behavior changes.
+
+Deprecated public APIs should remain available until at least the next minor
+release before `1.0`, unless keeping them would create a security, correctness,
+or maintenance risk. After `1.0`, deprecated public APIs should remain available
+until the next major release. Deprecations should be documented in
+`CHANGELOG.md` with the replacement path and the earliest expected removal
+version when that is known.
+
+Provider behavior depends partly on `pydantic-ai` and provider SDKs. Upstream
+model availability, credential requirements, supported media types, token usage
+reporting, and provider-specific error shapes can change outside an
+`openextract` release. `openextract` aims to keep its own public contract stable,
+but provider-specific compatibility notes may be updated as upstream behavior
+changes.
+
+Python support follows `requires-python` in `pyproject.toml`; the current minimum
+is Python 3.12. Dropping support for a Python minor version is a breaking change
+and should be announced in `CHANGELOG.md`.
+
 ## Security
 
 ### URL fetching and SSRF
