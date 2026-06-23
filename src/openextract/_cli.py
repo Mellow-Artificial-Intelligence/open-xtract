@@ -244,6 +244,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ExtractionError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 5
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     if args.output == "repr":
         _print_json(payload, as_repr=True)

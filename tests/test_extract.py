@@ -913,6 +913,33 @@ class TestExtractWithUsage:
 
 
 class TestExtractRetry:
+    def test_invalid_max_retries_is_rejected_before_extraction(self, mocker):
+        once = mocker.patch("openextract._extract._extract_once")
+
+        with pytest.raises(ValueError, match="max_retries"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=-1,
+            )
+
+        once.assert_not_called()
+
+    @pytest.mark.parametrize("retry_backoff", [0, -1.0, float("inf"), "slow", True])
+    def test_invalid_retry_backoff_is_rejected_before_extraction(self, mocker, retry_backoff):
+        once = mocker.patch("openextract._extract._extract_once")
+
+        with pytest.raises(ValueError, match="retry_backoff"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                retry_backoff=retry_backoff,  # type: ignore[arg-type]
+            )
+
+        once.assert_not_called()
+
     def test_no_retry_by_default_raises_immediately(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         once = mocker.patch(
@@ -1006,6 +1033,19 @@ class TestExtractRetry:
 
 
 class TestExtractWithUsageRetry:
+    def test_invalid_retry_options_are_rejected_before_extraction(self, mocker):
+        run_extraction = mocker.patch("openextract._extract._run_extraction")
+
+        with pytest.raises(ValueError, match="max_retries"):
+            extract_with_usage(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=True,  # type: ignore[arg-type]
+            )
+
+        run_extraction.assert_not_called()
+
     def test_retries_on_model_error(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         expected = _Person(name="Ada", age=36)
@@ -1031,6 +1071,19 @@ class TestExtractWithUsageRetry:
 
 
 class TestExtractAsyncRetry:
+    async def test_invalid_retry_options_are_rejected_before_agent_build(self, mocker):
+        agent_cls = mocker.patch("openextract._extract.Agent")
+
+        with pytest.raises(ValueError, match="retry_backoff"):
+            await extract_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                retry_backoff=0,
+            )
+
+        agent_cls.assert_not_called()
+
     async def test_retries_on_model_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hi")
@@ -1186,6 +1239,19 @@ class TestExtractAsync:
 
 
 class TestExtractWithUsageAsync:
+    async def test_invalid_retry_options_are_rejected_before_agent_build(self, mocker):
+        agent_cls = mocker.patch("openextract._extract.Agent")
+
+        with pytest.raises(ValueError, match="max_retries"):
+            await extract_with_usage_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=-1,
+            )
+
+        agent_cls.assert_not_called()
+
     async def test_returns_output_and_usage_tuple(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
@@ -1308,6 +1374,32 @@ def _stub_shared_agent(mocker, side_effect):
 
 
 class TestExtractMany:
+    def test_invalid_max_concurrency_is_rejected_before_agent_build(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        with pytest.raises(ValueError, match="max_concurrency"):
+            extract_many(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["a.txt"],
+                max_concurrency=0,
+            )
+
+        build_mock.assert_not_called()
+
+    def test_invalid_retry_options_are_rejected_before_agent_build(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        with pytest.raises(ValueError, match="max_retries"):
+            extract_many(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["a.txt"],
+                max_retries=-1,
+            )
+
+        build_mock.assert_not_called()
+
     def test_preserves_input_order(self, tmp_path, mocker):
         files = []
         for i in range(4):
@@ -1448,6 +1540,19 @@ class TestExtractMany:
 
 
 class TestExtractManyAsync:
+    async def test_invalid_options_are_rejected_before_agent_build(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        with pytest.raises(ValueError, match="max_concurrency"):
+            await extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["a.txt"],
+                max_concurrency=False,  # type: ignore[arg-type]
+            )
+
+        build_mock.assert_not_called()
+
     async def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 

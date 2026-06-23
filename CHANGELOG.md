@@ -21,6 +21,10 @@ timing when that is known.
 - README public API stability audit covering every symbol exported from
   `openextract.__all__`, plus CLI stability notes and pre-1.0 follow-ups.
 
+### Changed
+- `max_retries`, `retry_backoff`, and `max_concurrency` now fail early with
+  deterministic `ValueError` messages when invalid values are provided.
+
 ## [0.8.0] - 2026-06-02
 
 ### Added
