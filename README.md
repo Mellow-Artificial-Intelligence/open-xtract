@@ -101,7 +101,7 @@ result = extract(
 )
 ```
 
-`max_retries` defaults to `0` (single attempt). When set, `extract` retries only on `ModelError` and sleeps `retry_backoff * (2 ** attempt)` seconds (with up to 25% jitter) between attempts. `retry_backoff` defaults to `1.0` second.
+`max_retries` defaults to `0` (single attempt) and must be a non-negative integer. When set, `extract` retries only on `ModelError` and sleeps `retry_backoff * (2 ** attempt)` seconds (with up to 25% jitter) between attempts. `retry_backoff` defaults to `1.0` second and must be positive and finite.
 
 ### Inspecting token usage
 
@@ -258,8 +258,8 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 | `input_file`    | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
 | `instructions`  | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
 | `media_type`    | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
-| `max_retries`   | `int` (keyword-only)          | Extra attempts after a `ModelError`. Defaults to `0` (no retry).                                                  |
-| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter between retries.                                                 |
+| `max_retries`   | `int` (keyword-only)          | Extra attempts after a `ModelError`. Must be a non-negative integer. Defaults to `0` (no retry).                 |
+| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter between retries. Must be positive and finite.                   |
 
 Returns an instance of `schema`.
 
@@ -285,10 +285,10 @@ Run concurrent extractions from synchronous code. Each item in `input_files` is 
 | -------------------- | ---------------------------- | --------------------------------------------------------------------------- |
 | `input_files`        | `Iterable[str \| bytes \| BinaryIO]` | One input per extraction.                                          |
 | `media_type`         | `str \| None` (keyword-only) | Applied uniformly to every item; required if any item is `bytes`/file-like. |
-| `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions (default `5`).                                |
+| `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions. Must be a positive integer. Defaults to `5`. |
 | `return_exceptions`  | `bool` (keyword-only)        | If `True`, exceptions appear in the result list instead of being raised.    |
-| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a `ModelError`. Defaults to `0`.              |
-| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter.                  |
+| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a `ModelError`. Must be a non-negative integer. Defaults to `0`. |
+| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter. Must be positive and finite. |
 
 Returns a `list` of schema instances (or exceptions when `return_exceptions=True`).
 
@@ -319,8 +319,8 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `extract_async` | Stable | Async sibling of `extract`; same input contract and retry behavior, with `Agent.run` instead of `run_sync`. |
 | `extract_with_usage` | Stable | Usage-returning sync API. The `(output, Usage)` tuple shape is stable; exact token values depend on provider reporting. |
 | `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |
-| `extract_many` | Provisional | Batch return ordering and `return_exceptions` semantics are intended to remain, but pre-1.0 work should validate retry/concurrency options and clarify behavior when called inside an active event loop. |
-| `extract_many_async` | Provisional | Async batch API with the same return shape as `extract_many`; pre-1.0 work should validate retry/concurrency options. |
+| `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain, but pre-1.0 work should clarify behavior when called inside an active event loop. |
+| `extract_many_async` | Provisional | Async batch API with the same return shape, option constraints, and per-item retry behavior as `extract_many`. |
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
@@ -330,8 +330,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `openextract` CLI | Provisional | The command, core flags, JSON output, and documented exit-code categories are intended to remain, but provider-install and partial-batch failure behavior should finish release validation before 0.9. |
 
 No pre-1.0 signature changes are currently proposed for stable symbols. Known
-pre-1.0 follow-ups are limited to validation and documentation around batch
-concurrency, retry option constraints, active-event-loop behavior, and final CLI
+pre-1.0 follow-ups are limited to active-event-loop behavior and final CLI
 release readiness.
 
 ## Compatibility and deprecation policy

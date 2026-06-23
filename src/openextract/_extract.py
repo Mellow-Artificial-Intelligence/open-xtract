@@ -3,6 +3,7 @@
 import asyncio
 import importlib
 import ipaddress
+import math
 import mimetypes
 import os
 import random
@@ -413,6 +414,27 @@ def _retry_delay(retry_backoff: float, attempt: int) -> float:
     return retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
 
 
+def _validate_retry_options(max_retries: object, retry_backoff: object) -> None:
+    if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
+        raise ValueError("max_retries must be a non-negative integer.")
+    if (
+        isinstance(retry_backoff, bool)
+        or not isinstance(retry_backoff, int | float)
+        or not math.isfinite(retry_backoff)
+        or retry_backoff <= 0
+    ):
+        raise ValueError("retry_backoff must be a finite positive number of seconds.")
+
+
+def _validate_max_concurrency(max_concurrency: object) -> None:
+    if (
+        isinstance(max_concurrency, bool)
+        or not isinstance(max_concurrency, int)
+        or max_concurrency < 1
+    ):
+        raise ValueError("max_concurrency must be a positive integer.")
+
+
 def _run_with_retries_sync[R](
     fn: Callable[[], R],
     *,
@@ -420,6 +442,7 @@ def _run_with_retries_sync[R](
     retry_backoff: float,
 ) -> R:
     """Run ``fn`` until it succeeds or ``ModelError`` retries are exhausted."""
+    _validate_retry_options(max_retries, retry_backoff)
     attempt = 0
     while True:
         try:
@@ -438,6 +461,7 @@ async def _run_with_retries_async[R](
     retry_backoff: float,
 ) -> R:
     """Async counterpart to :func:`_run_with_retries_sync`."""
+    _validate_retry_options(max_retries, retry_backoff)
     attempt = 0
     while True:
         try:
@@ -596,6 +620,8 @@ async def _gather_extractions(
     max_retries: int,
     retry_backoff: float,
 ) -> list:
+    _validate_retry_options(max_retries, retry_backoff)
+    _validate_max_concurrency(max_concurrency)
     files = list(input_files)
     if not files:
         return []
@@ -652,7 +678,13 @@ def extract_many(
 
     Returns:
         A list of results (or exceptions, when ``return_exceptions=True``) in input order.
+
+    Raises:
+        ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
+            negative, or ``retry_backoff`` is not positive and finite.
     """
+    _validate_retry_options(max_retries, retry_backoff)
+    _validate_max_concurrency(max_concurrency)
     return asyncio.run(
         _gather_extractions(
             schema,

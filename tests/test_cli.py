@@ -245,6 +245,38 @@ class TestMainSuccess:
         assert mock_extract.call_args.kwargs["max_retries"] == 3
         assert mock_extract.call_args.kwargs["retry_backoff"] == 2.5
 
+    def test_invalid_max_retries_returns_1(self, capsys):
+        exit_code = main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--max-retries",
+                "-1",
+            ]
+        )
+
+        assert exit_code == 1
+        assert "max_retries" in capsys.readouterr().err
+
+    def test_invalid_retry_backoff_returns_1(self, capsys):
+        exit_code = main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--retry-backoff",
+                "0",
+            ]
+        )
+
+        assert exit_code == 1
+        assert "retry_backoff" in capsys.readouterr().err
+
 
 # ---------------------------------------------------------------------------
 # main error paths / exit codes
