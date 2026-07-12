@@ -706,6 +706,13 @@ class TestProviderNotInstalled:
             ("openai:gpt-4o", "openextract[openai]"),
             ("anthropic:claude-sonnet-4-20250514", "openextract[anthropic]"),
             ("google-gla:gemini-2.5-flash", "openextract[google]"),
+            ("google-vertex:gemini-2.5-pro", "openextract[google]"),
+            ("bedrock:anthropic.claude-sonnet-4-20250514-v1:0", "openextract[bedrock]"),
+            ("cohere:command-r-plus", "openextract[cohere]"),
+            ("groq:llama-3.3-70b-versatile", "openextract[groq]"),
+            ("huggingface:meta-llama/Llama-3.3-70B-Instruct", "openextract[huggingface]"),
+            ("mistral:mistral-large-latest", "openextract[mistral]"),
+            ("openrouter:anthropic/claude-sonnet-4", "openextract[openrouter]"),
             ("xai:grok-4.3", "openextract[xai]"),
             ("cerebras:llama-3.3-70b", "openextract[openai]"),
             ("ollama:llama3.2", "openextract[openai]"),
@@ -727,7 +734,7 @@ class TestProviderNotInstalled:
             extract(schema=_Person, model="openai:gpt-4o", input_file=str(local))
 
         message = str(exc_info.value)
-        assert "openextract[openai]" in message
+        assert "pip install 'openextract[openai]'" in message
         assert "No module named 'openai'" in message
 
     def test_provider_not_installed_is_extraction_error(self):

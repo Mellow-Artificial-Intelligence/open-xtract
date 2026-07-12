@@ -20,6 +20,9 @@ timing when that is known.
   exit `7` if any input failed (default remains abort-on-first-failure).
 - README public API stability audit covering every symbol exported from
   `openextract.__all__`, plus CLI stability notes and pre-1.0 follow-ups.
+- Release-readiness documentation for provider install errors, extra-specific
+  install hints, and CLI partial-batch failure stdout/stderr and exit-code
+  behavior.
 
 ### Changed
 - `max_retries`, `retry_backoff`, and `max_concurrency` now fail early with

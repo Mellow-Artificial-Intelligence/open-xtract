@@ -313,9 +313,11 @@ class TestMainErrorCodes:
         assert "misc" in capsys.readouterr().err
 
     def test_provider_not_installed_error_returns_6(self, mocker, capsys):
-        exc = ProviderNotInstalledError("install openextract[openai]")
+        exc = ProviderNotInstalledError("Install it with: pip install 'openextract[openai]'")
         assert self._invoke(mocker, exc) == 6
-        assert "openextract[openai]" in capsys.readouterr().err
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert "pip install 'openextract[openai]'" in captured.err
 
     def test_bad_schema_module_returns_1(self, capsys):
         exit_code = main(
@@ -430,6 +432,7 @@ class TestMainBatchAndUsage:
         assert '"name": "Ada"' in captured.out  # the successful item is still emitted
         assert '"error_type": "ModelError"' in captured.out
         assert '"input": "b.pdf"' in captured.out
+        assert "warning:" not in captured.out
         assert "1 of 2 input(s) failed" in captured.err
 
     def test_continue_on_error_all_success_exits_0(self, mocker, capsys):

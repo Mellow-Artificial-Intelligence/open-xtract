@@ -41,7 +41,7 @@ Or with pip:
 pip install openextract
 ```
 
-Model calls require a provider SDK. Install the extra for the provider you use, for example `openextract[openai]`, `openextract[anthropic]`, or `openextract[all]` for every supported provider. The base package ships `pydantic-ai-slim` without provider SDKs pre-installed.
+Model calls require a provider SDK. Install the extra for the provider you use, for example `openextract[openai]`, `openextract[anthropic]`, or `openextract[all]` for every supported provider. The base package ships `pydantic-ai-slim` without provider SDKs pre-installed. If the requested provider SDK is missing, `openextract` raises `ProviderNotInstalledError` with a provider-specific `pip install 'openextract[...]'` command when the model prefix is known.
 
 Requires Python 3.12+.
 
@@ -127,21 +127,21 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 
 `model` follows the `pydantic-ai` provider prefix convention:
 
-| Provider     | Example identifier                                       |
-| ------------ | -------------------------------------------------------- |
-| OpenAI       | `openai:gpt-5`                                           |
-| Anthropic    | `anthropic:claude-sonnet-4`                              |
-| Google       | `google-gla:gemini-2.5-pro`                              |
-| AWS Bedrock  | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`        |
-| xAI          | `xai:grok-4.3`                                             |
-| Cohere       | `cohere:command-r-plus`                                  |
-| Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`          |
-| Groq         | `groq:llama-3.3-70b-versatile`                           |
-| Cerebras     | `cerebras:llama3.1-70b`                                  |
-| Mistral      | `mistral:mistral-large-latest`                           |
-| OpenRouter   | `openrouter:anthropic/claude-sonnet-4`                   |
-| Outlines     | `outlines:transformers/meta-llama/Llama-3.2-1B-Instruct` |
-| Ollama       | `ollama:llama3`                                          |
+| Provider     | Example identifier                                       | Install extra |
+| ------------ | -------------------------------------------------------- | ------------- |
+| OpenAI       | `openai:gpt-5`                                           | `openextract[openai]` |
+| Anthropic    | `anthropic:claude-sonnet-4`                              | `openextract[anthropic]` |
+| Google       | `google-gla:gemini-2.5-pro`                              | `openextract[google]` |
+| AWS Bedrock  | `bedrock:anthropic.claude-sonnet-4-20250514-v1:0`        | `openextract[bedrock]` |
+| xAI          | `xai:grok-4.3`                                           | `openextract[xai]` |
+| Cohere       | `cohere:command-r-plus`                                  | `openextract[cohere]` |
+| Hugging Face | `huggingface:meta-llama/Llama-3.3-70B-Instruct`          | `openextract[huggingface]` |
+| Groq         | `groq:llama-3.3-70b-versatile`                           | `openextract[groq]` |
+| Cerebras     | `cerebras:llama3.1-70b`                                  | `openextract[openai]` |
+| Mistral      | `mistral:mistral-large-latest`                           | `openextract[mistral]` |
+| OpenRouter   | `openrouter:anthropic/claude-sonnet-4`                   | `openextract[openrouter]` |
+| Outlines     | `outlines:transformers/meta-llama/Llama-3.2-1B-Instruct` | Install the matching `pydantic-ai-slim[outlines-*]` backend |
+| Ollama       | `ollama:llama3`                                          | `openextract[openai]` |
 
 Ollama and Cerebras work via the `openai`-compatible code path &mdash; no dedicated extra is required for either.
 
@@ -204,6 +204,12 @@ cat ./reports/q4.pdf | openextract - \
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
 `5` other extraction error, `6` missing provider extra, `7` partial batch failure
 (`--continue-on-error`), `1` any other failure (including bad `--schema` paths).
+
+Extraction errors are written to stderr; successful JSON, usage payloads, and
+`--continue-on-error` batch arrays are written to stdout. Missing provider extras
+exit `6` and include the same install hint as the Python API, for example
+`pip install 'openextract[xai]'`. Partial batch failures with `--continue-on-error`
+still print the full batch array to stdout, write a warning to stderr, and exit `7`.
 
 ## Examples
 
@@ -327,11 +333,10 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
 | `ModelError` | Stable | Raised for provider/model API failures. Provider-specific classifiers may expand without changing the public type. |
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
-| `openextract` CLI | Provisional | The command, core flags, JSON output, and documented exit-code categories are intended to remain, but provider-install and partial-batch failure behavior should finish release validation before 0.9. |
+| `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, and partial-batch exit code `7` are intended to remain. |
 
 No pre-1.0 signature changes are currently proposed for stable symbols. Known
-pre-1.0 follow-ups are limited to active-event-loop behavior and final CLI
-release readiness.
+pre-1.0 follow-ups are limited to active-event-loop behavior.
 
 ## Compatibility and deprecation policy
 
