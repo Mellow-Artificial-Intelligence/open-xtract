@@ -14,6 +14,10 @@ Install provider extras as needed: `openextract[openai]`, `openextract[anthropic
 
 Set `OPENEXTRACT_MODEL` to override every example with a single model (useful for CI or one-off testing).
 
+If a provider SDK is missing, the Python API raises `ProviderNotInstalledError`
+with a `pip install 'openextract[...]'` hint for known model prefixes. The CLI
+prints the same error to stderr and exits `6`.
+
 ## Prerequisites
 
 ```bash
@@ -69,7 +73,17 @@ PYTHONPATH=. uv run openextract examples/fixtures/document_page.png \
   --schema examples.cli.schemas:DocumentInfo \
   --model anthropic:claude-opus-4-8 \
   --instructions "Two-sentence summary and primary language."
+
+# Batch via CLI, keeping per-item failures in the JSON output
+PYTHONPATH=. uv run openextract examples/fixtures/document_page.png missing.png \
+  --schema examples.cli.schemas:DocumentInfo \
+  --model xai:grok-4.3 \
+  --continue-on-error
 ```
+
+With `--continue-on-error`, successful items and per-item errors are written as
+one JSON array on stdout. If any item fails, the CLI also writes a warning to
+stderr and exits `7`; without the flag, the batch stops at the first failure.
 
 ### Audio
 
