@@ -1514,6 +1514,20 @@ class TestExtractMany:
         assert extract_many(schema=_Person, model="openai:gpt-5", input_files=[]) == []
         build_mock.assert_not_called()
 
+    def test_rejects_call_from_running_event_loop(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        async def _call_from_loop():
+            with pytest.raises(RuntimeError, match="extract_many_async"):
+                extract_many(
+                    schema=_Person,
+                    model="openai:gpt-5",
+                    input_files=["a.txt"],
+                )
+
+        asyncio.run(_call_from_loop())
+        build_mock.assert_not_called()
+
     def test_media_type_forwarded_to_runner(self, tmp_path, mocker):
         """media_type kwarg is passed through to every per-item runner call."""
         files = [str(tmp_path / f"f{i}.txt") for i in range(2)]

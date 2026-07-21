@@ -82,6 +82,51 @@ uv run python scripts/bench.py
 
 It deliberately does **not** measure model or network latency. See [docs/benchmarking.md](docs/benchmarking.md) for what it measures, when to run it, and how to read the output without overfitting to local noise.
 
+## Live provider smoke tests (maintainers)
+
+Default `pytest` does not call live models. To run the opt-in harness:
+
+```bash
+OPENEXTRACT_LIVE_SMOKE=1 uv run pytest -m integration tests/test_live_smoke.py -v
+```
+
+See [docs/live-smoke.md](docs/live-smoke.md).
+
+## Release checklist (maintainers)
+
+Use this before cutting a release (version bump on `main` triggers
+[`.github/workflows/release.yml`](.github/workflows/release.yml)):
+
+1. **Version bump** — set `version` in `pyproject.toml` to the release version.
+2. **Changelog** — move `[Unreleased]` notes into a dated `## [X.Y.Z]` section in
+   `CHANGELOG.md`; call out breaking changes explicitly.
+3. **Docs and examples review** — skim README, `docs/`, and `examples/README.md`
+   for version-sensitive install/CLI notes.
+4. **Local checks**
+   ```bash
+   uv sync --dev
+   uv run ruff check .
+   uv run ruff format --check .
+   uv run ty check
+   uv run pytest -v --cov=openextract --cov-report=term-missing
+   uv run coverage report --fail-under=100
+   ```
+5. **Dependency embargo** — confirm `[tool.uv] exclude-newer` is within the
+   rolling 24h window (merge recent `embargo-bump` PRs from
+   `.github/workflows/embargo-bump.yml` rather than hand-editing past the window).
+6. **Merge to `main`** — CI (`.github/workflows/ci.yml`) must be green.
+7. **GitHub Actions release job** — on push to `main`, `release.yml` builds,
+   publishes to PyPI (Trusted Publishing), and creates the `vX.Y.Z` GitHub
+   Release when that version is new.
+8. **PyPI verification** — `pip index versions openextract` / the PyPI project
+   page shows the new version; a clean venv install imports.
+9. **GitHub Release verification** — tag `vX.Y.Z` exists with release notes.
+10. **Post-release cleanup** — update docs/issues that referenced the prior
+    version; close or retarget completed milestone issues.
+11. **Security-sensitive notes** — if the release changes URL fetching, SSRF
+    controls, or supply-chain policy, call that out in `CHANGELOG.md` and
+    `SECURITY.md` as appropriate.
+
 ## Questions?
 
 Open an issue on GitHub.

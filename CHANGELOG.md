@@ -8,6 +8,17 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Added
+- Explicit `RuntimeError` when `extract_many()` is called from a running event
+  loop, directing callers to `extract_many_async`.
+- Maintainer docs: CLI stdout/stderr/exit-code contracts, provider capability
+  matrix, troubleshooting guide, live smoke harness notes, release checklist,
+  and an input-size-limits design proposal.
+- Opt-in live provider smoke test (`OPENEXTRACT_LIVE_SMOKE=1`) for a
+  representative OpenAI image path.
+- Expanded `SECURITY.md` URL input security model (schemes, host validation,
+  redirects, env configuration, and non-guarantees).
+
 ## [0.9.0] - 2026-07-12
 
 ### Added
