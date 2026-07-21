@@ -211,6 +211,10 @@ exit `6` and include the same install hint as the Python API, for example
 `pip install 'openextract[xai]'`. Partial batch failures with `--continue-on-error`
 still print the full batch array to stdout, write a warning to stderr, and exit `7`.
 
+Full stdout/stderr/exit-code contracts: [docs/cli.md](docs/cli.md).
+Provider capability matrix: [docs/providers.md](docs/providers.md).
+Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md).
+
 ## Examples
 
 Runnable scripts live in [`examples/`](examples/), grouped by use case (local files, bytes, URLs, images, batch, async, retries, CLI, and more). See [examples/README.md](examples/README.md) for the full table.
@@ -287,6 +291,11 @@ Async sibling of `extract_with_usage`; returns `(output, Usage)`.
 
 Run concurrent extractions from synchronous code. Each item in `input_files` is a path, URL, `bytes`, or file-like object (same rules as `extract`). Results are returned in input order.
 
+Do not call `extract_many` from a running event loop (for example inside
+`async def` or a notebook with an active loop). It uses `asyncio.run` and raises
+`RuntimeError` with a pointer to `extract_many_async`. Async callers should use
+`await extract_many_async(...)`.
+
 | Argument             | Type                         | Description                                                                 |
 | -------------------- | ---------------------------- | --------------------------------------------------------------------------- |
 | `input_files`        | `Iterable[str \| bytes \| BinaryIO]` | One input per extraction.                                          |
@@ -325,7 +334,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `extract_async` | Stable | Async sibling of `extract`; same input contract and retry behavior, with `Agent.run` instead of `run_sync`. |
 | `extract_with_usage` | Stable | Usage-returning sync API. The `(output, Usage)` tuple shape is stable; exact token values depend on provider reporting. |
 | `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |
-| `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain, but pre-1.0 work should clarify behavior when called inside an active event loop. |
+| `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain. Calling it from a running event loop raises `RuntimeError`; use `extract_many_async` in async code. |
 | `extract_many_async` | Provisional | Async batch API with the same return shape, option constraints, and per-item retry behavior as `extract_many`. |
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
@@ -335,8 +344,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
 | `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, and partial-batch exit code `7` are intended to remain. |
 
-No pre-1.0 signature changes are currently proposed for stable symbols. Known
-pre-1.0 follow-ups are limited to active-event-loop behavior.
+No pre-1.0 signature changes are currently proposed for stable symbols.
 
 ## Compatibility and deprecation policy
 
@@ -381,36 +389,18 @@ and should be announced in `CHANGELOG.md`.
 ### URL fetching and SSRF
 
 When `input_file` is an `http://` or `https://` URL, `openextract` fetches it
-directly. To reduce server-side request forgery risk when callers pass
-untrusted URLs, the fetcher refuses any URL whose host resolves to a
-non-public address &mdash; private RFC 1918 ranges, loopback, link-local (including
-the `169.254.169.254` cloud-metadata endpoint), multicast, and reserved
-ranges, for both IPv4 and IPv6 (including IPv4-mapped IPv6 like
-`::ffff:127.0.0.1`). The host is re-validated at every redirect hop, so an
-attacker cannot use a public URL that redirects to an internal one.
+with host validation, redirect re-checks, and configurable timeout/redirect
+limits. Summary:
 
-For workflows that legitimately need to fetch internal URLs (testing
-against `localhost`, on-prem services, etc.), set the
-`OPENEXTRACT_ALLOW_PRIVATE_URLS` environment variable to `1`, `true`, or
-`yes` to disable the check.
+- Supported schemes: `http://`, `https://`
+- Non-public hosts (private, loopback, link-local/metadata, multicast, reserved)
+  are refused unless `OPENEXTRACT_ALLOW_PRIVATE_URLS` is set
+- Hosts are re-validated at every redirect hop
+- `OPENEXTRACT_URL_TIMEOUT` (default `30`) and `OPENEXTRACT_MAX_REDIRECTS`
+  (default `10`) tune fetch behavior
 
-Tune fetch behavior with:
-
-- `OPENEXTRACT_URL_TIMEOUT` &mdash; HTTP timeout in seconds (default `30`)
-- `OPENEXTRACT_MAX_REDIRECTS` &mdash; maximum redirect hops (default `10`)
-
-Invalid or non-positive values fall back to the defaults. If you need a one-off fetch from an internal
-host without disabling validation globally, fetch the bytes with your own
-HTTP client and pass them to `extract()` as `bytes`/file-like with an
-explicit `media_type`.
-
-> **Note:** host validation is best-effort; it does not defend against DNS
-> rebinding (where the host resolves to different IPs across calls). Treat
-> URL-based extraction of untrusted input as a privileged operation.
-
-### Reporting vulnerabilities
-
-See [SECURITY.md](SECURITY.md).
+Full model, remaining risk boundaries (including DNS rebinding), and reporting
+process: [SECURITY.md](SECURITY.md#url-input-security-model).
 
 ## Development
 

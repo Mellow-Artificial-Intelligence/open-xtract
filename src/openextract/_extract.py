@@ -682,9 +682,20 @@ def extract_many(
     Raises:
         ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
             negative, or ``retry_backoff`` is not positive and finite.
+        RuntimeError: If called from a running event loop. Use
+            :func:`extract_many_async` in async code instead.
     """
     _validate_retry_options(max_retries, retry_backoff)
     _validate_max_concurrency(max_concurrency)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "extract_many() cannot be called from a running event loop; "
+            "use await extract_many_async(...) instead."
+        )
     return asyncio.run(
         _gather_extractions(
             schema,

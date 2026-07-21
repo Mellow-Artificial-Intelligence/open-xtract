@@ -97,7 +97,7 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 markers = [
-    "integration: live model/API calls (set OPENEXTRACT_RUN_EXAMPLES=1)",
+    "integration: live model/API calls (set OPENEXTRACT_LIVE_SMOKE=1 or OPENEXTRACT_RUN_EXAMPLES=1)",
 ]
 
 [tool.coverage.run]
