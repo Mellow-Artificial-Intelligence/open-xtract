@@ -28,12 +28,15 @@ exit code `7` is returned — the batch array is still written.
 | `2` | URL fetch error | `UrlFetchError` (network failure, HTTP error, SSRF refusal) |
 | `3` | Schema validation error | `SchemaValidationError` |
 | `4` | Model API error | `ModelError` |
-| `5` | Other extraction error | Other `ExtractionError` subclasses |
+| `5` | Other extraction error | Other `ExtractionError` subclasses (including `InputTooLargeError`) |
 | `6` | Missing provider SDK | `ProviderNotInstalledError` |
 | `7` | Partial batch failure | `--continue-on-error` with one or more per-item failures |
 
 These mappings live in `src/openextract/_cli.py` and are covered by
 `tests/test_cli.py`.
+
+Oversized inputs raise `InputTooLargeError` and exit `5`. Tune the limit with
+`OPENEXTRACT_MAX_INPUT_BYTES` (default 50 MiB).
 
 ## Successful single-file output
 
@@ -82,14 +85,17 @@ openextract ./reports/q4.pdf \
 }
 ```
 
-## `--output json` and `--output repr`
+## `--output json`, `--output jsonl`, and `--output repr`
 
 | Flag | Behavior |
 | ---- | -------- |
-| `--output json` (default) | Pretty-printed JSON (`indent=2`). Single-file non-usage results use `model_dump_json`. |
+| `--output json` (default) | Pretty-printed JSON (`indent=2`). Single-file non-usage results use `model_dump_json`. Batch mode emits a JSON array. |
+| `--output jsonl` | Batch only: one JSON object per line, in input order. Rejected for single-file / `--usage` (exit `1`). |
 | `--output repr` | Python `repr(...)` of the same payload object. |
 
-Both formats write only to stdout on success.
+Both JSON formats write only to stdout on success. JSONL with
+`--continue-on-error` emits the same per-item error objects as the array form,
+one line each; stderr still gets the partial-failure warning and exit `7`.
 
 ## Stdin input
 

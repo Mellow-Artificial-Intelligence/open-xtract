@@ -9,6 +9,20 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- `InputTooLargeError` and a default 50 MiB input size limit
+  (`OPENEXTRACT_MAX_INPUT_BYTES` / `max_input_bytes=`) across extract APIs.
+  Oversized local paths, bytes, file-like objects, and URL bodies raise before
+  the model call; CLI maps the error to exit code `5`.
+- Opt-in live provider smoke coverage for OpenAI, Anthropic, and xAI image
+  paths (`OPENEXTRACT_LIVE_SMOKE=1`).
+- CLI `--output jsonl` for batch runs (one JSON object per line; partial
+  failures keep the same error object shape).
+- Design notes: API reference 1.0 decision, 1.0 freeze checklist,
+  `ExtractResult`, rate limiting, and CLI batch checkpoint/resume.
+- Provider matrix promotions and evidence links for OpenAI / Anthropic / xAI
+  cells backed by examples and live smoke.
+
+### Added (prior unreleased)
 - Explicit `RuntimeError` when `extract_many()` is called from a running event
   loop, directing callers to `extract_many_async`.
 - Maintainer docs: CLI stdout/stderr/exit-code contracts, provider capability
@@ -18,6 +32,11 @@ timing when that is known.
   representative OpenAI image path.
 - Expanded `SECURITY.md` URL input security model (schemes, host validation,
   redirects, env configuration, and non-guarantees).
+
+### Changed
+- Input media larger than the configured size limit now fails with
+  `InputTooLargeError` (breaking for workflows that previously loaded larger
+  inputs unbounded). Raise the limit via env/kwarg when intentional.
 
 ## [0.9.0] - 2026-07-12
 

@@ -9,8 +9,8 @@ Proposal for bounding how much data `openextract` loads before sending media to
 a model. Today, local paths, URL responses, `bytes`, and file-like objects are
 read fully into memory with no size cap.
 
-**Status:** proposal (not implemented)  
-**Related issue:** [#125](https://github.com/Mellow-Artificial-Intelligence/openextract/issues/125)
+**Status:** implemented  
+**Related issues:** [#125](https://github.com/Mellow-Artificial-Intelligence/openextract/issues/125) (design), [#143](https://github.com/Mellow-Artificial-Intelligence/openextract/issues/143) (implementation)
 
 ## Goals
 

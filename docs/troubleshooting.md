@@ -71,6 +71,31 @@ Set the provider env var (loaded automatically from `.env`), for example
 3. Tune `OPENEXTRACT_URL_TIMEOUT` / `OPENEXTRACT_MAX_REDIRECTS` if needed.
 4. Read [SECURITY.md](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/SECURITY.md#url-input-security-model).
 
+## Input too large
+
+**Symptoms**
+
+- Python: `InputTooLargeError`
+- CLI: exit code `5`
+
+**Cause**
+
+Resolved input (local file, URL body, `bytes`, or file-like) exceeds the
+configured size limit (default 50 MiB).
+
+**Next step**
+
+1. Confirm the file/URL is the intended input and not accidentally huge.
+2. Raise the limit when intentional:
+
+```bash
+export OPENEXTRACT_MAX_INPUT_BYTES=104857600  # 100 MiB
+```
+
+```python
+extract(..., max_input_bytes=100_000_000)
+```
+
 ## Schema validation failures
 
 **Symptoms**
@@ -169,4 +194,5 @@ results = await extract_many_async(schema=..., model=..., input_files=...)
 
 - [CLI contracts](cli.md)
 - [Provider matrix](providers.md)
+- [1.0 freeze checklist](design/1.0-freeze.md)
 - [README error handling](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/README.md#error-handling)

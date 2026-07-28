@@ -101,6 +101,12 @@ def _print_json(payload: Any, *, as_repr: bool) -> None:
     print(json.dumps(payload, indent=2, default=str))
 
 
+def _print_jsonl(payload: list[Any]) -> None:
+    """Write one JSON object per line (batch JSONL mode)."""
+    for item in payload:
+        print(json.dumps(item, default=str))
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="openextract",
@@ -148,9 +154,12 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        choices=("json", "repr"),
+        choices=("json", "jsonl", "repr"),
         default="json",
-        help="Output format: 'json' (default) or 'repr'.",
+        help=(
+            "Output format: 'json' (default array/object), 'jsonl' (batch: one "
+            "JSON object per line), or 'repr'."
+        ),
     )
     parser.add_argument(
         "--max-retries",
@@ -188,6 +197,14 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.usage and len(input_files) != 1:
         print("error: --usage requires exactly one input file", file=sys.stderr)
+        return 1
+
+    if args.output == "jsonl" and (len(input_files) == 1 or args.usage):
+        print(
+            "error: --output jsonl is only supported for batch runs "
+            "(two or more inputs, without --usage)",
+            file=sys.stderr,
+        )
         return 1
 
     media_type = args.media_type
@@ -248,7 +265,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if args.output == "repr":
+    if args.output == "jsonl":
+        _print_jsonl(payload)
+    elif args.output == "repr":
         _print_json(payload, as_repr=True)
     elif len(input_files) == 1 and not args.usage and isinstance(payload, BaseModel):
         print(payload.model_dump_json(indent=2))

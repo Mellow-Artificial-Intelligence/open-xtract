@@ -24,3 +24,7 @@ class SchemaValidationError(ExtractionError):
 
 class UrlFetchError(ExtractionError):
     """Error fetching the URL content."""
+
+
+class InputTooLargeError(ExtractionError):
+    """Input media exceeds the configured size limit."""

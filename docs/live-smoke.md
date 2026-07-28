@@ -20,13 +20,19 @@ OPENEXTRACT_RUN_EXAMPLES=1 uv run pytest -m integration tests/test_examples.py -
 
 Without these env vars, integration tests skip.
 
-## What is covered initially
+## What is covered
 
-| Test | Model (default) | Media | Credential |
-| ---- | --------------- | ----- | ---------- |
-| `test_live_openai_image_smoke` | `openai:gpt-5` | bundled PNG fixture | `OPENAI_API_KEY` |
+| Test | Model (default) | Media | Credential | Override |
+| ---- | --------------- | ----- | ---------- | -------- |
+| `test_live_openai_image_smoke` | `openai:gpt-5` | bundled PNG fixture | `OPENAI_API_KEY` | `OPENEXTRACT_LIVE_MODEL_OPENAI` or `OPENEXTRACT_LIVE_MODEL` |
+| `test_live_anthropic_image_smoke` | `anthropic:claude-opus-4-8` | bundled PNG fixture | `ANTHROPIC_API_KEY` | `OPENEXTRACT_LIVE_MODEL_ANTHROPIC` |
+| `test_live_xai_image_smoke` | `xai:grok-4.3` | bundled PNG fixture | `XAI_API_KEY` | `OPENEXTRACT_LIVE_MODEL_XAI` |
 
-Override the model with `OPENEXTRACT_LIVE_MODEL` when needed.
+A fourth local/Ollama path is deferred: it needs a running local server and is
+not required for the ≥3 representative-provider gate.
+
+When cutting a release that gates on provider compatibility, record the verified
+model IDs from this harness in the release notes / changelog.
 
 ## Design rules
 
@@ -34,8 +40,8 @@ Override the model with `OPENEXTRACT_LIVE_MODEL` when needed.
 - Explicit env opt-in only.
 - Fixtures are small and non-sensitive (`examples/fixtures/`).
 - Not enabled in default CI.
-- Expand one provider path at a time; promote matrix cells in
-  [providers.md](providers.md) from expected → verified when a path is stable.
+- Promote matrix cells in [providers.md](providers.md) from expected → verified
+  when a path is stable.
 
 ## Related
 

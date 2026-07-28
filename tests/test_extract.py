@@ -14,6 +14,7 @@ from pydantic_ai import BinaryContent
 
 from openextract import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -27,6 +28,7 @@ from openextract import (
     extract_with_usage_async,
 )
 from openextract._extract import (
+    _DEFAULT_MAX_INPUT_BYTES,
     _fetch_url,
     _get_media,
     _get_media_type,
@@ -34,6 +36,7 @@ from openextract._extract import (
     _is_public_ip,
     _is_safe_host,
     _max_redirects,
+    _resolve_max_input_bytes,
     _run_with_shared_agent,
     _url_fetch_timeout,
 )
@@ -46,6 +49,7 @@ def _build_response(
     is_redirect: bool = False,
     status_code: int = 200,
     location: str | None = None,
+    content_length: str | int | None = None,
 ) -> MagicMock:
     """Build a MagicMock that behaves like an httpx.Response."""
     response = MagicMock()
@@ -55,6 +59,8 @@ def _build_response(
         headers["content-type"] = content_type
     if location is not None:
         headers["location"] = location
+    if content_length is not None:
+        headers["content-length"] = str(content_length)
     response.headers = headers
     response.is_redirect = is_redirect
     response.status_code = status_code
@@ -81,6 +87,7 @@ def test_star_import_exposes_only_existing_names():
         "extract_with_usage_async",
         "Usage",
         "ExtractionError",
+        "InputTooLargeError",
         "ModelError",
         "ProviderNotInstalledError",
         "SchemaValidationError",
@@ -215,9 +222,94 @@ class TestGetMedia:
 
 
 # ---------------------------------------------------------------------------
-# SSRF host validation
+# Input size limits
 # ---------------------------------------------------------------------------
 
+
+class TestInputSizeLimits:
+    def test_default_limit_is_50_mib(self, monkeypatch):
+        monkeypatch.delenv("OPENEXTRACT_MAX_INPUT_BYTES", raising=False)
+        assert _resolve_max_input_bytes(None) == _DEFAULT_MAX_INPUT_BYTES
+        assert _DEFAULT_MAX_INPUT_BYTES == 52_428_800
+
+    def test_env_override(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", "1024")
+        assert _resolve_max_input_bytes(None) == 1024
+
+    def test_kwarg_wins_over_env(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", "1024")
+        assert _resolve_max_input_bytes(2048) == 2048
+
+    def test_rejects_non_positive_kwarg(self):
+        with pytest.raises(ValueError, match="max_input_bytes must be a positive integer"):
+            _resolve_max_input_bytes(0)
+        with pytest.raises(ValueError, match="max_input_bytes must be a positive integer"):
+            _resolve_max_input_bytes(-1)
+        with pytest.raises(ValueError, match="max_input_bytes must be a positive integer"):
+            _resolve_max_input_bytes(True)  # type: ignore[arg-type]
+
+    def test_rejects_non_positive_env(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", "0")
+        with pytest.raises(ValueError, match="OPENEXTRACT_MAX_INPUT_BYTES"):
+            _resolve_max_input_bytes(None)
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", "nope")
+        with pytest.raises(ValueError, match="OPENEXTRACT_MAX_INPUT_BYTES"):
+            _resolve_max_input_bytes(None)
+
+    def test_local_oversize_raises(self, tmp_path):
+        path = tmp_path / "big.bin"
+        path.write_bytes(b"x" * 20)
+        with pytest.raises(InputTooLargeError, match="configured size limit"):
+            _get_media(str(path), max_bytes=10)
+
+    def test_bytes_oversize_raises(self):
+        with pytest.raises(InputTooLargeError, match="got at least 11"):
+            _get_media(b"x" * 11, media_type="application/octet-stream", max_bytes=10)
+
+    def test_file_like_oversize_raises(self):
+        with pytest.raises(InputTooLargeError, match="configured size limit"):
+            _get_media(io.BytesIO(b"x" * 50), media_type="application/pdf", max_bytes=10)
+
+    def test_file_like_within_limit(self):
+        data = b"hello"
+        got, media_type = _get_media(io.BytesIO(data), media_type="text/plain", max_bytes=10)
+        assert got == data
+        assert media_type == "text/plain"
+
+    def test_url_content_length_fast_fail(self, mocker):
+        fake_response = _build_response(content=b"ignored", content_length=999)
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        with pytest.raises(InputTooLargeError, match="got at least 999"):
+            _get_media("https://example.com/huge.bin", max_bytes=10)
+
+    def test_url_missing_content_length_checks_body(self, mocker):
+        fake_response = _build_response(content=b"x" * 50, content_type="application/octet-stream")
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        with pytest.raises(InputTooLargeError, match="got at least 50"):
+            _get_media("https://example.com/blob", max_bytes=10)
+
+    def test_url_within_limit(self, mocker):
+        fake_response = _build_response(content=b"ok", content_type="text/plain", content_length=2)
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        data, media_type = _get_media("https://example.com/ok.txt", max_bytes=10)
+        assert data == b"ok"
+        assert media_type == "text/plain"
+
+    def test_extract_surfaces_input_too_large(self, mocker):
+        mocker.patch(
+            "openextract._extract._get_media",
+            side_effect=InputTooLargeError("too big"),
+        )
+        class Out(BaseModel):
+            x: str
+
+        with pytest.raises(InputTooLargeError, match="too big"):
+            extract(schema=Out, model="test:model", input_file="x.pdf")
+
+
+# ---------------------------------------------------------------------------
+# SSRF host validation
+# ---------------------------------------------------------------------------
 
 def _addrinfo(ip: str):
     """Build a getaddrinfo-shaped tuple for ``ip``."""

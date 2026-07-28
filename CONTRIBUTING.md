@@ -90,7 +90,8 @@ Default `pytest` does not call live models. To run the opt-in harness:
 OPENEXTRACT_LIVE_SMOKE=1 uv run pytest -m integration tests/test_live_smoke.py -v
 ```
 
-See [docs/live-smoke.md](docs/live-smoke.md).
+Covers OpenAI, Anthropic, and xAI image paths when the matching API keys are
+set. See [docs/live-smoke.md](docs/live-smoke.md).
 
 ## Release checklist (maintainers)
 

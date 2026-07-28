@@ -4,9 +4,9 @@
 
 | Version | Supported          |
 | ------- | ------------------ |
+| 0.9.x   | :white_check_mark: |
 | 0.8.x   | :white_check_mark: |
-| 0.7.x   | :white_check_mark: |
-| < 0.7   | :x:                |
+| < 0.8   | :x:                |
 
 ## Reporting a Vulnerability
 
@@ -63,8 +63,11 @@ Default maximum hops: `10` (`OPENEXTRACT_MAX_REDIRECTS`).
 | `OPENEXTRACT_URL_TIMEOUT` | `30` | HTTP timeout in seconds |
 | `OPENEXTRACT_MAX_REDIRECTS` | `10` | Maximum redirect hops |
 | `OPENEXTRACT_ALLOW_PRIVATE_URLS` | unset | Set to `1` / `true` / `yes` to disable host validation |
+| `OPENEXTRACT_MAX_INPUT_BYTES` | `52428800` (50 MiB) | Hard cap on resolved input size (local, URL, bytes, file-like) |
 
 Invalid or non-positive timeout/redirect values fall back to the defaults.
+Invalid or non-positive `OPENEXTRACT_MAX_INPUT_BYTES` raises `ValueError` when
+resolved. Callers may also pass `max_input_bytes=` on extract APIs (kwarg wins).
 
 `OPENEXTRACT_ALLOW_PRIVATE_URLS` is intended for trusted environments (local
 tests, on-prem services). Enabling it removes the private-host guardrail.
@@ -76,11 +79,14 @@ tests, on-prem services). Enabling it removes the private-host guardrail.
 - Direct requests to private/loopback/link-local/metadata IPs
 - Redirect chains that land on non-public hosts
 - Basic timeout and redirect-count limits
+- Resolved input size limits (`InputTooLargeError`; URL `Content-Length`
+  fast-fail plus body length enforcement)
 
 **Not guaranteed:**
 
 - DNS rebinding (a hostname resolving to different IPs across lookups)
-- Response body size limits (see the [input size limits design](docs/design/input-size-limits.md))
+- Preventing the HTTP client from buffering before the size check on every
+  transport path (prefer streaming; always enforce after bytes are resolved)
 - Safety of the model provider after bytes are fetched
 - Non-HTTP SSRF channels outside this fetcher
 

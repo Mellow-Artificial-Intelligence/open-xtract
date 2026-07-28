@@ -24,6 +24,7 @@ from pydantic_ai.output import NativeOutput
 
 from .exceptions import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -36,9 +37,12 @@ _DEFAULT_MEDIA_TYPE = "application/octet-stream"
 _URL_PREFIXES = ("http://", "https://")
 _DEFAULT_URL_FETCH_TIMEOUT = 30.0
 _DEFAULT_MAX_REDIRECTS = 10
+_DEFAULT_MAX_INPUT_BYTES = 52_428_800  # 50 MiB
 _URL_TIMEOUT_ENV = "OPENEXTRACT_URL_TIMEOUT"
 _MAX_REDIRECTS_ENV = "OPENEXTRACT_MAX_REDIRECTS"
 _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
+_MAX_INPUT_BYTES_ENV = "OPENEXTRACT_MAX_INPUT_BYTES"
+_READ_CHUNK_SIZE = 65_536
 _BYTES_MEDIA_TYPE_REQUIRED = (
     "media_type is required when input_file is bytes or a file-like object; "
     "pass it explicitly, e.g. extract(..., media_type='application/pdf')."
@@ -180,6 +184,97 @@ def _max_redirects() -> int:
     return _env_positive_int(_MAX_REDIRECTS_ENV, _DEFAULT_MAX_REDIRECTS)
 
 
+def _too_large_message(limit: int, got: int) -> str:
+    return (
+        f"Input exceeds the configured size limit ({limit} bytes); "
+        f"got at least {got} bytes. "
+        f"Set {_MAX_INPUT_BYTES_ENV} or pass max_input_bytes=... if this is intentional."
+    )
+
+
+def _resolve_max_input_bytes(max_input_bytes: int | None) -> int:
+    """Resolve the input size limit from kwarg, env, or the 50 MiB default."""
+    if max_input_bytes is not None:
+        if (
+            isinstance(max_input_bytes, bool)
+            or not isinstance(max_input_bytes, int)
+            or max_input_bytes <= 0
+        ):
+            raise ValueError("max_input_bytes must be a positive integer.")
+        return max_input_bytes
+
+    raw = os.environ.get(_MAX_INPUT_BYTES_ENV, "").strip()
+    if not raw:
+        return _DEFAULT_MAX_INPUT_BYTES
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"{_MAX_INPUT_BYTES_ENV} must be a positive integer, got {raw!r}."
+        ) from exc
+    if value <= 0:
+        raise ValueError(f"{_MAX_INPUT_BYTES_ENV} must be a positive integer, got {value}.")
+    return value
+
+
+def _enforce_max_input_bytes(data: bytes, *, limit: int) -> bytes:
+    """Return ``data`` or raise :class:`InputTooLargeError` when over ``limit``."""
+    if len(data) > limit:
+        raise InputTooLargeError(_too_large_message(limit, len(data)))
+    return data
+
+
+def _check_content_length(headers: httpx.Headers | dict[str, str], limit: int) -> None:
+    """Fail fast when a trustworthy ``Content-Length`` exceeds ``limit``."""
+    raw = headers.get("content-length")
+    if raw is None:
+        return
+    try:
+        length = int(str(raw).strip())
+    except (TypeError, ValueError):
+        return
+    if length > limit:
+        raise InputTooLargeError(_too_large_message(limit, length))
+
+
+def _read_file_like_capped(file_obj: BinaryIO, *, limit: int) -> bytes:
+    """Read a file-like object in chunks; stop when size exceeds ``limit``."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        # Read one byte past the limit so we can detect oversize without seeking.
+        chunk = file_obj.read(min(_READ_CHUNK_SIZE, limit - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise InputTooLargeError(_too_large_message(limit, total))
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _read_response_body_capped(response: httpx.Response, *, limit: int) -> bytes:
+    """Read an HTTP response body with a hard size cap.
+
+    Real ``httpx.Response`` objects are consumed via ``iter_bytes`` so a streamed
+    response can fail before buffering the full payload. Mocked responses fall
+    back to ``response.content``.
+    """
+    _check_content_length(response.headers, limit)
+    if isinstance(response, httpx.Response):
+        chunks: list[bytes] = []
+        total = 0
+        for chunk in response.iter_bytes():
+            if not chunk:
+                continue
+            total += len(chunk)
+            if total > limit:
+                raise InputTooLargeError(_too_large_message(limit, total))
+            chunks.append(chunk)
+        return b"".join(chunks)
+    return _enforce_max_input_bytes(response.content, limit=limit)
+
+
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True only for globally routable public unicast addresses.
 
@@ -224,8 +319,14 @@ def _is_safe_host(host: str | None) -> bool:
     return True
 
 
-def _fetch_url(url: str) -> httpx.Response:
-    """Fetch ``url`` with SSRF defenses; validate the host at every redirect hop."""
+def _fetch_url(url: str, *, max_bytes: int | None = None) -> httpx.Response:
+    """Fetch ``url`` with SSRF defenses; validate the host at every redirect hop.
+
+    When ``max_bytes`` is set, the final response body is read through a size
+    cap (``Content-Length`` fast-fail + streamed/capped body) and attached as
+    ``response._openextract_body`` for callers that need the bytes without
+    re-reading.
+    """
     current = url
     limit = _max_redirects()
     timeout = _url_fetch_timeout()
@@ -241,15 +342,24 @@ def _fetch_url(url: str) -> httpx.Response:
             current = str(httpx.URL(current).join(location))
             continue
         response.raise_for_status()
+        if max_bytes is not None:
+            # Cache capped bytes on the response so `_read_from_path` does not
+            # re-buffer via `.content` after a streamed/capped read.
+            response._openextract_body = _read_response_body_capped(  # type: ignore[attr-defined]
+                response, limit=max_bytes
+            )
         return response
     raise UrlFetchError(f"Too many redirects (>{limit})")
 
 
-def _read_from_path(file_path: str) -> tuple[bytes, str]:
+def _read_from_path(file_path: str, *, max_bytes: int) -> tuple[bytes, str]:
     """Read bytes from a local path or http(s) URL; return (bytes, media_type)."""
     if file_path.startswith(_URL_PREFIXES):
-        response = _fetch_url(file_path)
-        media_bytes = response.content
+        response = _fetch_url(file_path, max_bytes=max_bytes)
+        cached = getattr(response, "_openextract_body", None)
+        media_bytes = (
+            cached if isinstance(cached, bytes) else _enforce_max_input_bytes(response.content, limit=max_bytes)
+        )
         media_type = _get_media_type(file_path)
         # If the URL extension didn't tell us anything, trust the server's Content-Type.
         if media_type == _DEFAULT_MEDIA_TYPE:
@@ -258,12 +368,18 @@ def _read_from_path(file_path: str) -> tuple[bytes, str]:
                 media_type = header
         return media_bytes, media_type
 
-    return Path(file_path).read_bytes(), _get_media_type(file_path)
+    path = Path(file_path)
+    size = path.stat().st_size
+    if size > max_bytes:
+        raise InputTooLargeError(_too_large_message(max_bytes, size))
+    return _enforce_max_input_bytes(path.read_bytes(), limit=max_bytes), _get_media_type(file_path)
 
 
 def _get_media(
     input_file: str | bytes | BinaryIO,
     media_type: str | None = None,
+    *,
+    max_bytes: int | None = None,
 ) -> tuple[bytes, str]:
     """Resolve ``input_file`` to ``(bytes, media_type)``.
 
@@ -271,19 +387,21 @@ def _get_media(
     objects (anything with a ``.read()`` method) are passed through. For the
     latter two, ``media_type`` is required.
     """
+    limit = _resolve_max_input_bytes(max_bytes)
+
     if isinstance(input_file, str):
-        file_bytes, resolved_type = _read_from_path(input_file)
+        file_bytes, resolved_type = _read_from_path(input_file, max_bytes=limit)
         return file_bytes, media_type or resolved_type
 
     if isinstance(input_file, bytes):
         if media_type is None:
             raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
-        return input_file, media_type
+        return _enforce_max_input_bytes(input_file, limit=limit), media_type
 
     if hasattr(input_file, "read"):
         if media_type is None:
             raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
-        return input_file.read(), media_type
+        return _read_file_like_capped(input_file, limit=limit), media_type
 
     raise TypeError(
         "input_file must be a str path/URL, bytes, or a file-like object with a .read() method."
@@ -344,13 +462,13 @@ def _map_exception(exc: BaseException) -> ExtractionError:
 def _extraction_errors() -> Iterator[None]:
     """Map low-level extraction failures to the ``ExtractionError`` hierarchy.
 
-    ``TypeError`` (bad call) and already-mapped ``ExtractionError`` subclasses
-    pass through unchanged; everything else is routed through
+    ``TypeError`` / ``ValueError`` (bad call) and already-mapped ``ExtractionError``
+    subclasses pass through unchanged; everything else is routed through
     :func:`_map_exception`.
     """
     try:
         yield
-    except (TypeError, ExtractionError):
+    except (TypeError, ValueError, ExtractionError):
         raise
     except Exception as e:
         raise _map_exception(e) from e
@@ -372,10 +490,13 @@ def _prepare_run(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int | None = None,
 ) -> tuple[Agent, list]:
     """Load env, resolve the media payload, and build the agent + run inputs."""
     _ensure_dotenv_loaded()
-    file_bytes, file_type = _get_media(input_file, media_type=media_type)
+    file_bytes, file_type = _get_media(
+        input_file, media_type=media_type, max_bytes=max_input_bytes
+    )
     agent = _build_agent(schema, model, instructions)
     return agent, _build_run_inputs(file_bytes, file_type)
 
@@ -386,6 +507,7 @@ def _run_extraction(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int | None = None,
 ):
     """Run a single sync extraction and return the raw pydantic-ai result.
 
@@ -394,7 +516,9 @@ def _run_extraction(
     ``extract_with_usage`` (which surfaces it).
     """
     with _extraction_errors():
-        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+        agent, inputs = _prepare_run(
+            schema, model, input_file, instructions, media_type, max_input_bytes
+        )
         return agent.run_sync(inputs)
 
 
@@ -404,9 +528,12 @@ def _extract_once(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int | None = None,
 ) -> T:
     """Perform a single sync extraction attempt; return the schema instance."""
-    result = _run_extraction(schema, model, input_file, instructions, media_type)
+    result = _run_extraction(
+        schema, model, input_file, instructions, media_type, max_input_bytes
+    )
     return cast(T, result.output)
 
 
@@ -482,6 +609,7 @@ def extract(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    max_input_bytes: int | None = None,
 ) -> T:
     """
     Extract structured data from a document, image, audio, or video file using an LLM.
@@ -501,6 +629,9 @@ def extract(
         retry_backoff: Base backoff in seconds. Sleep between attempts is
             ``retry_backoff * (2 ** attempt) * (1 + random.uniform(0, 0.25))``,
             i.e. exponential backoff with up to 25% jitter.
+        max_input_bytes: Optional hard cap on resolved input size. ``None`` uses
+            ``OPENEXTRACT_MAX_INPUT_BYTES`` or the default 50 MiB. Must be a
+            positive integer when set.
 
     Returns:
         An instance of the schema populated with extracted data.
@@ -508,13 +639,17 @@ def extract(
     Raises:
         TypeError: If ``input_file`` is bytes or file-like and ``media_type``
             is not provided.
+        ValueError: If ``max_input_bytes`` / env override is not a positive int.
+        InputTooLargeError: If the resolved input exceeds the configured size limit.
         UrlFetchError: If the URL cannot be fetched or returns a non-2xx status.
         SchemaValidationError: If the model output doesn't match the schema.
         ModelError: If retries (if any) are exhausted.
         ExtractionError: For other extraction failures.
     """
     return _run_with_retries_sync(
-        lambda: _extract_once(schema, model, input_file, instructions, media_type),
+        lambda: _extract_once(
+            schema, model, input_file, instructions, media_type, max_input_bytes
+        ),
         max_retries=max_retries,
         retry_backoff=retry_backoff,
     )
@@ -529,6 +664,7 @@ def extract_with_usage(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    max_input_bytes: int | None = None,
 ) -> tuple[T, Usage]:
     """Extract structured data and return ``(output, Usage)`` for token accounting.
 
@@ -537,7 +673,9 @@ def extract_with_usage(
     """
 
     def _once() -> tuple[T, Usage]:
-        result = _run_extraction(schema, model, input_file, instructions, media_type)
+        result = _run_extraction(
+            schema, model, input_file, instructions, media_type, max_input_bytes
+        )
         return cast(T, result.output), _usage_from_result(result)
 
     return _run_with_retries_sync(_once, max_retries=max_retries, retry_backoff=retry_backoff)
@@ -552,12 +690,15 @@ async def extract_with_usage_async(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    max_input_bytes: int | None = None,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
 
     async def _once() -> tuple[T, Usage]:
         with _extraction_errors():
-            agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+            agent, inputs = _prepare_run(
+                schema, model, input_file, instructions, media_type, max_input_bytes
+            )
             result = await agent.run(inputs)
             return cast(T, result.output), _usage_from_result(result)
 
@@ -577,12 +718,15 @@ async def extract_async(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    max_input_bytes: int | None = None,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
 
     async def _once() -> T:
         with _extraction_errors():
-            agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+            agent, inputs = _prepare_run(
+                schema, model, input_file, instructions, media_type, max_input_bytes
+            )
             result = await agent.run(inputs)
             return cast(T, result.output)
 
@@ -597,6 +741,7 @@ async def _run_with_shared_agent(
     agent: Agent,
     input_file: str | bytes | BinaryIO,
     media_type: str | None,
+    max_input_bytes: int | None = None,
 ) -> object:
     """Run a single extraction reusing a pre-built ``Agent``.
 
@@ -604,7 +749,9 @@ async def _run_with_shared_agent(
     ``ExtractionError`` subclasses as the per-item path.
     """
     with _extraction_errors():
-        file_bytes, file_type = _get_media(input_file, media_type=media_type)
+        file_bytes, file_type = _get_media(
+            input_file, media_type=media_type, max_bytes=max_input_bytes
+        )
         result = await agent.run(_build_run_inputs(file_bytes, file_type))
         return result.output
 
@@ -619,6 +766,7 @@ async def _gather_extractions(
     media_type: str | None,
     max_retries: int,
     retry_backoff: float,
+    max_input_bytes: int | None = None,
 ) -> list:
     _validate_retry_options(max_retries, retry_backoff)
     _validate_max_concurrency(max_concurrency)
@@ -634,7 +782,7 @@ async def _gather_extractions(
 
     async def _bounded(item):
         async def _once():
-            return await _run_with_shared_agent(agent, item, media_type)
+            return await _run_with_shared_agent(agent, item, media_type, max_input_bytes)
 
         async with semaphore:
             return await _run_with_retries_async(
@@ -658,6 +806,7 @@ def extract_many(
     return_exceptions: bool = False,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    max_input_bytes: int | None = None,
 ) -> list:
     """Run :func:`extract_async` over many inputs concurrently from sync code.
 
@@ -675,13 +824,16 @@ def extract_many(
         max_retries: Per-item retries after ``ModelError`` (same semantics as
             :func:`extract`).
         retry_backoff: Base backoff seconds between per-item retries.
+        max_input_bytes: Optional hard cap on each item's resolved input size.
+            ``None`` uses ``OPENEXTRACT_MAX_INPUT_BYTES`` or the default 50 MiB.
 
     Returns:
         A list of results (or exceptions, when ``return_exceptions=True``) in input order.
 
     Raises:
         ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
-            negative, or ``retry_backoff`` is not positive and finite.
+            negative, ``retry_backoff`` is not positive and finite, or
+            ``max_input_bytes`` is not a positive integer when set.
         RuntimeError: If called from a running event loop. Use
             :func:`extract_many_async` in async code instead.
     """
@@ -707,6 +859,7 @@ def extract_many(
             media_type,
             max_retries,
             retry_backoff,
+            max_input_bytes,
         )
     )
 
@@ -722,6 +875,7 @@ async def extract_many_async(
     return_exceptions: bool = False,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    max_input_bytes: int | None = None,
 ) -> list:
     """Async sibling of :func:`extract_many`."""
     return await _gather_extractions(
@@ -734,4 +888,5 @@ async def extract_many_async(
         media_type,
         max_retries,
         retry_backoff,
+        max_input_bytes,
     )

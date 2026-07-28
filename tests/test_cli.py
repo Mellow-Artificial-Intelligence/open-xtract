@@ -1,5 +1,6 @@
 """Tests for openextract._cli."""
 
+import json
 from unittest.mock import MagicMock
 
 import pytest
@@ -7,6 +8,7 @@ from pydantic import BaseModel
 
 from openextract import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -312,6 +314,10 @@ class TestMainErrorCodes:
         assert self._invoke(mocker, ExtractionError("misc")) == 5
         assert "misc" in capsys.readouterr().err
 
+    def test_input_too_large_error_returns_5(self, mocker, capsys):
+        assert self._invoke(mocker, InputTooLargeError("too big")) == 5
+        assert "too big" in capsys.readouterr().err
+
     def test_provider_not_installed_error_returns_6(self, mocker, capsys):
         exc = ProviderNotInstalledError("Install it with: pip install 'openextract[openai]'")
         assert self._invoke(mocker, exc) == 6
@@ -454,6 +460,76 @@ class TestMainBatchAndUsage:
 
         assert exit_code == 0
         assert capsys.readouterr().err == ""
+
+    def test_jsonl_batch_success(self, mocker, capsys):
+        fake_a = MagicMock()
+        fake_a.model_dump.return_value = {"name": "Ada", "age": 36}
+        fake_b = MagicMock()
+        fake_b.model_dump.return_value = {"name": "Linus", "age": 54}
+        _patch_extract_many(mocker, return_value=[fake_a, fake_b])
+
+        exit_code = main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--output",
+                "jsonl",
+            ]
+        )
+
+        assert exit_code == 0
+        lines = [line for line in capsys.readouterr().out.splitlines() if line.strip()]
+        assert len(lines) == 2
+        assert json.loads(lines[0]) == {"name": "Ada", "age": 36}
+        assert json.loads(lines[1]) == {"name": "Linus", "age": 54}
+
+    def test_jsonl_batch_partial_failure(self, mocker, capsys):
+        fake = MagicMock()
+        fake.model_dump.return_value = {"name": "Ada", "age": 36}
+        _patch_extract_many(mocker, return_value=[fake, ModelError("boom")])
+
+        exit_code = main(
+            [
+                "a.pdf",
+                "b.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--output",
+                "jsonl",
+                "--continue-on-error",
+            ]
+        )
+
+        assert exit_code == 7
+        captured = capsys.readouterr()
+        lines = [line for line in captured.out.splitlines() if line.strip()]
+        assert len(lines) == 2
+        assert json.loads(lines[0]) == {"name": "Ada", "age": 36}
+        err_obj = json.loads(lines[1])
+        assert err_obj["input"] == "b.pdf"
+        assert err_obj["error_type"] == "ModelError"
+        assert "1 of 2 input(s) failed" in captured.err
+
+    def test_jsonl_rejected_for_single_input(self, mocker, capsys):
+        exit_code = main(
+            [
+                "a.pdf",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--output",
+                "jsonl",
+            ]
+        )
+        assert exit_code == 1
+        assert "jsonl is only supported for batch" in capsys.readouterr().err
 
     def test_usage_flag_calls_extract_with_usage(self, mocker, capsys):
         from openextract import Usage
