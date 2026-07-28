@@ -266,6 +266,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 1
 
     if args.output == "jsonl":
+        assert isinstance(payload, list)
         _print_jsonl(payload)
     elif args.output == "repr":
         _print_json(payload, as_repr=True)

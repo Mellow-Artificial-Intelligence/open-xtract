@@ -295,11 +295,46 @@ class TestInputSizeLimits:
         assert data == b"ok"
         assert media_type == "text/plain"
 
+    def test_invalid_content_length_falls_through_to_body(self, mocker):
+        fake_response = _build_response(
+            content=b"ok",
+            content_type="text/plain",
+            content_length="not-a-number",
+        )
+        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        data, _ = _get_media("https://example.com/ok.txt", max_bytes=10)
+        assert data == b"ok"
+
+    def test_real_httpx_response_stream_cap(self):
+        from openextract._extract import _accumulate_capped, _read_response_body_capped
+
+        response = httpx.Response(200, content=b"x" * 50)
+        with pytest.raises(InputTooLargeError, match="got at least 50"):
+            _read_response_body_capped(response, limit=10)
+
+        with pytest.raises(InputTooLargeError, match="got at least 11"):
+            _accumulate_capped([b"", b"xxxxx", b"yyyyyy"], limit=10)
+        assert _accumulate_capped([b"", b"ok"], limit=10) == b"ok"
+
+    def test_real_httpx_response_within_limit(self):
+        from openextract._extract import _read_response_body_capped
+
+        response = httpx.Response(200, content=b"hello")
+        assert _read_response_body_capped(response, limit=10) == b"hello"
+
+    def test_extract_rejects_invalid_max_input_bytes(self):
+        class Out(BaseModel):
+            x: str
+
+        with pytest.raises(ValueError, match="max_input_bytes must be a positive integer"):
+            extract(schema=Out, model="test:model", input_file="x.pdf", max_input_bytes=0)
+
     def test_extract_surfaces_input_too_large(self, mocker):
         mocker.patch(
             "openextract._extract._get_media",
             side_effect=InputTooLargeError("too big"),
         )
+
         class Out(BaseModel):
             x: str
 
@@ -310,6 +345,7 @@ class TestInputSizeLimits:
 # ---------------------------------------------------------------------------
 # SSRF host validation
 # ---------------------------------------------------------------------------
+
 
 def _addrinfo(ip: str):
     """Build a getaddrinfo-shaped tuple for ``ip``."""
@@ -1509,7 +1545,7 @@ class TestExtractMany:
         people = [_Person(name=f"n{i}", age=i) for i in range(4)]
         path_to_person = dict(zip(files, people, strict=True))
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             # Tiny await yields control so tasks can interleave.
             await asyncio.sleep(0)
             return path_to_person[input_file]
@@ -1529,7 +1565,7 @@ class TestExtractMany:
         peak = 0
         lock = asyncio.Lock()
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             nonlocal in_flight, peak
             async with lock:
                 in_flight += 1
@@ -1555,7 +1591,7 @@ class TestExtractMany:
     def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             if input_file.endswith("f1.txt"):
                 raise ModelError("boom on f1")
             await asyncio.sleep(0.01)
@@ -1569,7 +1605,7 @@ class TestExtractMany:
     def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             if input_file.endswith("f1.txt"):
                 raise ModelError("boom on f1")
             return _Person(name=input_file, age=1)
@@ -1591,7 +1627,7 @@ class TestExtractMany:
         """The whole point of the batch path: one Agent for N items."""
         files = [str(tmp_path / f"f{i}.txt") for i in range(8)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             return _Person(name=input_file, age=1)
 
         build_mock = mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
@@ -1630,7 +1666,7 @@ class TestExtractMany:
 
         received_types: list[str | None] = []
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             received_types.append(media_type)
             return _Person(name=input_file, age=1)
 
@@ -1669,7 +1705,7 @@ class TestExtractManyAsync:
     async def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             if input_file.endswith("f0.txt"):
                 raise ModelError("boom first")
             await asyncio.sleep(0.01)
@@ -1687,7 +1723,7 @@ class TestExtractManyAsync:
     async def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             if input_file.endswith("f1.txt"):
                 raise SchemaValidationError("bad schema")
             return _Person(name=input_file, age=1)
@@ -1710,7 +1746,7 @@ class TestExtractManyAsync:
         expected = [_Person(name=f, age=i) for i, f in enumerate(files)]
         mapping = dict(zip(files, expected, strict=True))
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, max_input_bytes=None):
             await asyncio.sleep(0)
             return mapping[input_file]
 

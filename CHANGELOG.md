@@ -21,15 +21,11 @@ timing when that is known.
   `ExtractResult`, rate limiting, and CLI batch checkpoint/resume.
 - Provider matrix promotions and evidence links for OpenAI / Anthropic / xAI
   cells backed by examples and live smoke.
-
-### Added (prior unreleased)
 - Explicit `RuntimeError` when `extract_many()` is called from a running event
   loop, directing callers to `extract_many_async`.
 - Maintainer docs: CLI stdout/stderr/exit-code contracts, provider capability
   matrix, troubleshooting guide, live smoke harness notes, release checklist,
   and an input-size-limits design proposal.
-- Opt-in live provider smoke test (`OPENEXTRACT_LIVE_SMOKE=1`) for a
-  representative OpenAI image path.
 - Expanded `SECURITY.md` URL input security model (schemes, host validation,
   redirects, env configuration, and non-guarantees).
 
