@@ -6,7 +6,33 @@ class ExtractionError(Exception):
 
 
 class ModelError(ExtractionError):
-    """Error communicating with the model API."""
+    """Error communicating with the model API.
+
+    The optional metadata is populated for provider exceptions when available.
+    ``retryable`` defaults to ``True`` so manually raised ``ModelError`` values
+    retain their historical retry behavior.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        provider: str | None = None,
+        status_code: int | None = None,
+        retryable: bool | None = None,
+        retry_after: float | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.provider = provider
+        self.status_code = status_code
+        if retryable is None:
+            retryable = (
+                status_code is None
+                or status_code in {408, 409, 425, 429}
+                or 500 <= status_code <= 599
+            )
+        self.retryable = retryable
+        self.retry_after = retry_after
 
 
 class ProviderNotInstalledError(ExtractionError):

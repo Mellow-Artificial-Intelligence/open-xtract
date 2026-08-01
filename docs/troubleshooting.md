@@ -103,18 +103,21 @@ Provider/model API failure (auth, rate limit, server error, unsupported media).
 **Next step**
 
 ```python
-extract(..., max_retries=3, retry_backoff=1.0)
+extract(..., max_retries=3, retry_backoff=1.0, retry_max_backoff=60.0)
 ```
 
 CLI:
 
 ```bash
 openextract ./file.pdf --schema pkg:Model --model openai:gpt-5 \
-  --max-retries 3 --retry-backoff 1.0
+  --max-retries 3 --retry-backoff 1.0 --retry-max-backoff 60.0
 ```
 
-Retries apply only to `ModelError`. Invalid option values raise `ValueError`
-(CLI exit `1`).
+Retries apply only when `ModelError.retryable` is true. Rate limits, transient
+transport failures, and supported 5xx responses retry; authentication,
+permission, and invalid-request failures do not. Provider `Retry-After` values
+take precedence over exponential backoff but remain bounded by
+`retry_max_backoff`. Invalid option values raise `ValueError` (CLI exit `1`).
 
 ## CLI schema import errors
 

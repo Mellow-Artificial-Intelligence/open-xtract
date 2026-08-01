@@ -9,9 +9,10 @@ import os
 import random
 import socket
 import time
-from collections.abc import Awaitable, Callable, Iterable, Iterator
+from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
+from email.utils import parsedate_to_datetime
 from pathlib import Path
 from typing import BinaryIO, TypeVar, cast
 from urllib.parse import urlparse
@@ -36,12 +37,46 @@ _DEFAULT_MEDIA_TYPE = "application/octet-stream"
 _URL_PREFIXES = ("http://", "https://")
 _DEFAULT_URL_FETCH_TIMEOUT = 30.0
 _DEFAULT_MAX_REDIRECTS = 10
+_DEFAULT_RETRY_MAX_BACKOFF = 60.0
 _URL_TIMEOUT_ENV = "OPENEXTRACT_URL_TIMEOUT"
 _MAX_REDIRECTS_ENV = "OPENEXTRACT_MAX_REDIRECTS"
 _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
 _BYTES_MEDIA_TYPE_REQUIRED = (
     "media_type is required when input_file is bytes or a file-like object; "
     "pass it explicitly, e.g. extract(..., media_type='application/pdf')."
+)
+_TRANSIENT_HTTP_STATUSES = frozenset((408, 409, 425, 429))
+_PROVIDER_MODULE_NAMES: tuple[tuple[str, str], ...] = (
+    ("openai", "openai"),
+    ("anthropic", "anthropic"),
+    ("google", "google"),
+    ("botocore", "bedrock"),
+    ("cohere", "cohere"),
+    ("huggingface_hub", "huggingface"),
+    ("groq", "groq"),
+    ("mistralai", "mistral"),
+    ("grpc", "xai"),
+)
+_TRANSIENT_ERROR_NAMES = (
+    "timeout",
+    "connection",
+    "ratelimit",
+    "throttl",
+    "resourceexhausted",
+    "servererror",
+    "internalserver",
+    "serviceunavailable",
+)
+_PERMANENT_ERROR_NAMES = (
+    "authentication",
+    "permission",
+    "forbidden",
+    "badrequest",
+    "invalidrequest",
+    "validation",
+    "unprocessable",
+    "notfound",
+    "accessdenied",
 )
 
 # (module, attribute) pairs for provider/model error base classes we want to
@@ -53,6 +88,7 @@ _PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
     ("anthropic", "APIError"),
     ("google.genai.errors", "APIError"),
     ("botocore.exceptions", "ClientError"),
+    ("botocore.exceptions", "BotoCoreError"),
     ("cohere.core.api_error", "ApiError"),
     ("huggingface_hub.errors", "HfHubHTTPError"),
     ("groq", "APIError"),
@@ -394,6 +430,132 @@ def _build_run_inputs(file_bytes: bytes, file_type: str) -> list:
     ]
 
 
+def _model_provider(exc: BaseException) -> str | None:
+    """Return a stable provider identifier when the exception exposes one."""
+    model_name = getattr(exc, "model_name", None)
+    if isinstance(model_name, str) and ":" in model_name:
+        return model_name.split(":", 1)[0]
+
+    for error_type in type(exc).__mro__:
+        module = error_type.__module__
+        for prefix, provider in _PROVIDER_MODULE_NAMES:
+            if module == prefix or module.startswith(f"{prefix}."):
+                return provider
+    return None
+
+
+def _model_status_code(exc: BaseException) -> int | None:
+    """Extract an HTTP status code from common provider exception shapes."""
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        return status_code
+
+    response = getattr(exc, "response", None)
+    if response is None:
+        response = getattr(exc, "raw_response", None)
+    response_status = getattr(response, "status_code", None)
+    if isinstance(response_status, int) and not isinstance(response_status, bool):
+        return response_status
+
+    if isinstance(response, Mapping):
+        metadata = response.get("ResponseMetadata", {})
+        if isinstance(metadata, Mapping):
+            metadata_status = metadata.get("HTTPStatusCode")
+            if isinstance(metadata_status, int) and not isinstance(metadata_status, bool):
+                return metadata_status
+
+    code = getattr(exc, "code", None)
+    if isinstance(code, int) and not isinstance(code, bool):
+        return code
+    return None
+
+
+def _parse_retry_after(value: object) -> float | None:
+    """Parse Retry-After seconds or an HTTP date into a non-negative duration."""
+    if not isinstance(value, str | int | float) or isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(str(value))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        seconds = retry_at.timestamp() - time.time()
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
+def _model_retry_after(exc: BaseException) -> float | None:
+    """Extract and parse Retry-After from common provider header containers."""
+    direct_value = getattr(exc, "retry_after", None)
+    if direct_value is not None:
+        parsed_value = _parse_retry_after(direct_value)
+        if parsed_value is not None:
+            return parsed_value
+
+    header_sets: list[Mapping] = []
+    headers = getattr(exc, "headers", None)
+    if isinstance(headers, Mapping):
+        header_sets.append(headers)
+
+    response = getattr(exc, "response", None)
+    if response is None:
+        response = getattr(exc, "raw_response", None)
+    response_headers = getattr(response, "headers", None)
+    if isinstance(response_headers, Mapping):
+        header_sets.append(response_headers)
+    if isinstance(response, Mapping):
+        metadata = response.get("ResponseMetadata", {})
+        if isinstance(metadata, Mapping):
+            metadata_headers = metadata.get("HTTPHeaders", {})
+            if isinstance(metadata_headers, Mapping):
+                header_sets.append(metadata_headers)
+
+    for header_set in header_sets:
+        for key, value in header_set.items():
+            if str(key).lower() == "retry-after":
+                return _parse_retry_after(value)
+    return None
+
+
+def _model_error_name(exc: BaseException) -> str:
+    """Normalize provider class names and structured error codes for policy checks."""
+    names = "".join(error_type.__name__ for error_type in type(exc).__mro__).lower()
+    response = getattr(exc, "response", None)
+    if isinstance(response, Mapping):
+        error = response.get("Error", {})
+        if isinstance(error, Mapping):
+            names += str(error.get("Code", "")).lower()
+    return names.replace("_", "")
+
+
+def _is_transient_model_exception(exc: BaseException, status_code: int | None) -> bool:
+    """Classify only known transient provider failures as retryable."""
+    if status_code is not None:
+        return status_code in _TRANSIENT_HTTP_STATUSES or 500 <= status_code <= 599
+
+    code = getattr(exc, "code", None)
+    if callable(code):
+        grpc_name = getattr(code(), "name", "").lower().replace("_", "")
+        if grpc_name in {
+            "deadlineexceeded",
+            "resourceexhausted",
+            "aborted",
+            "unavailable",
+            "internal",
+        }:
+            return True
+        if grpc_name:
+            return False
+
+    error_name = _model_error_name(exc)
+    if any(name in error_name for name in _PERMANENT_ERROR_NAMES):
+        return False
+    return any(name in error_name for name in _TRANSIENT_ERROR_NAMES)
+
+
 def _map_exception(exc: BaseException) -> ExtractionError:
     """Translate a low-level exception into the appropriate ExtractionError subclass."""
     if isinstance(exc, httpx.HTTPStatusError):
@@ -403,7 +565,14 @@ def _map_exception(exc: BaseException) -> ExtractionError:
     if isinstance(exc, ValidationError):
         return SchemaValidationError(f"Model output did not match schema: {exc}")
     if isinstance(exc, _collect_model_error_types()):
-        return ModelError(f"Model API error: {exc}")
+        status_code = _model_status_code(exc)
+        return ModelError(
+            f"Model API error: {exc}",
+            provider=_model_provider(exc),
+            status_code=status_code,
+            retryable=_is_transient_model_exception(exc, status_code),
+            retry_after=_model_retry_after(exc),
+        )
     return ExtractionError(f"Extraction failed: {exc}")
 
 
@@ -533,20 +702,43 @@ async def _run_extraction_async(agent: Agent, inputs: list):
         return await agent.run(inputs)
 
 
-def _retry_delay(retry_backoff: float, attempt: int) -> float:
-    return retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
+def _retry_delay(
+    retry_backoff: float,
+    retry_max_backoff: float,
+    attempt: int,
+    retry_after: float | None,
+) -> float:
+    """Return bounded exponential backoff with up to 25% additive jitter."""
+    if retry_after is not None:
+        return min(retry_after, retry_max_backoff)
+    try:
+        delay = retry_backoff * (2**attempt) * (1 + random.uniform(0, 0.25))
+    except OverflowError:
+        return retry_max_backoff
+    return min(delay, retry_max_backoff)
 
 
-def _validate_retry_options(max_retries: object, retry_backoff: object) -> None:
+def _validate_retry_options(
+    max_retries: object,
+    retry_backoff: object,
+    retry_max_backoff: object,
+) -> None:
     if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
         raise ValueError("max_retries must be a non-negative integer.")
     if (
         isinstance(retry_backoff, bool)
         or not isinstance(retry_backoff, int | float)
         or not math.isfinite(retry_backoff)
-        or retry_backoff <= 0
+        or retry_backoff < 0
     ):
-        raise ValueError("retry_backoff must be a finite positive number of seconds.")
+        raise ValueError("retry_backoff must be a finite non-negative number of seconds.")
+    if (
+        isinstance(retry_max_backoff, bool)
+        or not isinstance(retry_max_backoff, int | float)
+        or not math.isfinite(retry_max_backoff)
+        or retry_max_backoff < 0
+    ):
+        raise ValueError("retry_max_backoff must be a finite non-negative number of seconds.")
 
 
 def _validate_max_concurrency(max_concurrency: object) -> None:
@@ -563,17 +755,18 @@ def _run_with_retries_sync[R](
     *,
     max_retries: int,
     retry_backoff: float,
+    retry_max_backoff: float,
 ) -> R:
-    """Run ``fn`` until it succeeds or ``ModelError`` retries are exhausted."""
-    _validate_retry_options(max_retries, retry_backoff)
+    """Run ``fn`` until it succeeds or transient retries are exhausted."""
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     attempt = 0
     while True:
         try:
             return fn()
-        except ModelError:
-            if attempt >= max_retries:
+        except ModelError as exc:
+            if not exc.retryable or attempt >= max_retries:
                 raise
-            time.sleep(_retry_delay(retry_backoff, attempt))
+            time.sleep(_retry_delay(retry_backoff, retry_max_backoff, attempt, exc.retry_after))
             attempt += 1
 
 
@@ -582,17 +775,20 @@ async def _run_with_retries_async[R](
     *,
     max_retries: int,
     retry_backoff: float,
+    retry_max_backoff: float,
 ) -> R:
     """Async counterpart to :func:`_run_with_retries_sync`."""
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     attempt = 0
     while True:
         try:
             return await fn()
-        except ModelError:
-            if attempt >= max_retries:
+        except ModelError as exc:
+            if not exc.retryable or attempt >= max_retries:
                 raise
-            await asyncio.sleep(_retry_delay(retry_backoff, attempt))
+            await asyncio.sleep(
+                _retry_delay(retry_backoff, retry_max_backoff, attempt, exc.retry_after)
+            )
             attempt += 1
 
 
@@ -605,6 +801,7 @@ def extract(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> T:
     """
     Extract structured data from a document, image, audio, or video file using an LLM.
@@ -618,12 +815,13 @@ def extract(
         instructions: Optional natural-language guidance for the LLM.
         media_type: Optional MIME type. Required for ``bytes`` and file-like
             inputs; overrides the guess for ``str`` inputs when provided.
-        max_retries: Number of additional attempts to make after a ``ModelError``.
-            Defaults to 0 (no retries, single attempt). Only ``ModelError``
-            triggers a retry; other exceptions propagate immediately.
+        max_retries: Number of additional attempts after a transient
+            ``ModelError``. Defaults to 0 (no retries, single attempt).
         retry_backoff: Base backoff in seconds. Sleep between attempts is
             ``retry_backoff * (2 ** attempt) * (1 + random.uniform(0, 0.25))``,
             i.e. exponential backoff with up to 25% jitter.
+        retry_max_backoff: Maximum delay in seconds for exponential backoff or
+            a provider ``Retry-After`` value. Defaults to 60 seconds.
 
     Returns:
         An instance of the schema populated with extracted data.
@@ -636,12 +834,13 @@ def extract(
         ModelError: If retries (if any) are exhausted.
         ExtractionError: For other extraction failures.
     """
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     agent, inputs = _prepare_extraction(schema, model, input_file, instructions, media_type)
     return _run_with_retries_sync(
         lambda: _extract_once(agent, inputs),
         max_retries=max_retries,
         retry_backoff=retry_backoff,
+        retry_max_backoff=retry_max_backoff,
     )
 
 
@@ -654,20 +853,26 @@ def extract_with_usage(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> tuple[T, Usage]:
     """Extract structured data and return ``(output, Usage)`` for token accounting.
 
     Same retry semantics as :func:`extract`. Returns a :class:`Usage` describing
     the tokens consumed by the successful model call.
     """
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     agent, inputs = _prepare_extraction(schema, model, input_file, instructions, media_type)
 
     def _once() -> tuple[T, Usage]:
         result = _run_extraction(agent, inputs)
         return cast(T, result.output), _usage_from_result(result)
 
-    return _run_with_retries_sync(_once, max_retries=max_retries, retry_backoff=retry_backoff)
+    return _run_with_retries_sync(
+        _once,
+        max_retries=max_retries,
+        retry_backoff=retry_backoff,
+        retry_max_backoff=retry_max_backoff,
+    )
 
 
 async def extract_with_usage_async(
@@ -679,9 +884,10 @@ async def extract_with_usage_async(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     agent, inputs = await _prepare_extraction_async(
         schema,
         model,
@@ -698,6 +904,7 @@ async def extract_with_usage_async(
         _once,
         max_retries=max_retries,
         retry_backoff=retry_backoff,
+        retry_max_backoff=retry_max_backoff,
     )
 
 
@@ -710,9 +917,10 @@ async def extract_async(
     media_type: str | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     agent, inputs = await _prepare_extraction_async(
         schema,
         model,
@@ -729,6 +937,7 @@ async def extract_async(
         _once,
         max_retries=max_retries,
         retry_backoff=retry_backoff,
+        retry_max_backoff=retry_max_backoff,
     )
 
 
@@ -755,8 +964,9 @@ async def _gather_extractions(
     media_type: str | None,
     max_retries: int,
     retry_backoff: float,
+    retry_max_backoff: float,
 ) -> list:
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     _validate_max_concurrency(max_concurrency)
     files = list(input_files)
     if not files:
@@ -784,6 +994,7 @@ async def _gather_extractions(
                     _once,
                     max_retries=max_retries,
                     retry_backoff=retry_backoff,
+                    retry_max_backoff=retry_max_backoff,
                 )
 
         tasks = [_bounded(item) for item in files]
@@ -801,6 +1012,7 @@ def extract_many(
     return_exceptions: bool = False,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> list:
     """Run :func:`extract_async` over many inputs concurrently from sync code.
 
@@ -818,17 +1030,18 @@ def extract_many(
         max_retries: Per-item retries after ``ModelError`` (same semantics as
             :func:`extract`).
         retry_backoff: Base backoff seconds between per-item retries.
+        retry_max_backoff: Maximum per-item retry delay in seconds.
 
     Returns:
         A list of results (or exceptions, when ``return_exceptions=True``) in input order.
 
     Raises:
         ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
-            negative, or ``retry_backoff`` is not positive and finite.
+            negative, or a backoff value is negative or non-finite.
         RuntimeError: If called from a running event loop. Use
             :func:`extract_many_async` in async code instead.
     """
-    _validate_retry_options(max_retries, retry_backoff)
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     _validate_max_concurrency(max_concurrency)
     try:
         asyncio.get_running_loop()
@@ -850,6 +1063,7 @@ def extract_many(
             media_type,
             max_retries,
             retry_backoff,
+            retry_max_backoff,
         )
     )
 
@@ -865,6 +1079,7 @@ async def extract_many_async(
     return_exceptions: bool = False,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> list:
     """Async sibling of :func:`extract_many`."""
     return await _gather_extractions(
@@ -877,4 +1092,5 @@ async def extract_many_async(
         media_type,
         max_retries,
         retry_backoff,
+        retry_max_backoff,
     )

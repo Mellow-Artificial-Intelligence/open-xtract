@@ -166,6 +166,13 @@ def _build_parser() -> argparse.ArgumentParser:
         metavar="SECONDS",
         help="Base backoff in seconds for retry (default 1.0).",
     )
+    parser.add_argument(
+        "--retry-max-backoff",
+        type=float,
+        default=60.0,
+        metavar="SECONDS",
+        help="Maximum retry delay in seconds, including Retry-After (default 60.0).",
+    )
     return parser
 
 
@@ -205,6 +212,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     media_type=media_type,
                     max_retries=args.max_retries,
                     retry_backoff=args.retry_backoff,
+                    retry_max_backoff=args.retry_max_backoff,
                 )
                 payload: Any = {"result": result.model_dump(), "usage": _usage_payload(usage)}
             else:
@@ -216,6 +224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     media_type=media_type,
                     max_retries=args.max_retries,
                     retry_backoff=args.retry_backoff,
+                    retry_max_backoff=args.retry_max_backoff,
                 )
         else:
             results = extract_many(
@@ -226,6 +235,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 media_type=media_type,
                 max_retries=args.max_retries,
                 retry_backoff=args.retry_backoff,
+                retry_max_backoff=args.retry_max_backoff,
                 return_exceptions=args.continue_on_error,
             )
             payload, batch_failures = _batch_payload(results, input_files)

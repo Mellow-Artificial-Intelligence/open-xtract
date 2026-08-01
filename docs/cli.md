@@ -129,6 +129,14 @@ openextract ./ok.pdf ./missing.pdf \
 - Without `--continue-on-error`, the first failure aborts and maps to exit codes
   `2`–`6` / `1` as usual (no batch array).
 
+## Retry policy
+
+`--max-retries` enables retries for transient model failures only.
+`--retry-backoff` controls exponential backoff with up to 25% additive jitter,
+and `--retry-max-backoff` caps both calculated delays and provider
+`Retry-After` values. Authentication, permission, and invalid-request failures
+exit immediately with code `4`.
+
 ## Related docs
 
 - [Troubleshooting](troubleshooting.md)

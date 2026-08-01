@@ -19,6 +19,13 @@ timing when that is known.
 - Expanded `SECURITY.md` URL input security model (schemes, host validation,
   redirects, env configuration, and non-guarantees).
 
+### Changed
+- Model retries now distinguish transient failures from permanent provider
+  errors, honor bounded `Retry-After` values, and expose provider, status,
+  retryability, and retry-after metadata on `ModelError`.
+- Added `retry_max_backoff` to all extraction APIs and
+  `--retry-max-backoff` to the CLI.
+
 ## [0.9.0] - 2026-07-12
 
 ### Added
