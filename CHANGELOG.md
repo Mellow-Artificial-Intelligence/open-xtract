@@ -38,6 +38,8 @@ timing when that is known.
   behavior.
 
 ### Changed
+- Async extraction now keeps disk, DNS, and file-like reads off the event loop
+  and reuses one HTTP client across each batch.
 - `max_retries`, `retry_backoff`, and `max_concurrency` now fail early with
   deterministic `ValueError` messages when invalid values are provided.
 
