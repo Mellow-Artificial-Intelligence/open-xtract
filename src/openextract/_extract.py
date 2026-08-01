@@ -226,14 +226,19 @@ def _is_safe_host(host: str | None) -> bool:
 
 def _fetch_url(url: str) -> httpx.Response:
     """Fetch ``url`` with SSRF defenses; validate the host at every redirect hop."""
+    with httpx.Client(follow_redirects=False, timeout=_url_fetch_timeout()) as client:
+        return _fetch_url_with_client(url, client)
+
+
+def _fetch_url_with_client(url: str, client: httpx.Client) -> httpx.Response:
+    """Fetch ``url`` through ``client`` while validating every redirect target."""
     current = url
     limit = _max_redirects()
-    timeout = _url_fetch_timeout()
     for _ in range(limit):
         host = urlparse(current).hostname
         if not _is_safe_host(host):
             raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
-        response = httpx.get(current, follow_redirects=False, timeout=timeout)
+        response = client.get(current)
         if response.is_redirect:
             location = response.headers.get("location")
             if not location:
@@ -245,20 +250,63 @@ def _fetch_url(url: str) -> httpx.Response:
     raise UrlFetchError(f"Too many redirects (>{limit})")
 
 
+async def _fetch_url_async(url: str, client: httpx.AsyncClient) -> httpx.Response:
+    """Async URL fetch with the same redirect-by-redirect SSRF validation."""
+    current = url
+    limit = _max_redirects()
+    for _ in range(limit):
+        host = urlparse(current).hostname
+        if not await asyncio.to_thread(_is_safe_host, host):
+            raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
+        response = await client.get(current)
+        if response.is_redirect:
+            location = response.headers.get("location")
+            if not location:
+                raise UrlFetchError(f"Redirect from {current!r} missing Location header")
+            current = str(httpx.URL(current).join(location))
+            continue
+        response.raise_for_status()
+        return response
+    raise UrlFetchError(f"Too many redirects (>{limit})")
+
+
+def _media_from_response(file_path: str, response: httpx.Response) -> tuple[bytes, str]:
+    """Resolve response bytes and MIME type for a URL input."""
+    media_type = _get_media_type(file_path)
+    if media_type == _DEFAULT_MEDIA_TYPE:
+        header = response.headers.get("content-type", "").split(";", 1)[0].strip()
+        if header:
+            media_type = header
+    return response.content, media_type
+
+
 def _read_from_path(file_path: str) -> tuple[bytes, str]:
     """Read bytes from a local path or http(s) URL; return (bytes, media_type)."""
     if file_path.startswith(_URL_PREFIXES):
         response = _fetch_url(file_path)
-        media_bytes = response.content
-        media_type = _get_media_type(file_path)
-        # If the URL extension didn't tell us anything, trust the server's Content-Type.
-        if media_type == _DEFAULT_MEDIA_TYPE:
-            header = response.headers.get("content-type", "").split(";", 1)[0].strip()
-            if header:
-                media_type = header
-        return media_bytes, media_type
+        return _media_from_response(file_path, response)
 
     return Path(file_path).read_bytes(), _get_media_type(file_path)
+
+
+async def _read_from_path_async(
+    file_path: str,
+    client: httpx.AsyncClient | None,
+) -> tuple[bytes, str]:
+    """Async counterpart to :func:`_read_from_path`."""
+    if file_path.startswith(_URL_PREFIXES):
+        if client is None:
+            async with httpx.AsyncClient(
+                follow_redirects=False,
+                timeout=_url_fetch_timeout(),
+            ) as owned_client:
+                response = await _fetch_url_async(file_path, owned_client)
+        else:
+            response = await _fetch_url_async(file_path, client)
+        return _media_from_response(file_path, response)
+
+    media_bytes = await asyncio.to_thread(Path(file_path).read_bytes)
+    return media_bytes, _get_media_type(file_path)
 
 
 def _get_media(
@@ -288,6 +336,25 @@ def _get_media(
     raise TypeError(
         "input_file must be a str path/URL, bytes, or a file-like object with a .read() method."
     )
+
+
+async def _get_media_async(
+    input_file: str | bytes | BinaryIO,
+    client: httpx.AsyncClient | None = None,
+    media_type: str | None = None,
+) -> tuple[bytes, str]:
+    """Resolve media without blocking the event loop on disk, DNS, or stream I/O."""
+    if isinstance(input_file, str):
+        file_bytes, resolved_type = await _read_from_path_async(input_file, client)
+        return file_bytes, media_type or resolved_type
+
+    if isinstance(input_file, bytes):
+        return _get_media(input_file, media_type=media_type)
+
+    if hasattr(input_file, "read"):
+        return await asyncio.to_thread(_get_media, input_file, media_type)
+
+    return _get_media(input_file, media_type=media_type)
 
 
 def _install_hint(model: str) -> str:
@@ -376,6 +443,21 @@ def _prepare_run(
     """Load env, resolve the media payload, and build the agent + run inputs."""
     _ensure_dotenv_loaded()
     file_bytes, file_type = _get_media(input_file, media_type=media_type)
+    agent = _build_agent(schema, model, instructions)
+    return agent, _build_run_inputs(file_bytes, file_type)
+
+
+async def _prepare_run_async(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None,
+    media_type: str | None,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[Agent, list]:
+    """Async media preparation plus agent construction."""
+    _ensure_dotenv_loaded()
+    file_bytes, file_type = await _get_media_async(input_file, client, media_type=media_type)
     agent = _build_agent(schema, model, instructions)
     return agent, _build_run_inputs(file_bytes, file_type)
 
@@ -557,7 +639,9 @@ async def extract_with_usage_async(
 
     async def _once() -> tuple[T, Usage]:
         with _extraction_errors():
-            agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+            agent, inputs = await _prepare_run_async(
+                schema, model, input_file, instructions, media_type
+            )
             result = await agent.run(inputs)
             return cast(T, result.output), _usage_from_result(result)
 
@@ -582,7 +666,9 @@ async def extract_async(
 
     async def _once() -> T:
         with _extraction_errors():
-            agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+            agent, inputs = await _prepare_run_async(
+                schema, model, input_file, instructions, media_type
+            )
             result = await agent.run(inputs)
             return cast(T, result.output)
 
@@ -597,6 +683,7 @@ async def _run_with_shared_agent(
     agent: Agent,
     input_file: str | bytes | BinaryIO,
     media_type: str | None,
+    client: httpx.AsyncClient | None = None,
 ) -> object:
     """Run a single extraction reusing a pre-built ``Agent``.
 
@@ -604,7 +691,7 @@ async def _run_with_shared_agent(
     ``ExtractionError`` subclasses as the per-item path.
     """
     with _extraction_errors():
-        file_bytes, file_type = _get_media(input_file, media_type=media_type)
+        file_bytes, file_type = await _get_media_async(input_file, client, media_type=media_type)
         result = await agent.run(_build_run_inputs(file_bytes, file_type))
         return result.output
 
@@ -632,19 +719,24 @@ async def _gather_extractions(
     agent = _build_agent(schema, model, instructions)
     semaphore = asyncio.Semaphore(max_concurrency)
 
-    async def _bounded(item):
-        async def _once():
-            return await _run_with_shared_agent(agent, item, media_type)
+    async with httpx.AsyncClient(
+        follow_redirects=False,
+        timeout=_url_fetch_timeout(),
+    ) as client:
 
-        async with semaphore:
-            return await _run_with_retries_async(
-                _once,
-                max_retries=max_retries,
-                retry_backoff=retry_backoff,
-            )
+        async def _bounded(item):
+            async def _once():
+                return await _run_with_shared_agent(agent, item, media_type, client)
 
-    tasks = [_bounded(item) for item in files]
-    return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
+            async with semaphore:
+                return await _run_with_retries_async(
+                    _once,
+                    max_retries=max_retries,
+                    retry_backoff=retry_backoff,
+                )
+
+        tasks = [_bounded(item) for item in files]
+        return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
 
 
 def extract_many(

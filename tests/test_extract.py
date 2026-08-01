@@ -4,6 +4,8 @@ import asyncio
 import io
 import ipaddress
 import socket
+import threading
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -28,7 +30,9 @@ from openextract import (
 )
 from openextract._extract import (
     _fetch_url,
+    _fetch_url_async,
     _get_media,
+    _get_media_async,
     _get_media_type,
     _install_hint,
     _is_public_ip,
@@ -60,6 +64,16 @@ def _build_response(
     response.status_code = status_code
     response.raise_for_status.return_value = None
     return response
+
+
+def _mock_sync_http_client(mocker, *, response=None, side_effect=None):
+    client_cls = mocker.patch("openextract._extract.httpx.Client")
+    client = client_cls.return_value.__enter__.return_value
+    if side_effect is not None:
+        client.get.side_effect = side_effect
+    else:
+        client.get.return_value = response
+    return client_cls, client
 
 
 # ---------------------------------------------------------------------------
@@ -150,24 +164,21 @@ class TestGetMedia:
 
     def test_fetches_https_url(self, mocker):
         fake_response = _build_response(content=b"<html>remote</html>")
-        mock_get = mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        client_cls, client = _mock_sync_http_client(mocker, response=fake_response)
 
         media_bytes, media_type = _get_media("https://example.com/page.html")
 
-        mock_get.assert_called_once()
-        args, kwargs = mock_get.call_args
-        assert args[0] == "https://example.com/page.html"
+        client_cls.assert_called_once_with(follow_redirects=False, timeout=30.0)
+        client.get.assert_called_once_with("https://example.com/page.html")
         # follow_redirects is disabled at the httpx layer; redirects are followed
         # manually in _fetch_url so the SSRF host check runs at every hop.
-        assert kwargs["follow_redirects"] is False
-        assert kwargs["timeout"] == 30.0
         assert media_bytes == b"<html>remote</html>"
         assert media_type == "text/html"
 
     def test_fetches_http_url(self, mocker):
         """http:// URLs are fetched, not treated as local paths."""
         fake_response = _build_response(content=b"plain")
-        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        _mock_sync_http_client(mocker, response=fake_response)
 
         media_bytes, media_type = _get_media("http://example.com/page.html")
 
@@ -179,7 +190,7 @@ class TestGetMedia:
             content=b"raw-bytes",
             content_type="application/pdf; charset=binary",
         )
-        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        _mock_sync_http_client(mocker, response=fake_response)
 
         media_bytes, media_type = _get_media("https://example.com/download?id=42")
 
@@ -188,7 +199,7 @@ class TestGetMedia:
 
     def test_url_with_no_extension_and_no_header_stays_octet_stream(self, mocker):
         fake_response = _build_response(content=b"raw-bytes", content_type="")
-        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        _mock_sync_http_client(mocker, response=fake_response)
 
         _, media_type = _get_media("https://example.com/blob")
 
@@ -197,7 +208,7 @@ class TestGetMedia:
     def test_known_url_extension_ignores_response_header(self, mocker):
         """URL extension wins when it's specific; protects against misconfigured servers."""
         fake_response = _build_response(content=b"%PDF", content_type="text/html")
-        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        _mock_sync_http_client(mocker, response=fake_response)
 
         _, media_type = _get_media("https://example.com/doc.pdf")
 
@@ -208,7 +219,7 @@ class TestGetMedia:
         fake_response.raise_for_status.side_effect = httpx.HTTPStatusError(
             "404 Not Found", request=MagicMock(), response=fake_response
         )
-        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        _mock_sync_http_client(mocker, response=fake_response)
 
         with pytest.raises(httpx.HTTPStatusError):
             _get_media("https://example.com/missing.pdf")
@@ -309,16 +320,12 @@ class TestFetchUrl:
             content=b"", status_code=302, is_redirect=True, location="https://2.2.2.2/final.html"
         )
         final = _build_response(content=b"ok", content_type="text/html")
-        mock_get = mocker.patch("openextract._extract.httpx.get", side_effect=[redirect, final])
+        _, client = _mock_sync_http_client(mocker, side_effect=[redirect, final])
 
         response = _fetch_url("https://1.1.1.1/start")
 
         assert response is final
-        assert mock_get.call_count == 2
-        # Both hops must be issued with follow_redirects disabled so our host
-        # check runs each time.
-        for call in mock_get.call_args_list:
-            assert call.kwargs["follow_redirects"] is False
+        assert client.get.call_count == 2
 
     def test_blocks_redirect_to_private_host(self, mocker):
         redirect = _build_response(
@@ -327,14 +334,14 @@ class TestFetchUrl:
             is_redirect=True,
             location="http://169.254.169.254/latest/meta-data/",
         )
-        mocker.patch("openextract._extract.httpx.get", return_value=redirect)
+        _mock_sync_http_client(mocker, response=redirect)
 
         with pytest.raises(UrlFetchError, match="non-public host"):
             _fetch_url("https://1.1.1.1/start")
 
     def test_redirect_without_location_raises_url_fetch_error(self, mocker):
         no_location = _build_response(content=b"", status_code=302, is_redirect=True, location=None)
-        mocker.patch("openextract._extract.httpx.get", return_value=no_location)
+        _mock_sync_http_client(mocker, response=no_location)
 
         with pytest.raises(UrlFetchError, match="missing Location"):
             _fetch_url("https://1.1.1.1/start")
@@ -343,10 +350,115 @@ class TestFetchUrl:
         redirect = _build_response(
             content=b"", status_code=302, is_redirect=True, location="https://1.1.1.1/loop"
         )
-        mocker.patch("openextract._extract.httpx.get", return_value=redirect)
+        _mock_sync_http_client(mocker, response=redirect)
 
         with pytest.raises(UrlFetchError, match="Too many redirects"):
             _fetch_url("https://1.1.1.1/loop")
+
+
+class TestFetchUrlAsync:
+    async def test_refuses_private_host_before_request(self):
+        client = MagicMock()
+        client.get = AsyncMock()
+
+        with pytest.raises(UrlFetchError, match="non-public host"):
+            await _fetch_url_async("http://127.0.0.1/secret", client)
+
+        client.get.assert_not_awaited()
+
+    async def test_follows_safe_redirect(self):
+        redirect = _build_response(
+            content=b"", status_code=302, is_redirect=True, location="https://2.2.2.2/final"
+        )
+        final = _build_response(content=b"ok")
+        client = MagicMock()
+        client.get = AsyncMock(side_effect=[redirect, final])
+
+        response = await _fetch_url_async("https://1.1.1.1/start", client)
+
+        assert response is final
+        assert client.get.await_count == 2
+
+    async def test_blocks_redirect_to_private_host(self):
+        redirect = _build_response(
+            content=b"",
+            status_code=302,
+            is_redirect=True,
+            location="http://169.254.169.254/latest/meta-data/",
+        )
+        client = MagicMock()
+        client.get = AsyncMock(return_value=redirect)
+
+        with pytest.raises(UrlFetchError, match="non-public host"):
+            await _fetch_url_async("https://1.1.1.1/start", client)
+
+        client.get.assert_awaited_once()
+
+    async def test_redirect_without_location_raises(self):
+        response = _build_response(is_redirect=True, status_code=302, location=None)
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
+
+        with pytest.raises(UrlFetchError, match="missing Location"):
+            await _fetch_url_async("https://1.1.1.1/start", client)
+
+    async def test_too_many_redirects_raises(self):
+        redirect = _build_response(
+            is_redirect=True, status_code=302, location="https://1.1.1.1/loop"
+        )
+        client = MagicMock()
+        client.get = AsyncMock(return_value=redirect)
+
+        with pytest.raises(UrlFetchError, match="Too many redirects"):
+            await _fetch_url_async("https://1.1.1.1/loop", client)
+
+
+class TestGetMediaAsync:
+    async def test_url_without_client_owns_client_lifecycle(self, mocker):
+        response = _build_response(content=b"pdf", content_type="application/pdf")
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client_cls = mocker.patch("openextract._extract.httpx.AsyncClient", return_value=client)
+
+        result = await _get_media_async("https://1.1.1.1/download")
+
+        assert result == (b"pdf", "application/pdf")
+        client_cls.assert_called_once_with(follow_redirects=False, timeout=30.0)
+        client.__aexit__.assert_awaited_once()
+
+    async def test_fetches_url_and_uses_response_media_type(self):
+        response = _build_response(content=b"pdf", content_type="application/pdf")
+        client = MagicMock()
+        client.get = AsyncMock(return_value=response)
+
+        media_bytes, media_type = await _get_media_async("https://1.1.1.1/download", client)
+
+        assert media_bytes == b"pdf"
+        assert media_type == "application/pdf"
+
+    async def test_reads_local_path_with_override(self, tmp_path):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+
+        result = await _get_media_async(str(local), MagicMock(), media_type="application/custom")
+
+        assert result == (b"hello", "application/custom")
+
+    async def test_bytes_input_uses_existing_validation(self):
+        result = await _get_media_async(b"hello", MagicMock(), media_type="text/plain")
+
+        assert result == (b"hello", "text/plain")
+
+    async def test_filelike_read_is_offloaded(self):
+        result = await _get_media_async(io.BytesIO(b"hello"), MagicMock(), media_type="text/plain")
+
+        assert result == (b"hello", "text/plain")
+
+    async def test_unsupported_input_preserves_type_error(self):
+        with pytest.raises(TypeError, match="input_file must be"):
+            await _get_media_async(123, MagicMock())  # type: ignore[arg-type]
 
 
 class TestUrlFetchConfiguration:
@@ -359,11 +471,11 @@ class TestUrlFetchConfiguration:
     def test_custom_timeout_from_env(self, monkeypatch, mocker):
         monkeypatch.setenv("OPENEXTRACT_URL_TIMEOUT", "45")
         fake_response = _build_response(content=b"ok")
-        mock_get = mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        client_cls, _ = _mock_sync_http_client(mocker, response=fake_response)
 
         _fetch_url("https://1.1.1.1/doc.pdf")
 
-        assert mock_get.call_args.kwargs["timeout"] == 45.0
+        assert client_cls.call_args.kwargs["timeout"] == 45.0
 
     def test_invalid_timeout_falls_back_to_default(self, monkeypatch):
         monkeypatch.setenv("OPENEXTRACT_URL_TIMEOUT", "not-a-number")
@@ -378,7 +490,7 @@ class TestUrlFetchConfiguration:
         redirect = _build_response(
             content=b"", status_code=302, is_redirect=True, location="https://1.1.1.1/loop"
         )
-        mocker.patch("openextract._extract.httpx.get", return_value=redirect)
+        _mock_sync_http_client(mocker, response=redirect)
 
         with pytest.raises(UrlFetchError, match="Too many redirects \\(>2\\)"):
             _fetch_url("https://1.1.1.1/loop")
@@ -566,7 +678,7 @@ class TestExtract:
         fake_response.raise_for_status.side_effect = httpx.HTTPStatusError(
             "Not Found", request=MagicMock(), response=fake_response
         )
-        mocker.patch("openextract._extract.httpx.get", return_value=fake_response)
+        _mock_sync_http_client(mocker, response=fake_response)
 
         with pytest.raises(UrlFetchError, match="404"):
             extract(
@@ -1142,6 +1254,23 @@ def _make_async_agent_mock(mocker, output=None, run_side_effect=None, usage=None
 
 
 class TestExtractAsync:
+    async def test_local_read_does_not_block_event_loop(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hi")
+        original_read_bytes = Path.read_bytes
+
+        def slow_read_bytes(path):
+            time.sleep(0.05)
+            return original_read_bytes(path)
+
+        mocker.patch.object(Path, "read_bytes", slow_read_bytes)
+        _make_async_agent_mock(mocker, output=_Person(name="Grace", age=85))
+        heartbeat = asyncio.create_task(asyncio.sleep(0.01))
+
+        await extract_async(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+        assert heartbeat.done()
+
     async def test_returns_schema_instance_from_local_file(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hi")
@@ -1180,14 +1309,14 @@ class TestExtractAsync:
         response = MagicMock()
         response.status_code = 502
         err = httpx.HTTPStatusError("boom", request=MagicMock(), response=response)
-        mocker.patch("openextract._extract._get_media", side_effect=err)
+        mocker.patch("openextract._extract._get_media_async", side_effect=err)
 
         with pytest.raises(UrlFetchError, match="502"):
             await extract_async(schema=_Person, model="openai:gpt-5", input_file="https://x/y")
 
     async def test_request_error_is_wrapped(self, mocker):
         err = httpx.ConnectError("dns failure")
-        mocker.patch("openextract._extract._get_media", side_effect=err)
+        mocker.patch("openextract._extract._get_media_async", side_effect=err)
 
         with pytest.raises(UrlFetchError, match="dns failure"):
             await extract_async(schema=_Person, model="openai:gpt-5", input_file="https://x/y")
@@ -1417,7 +1546,7 @@ class TestExtractMany:
         people = [_Person(name=f"n{i}", age=i) for i in range(4)]
         path_to_person = dict(zip(files, people, strict=True))
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             # Tiny await yields control so tasks can interleave.
             await asyncio.sleep(0)
             return path_to_person[input_file]
@@ -1437,7 +1566,7 @@ class TestExtractMany:
         peak = 0
         lock = asyncio.Lock()
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             nonlocal in_flight, peak
             async with lock:
                 in_flight += 1
@@ -1463,7 +1592,7 @@ class TestExtractMany:
     def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             if input_file.endswith("f1.txt"):
                 raise ModelError("boom on f1")
             await asyncio.sleep(0.01)
@@ -1477,7 +1606,7 @@ class TestExtractMany:
     def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             if input_file.endswith("f1.txt"):
                 raise ModelError("boom on f1")
             return _Person(name=input_file, age=1)
@@ -1499,7 +1628,7 @@ class TestExtractMany:
         """The whole point of the batch path: one Agent for N items."""
         files = [str(tmp_path / f"f{i}.txt") for i in range(8)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             return _Person(name=input_file, age=1)
 
         build_mock = mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
@@ -1538,7 +1667,7 @@ class TestExtractMany:
 
         received_types: list[str | None] = []
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             received_types.append(media_type)
             return _Person(name=input_file, age=1)
 
@@ -1561,6 +1690,34 @@ class TestExtractMany:
 
 
 class TestExtractManyAsync:
+    async def test_local_media_reads_overlap(self, tmp_path, mocker):
+        files = []
+        for index in range(3):
+            path = tmp_path / f"f{index}.txt"
+            path.write_bytes(b"x")
+            files.append(str(path))
+
+        barrier = threading.Barrier(3)
+
+        def concurrent_read_bytes(path):
+            barrier.wait(timeout=1)
+            return b"x"
+
+        mocker.patch.object(Path, "read_bytes", concurrent_read_bytes)
+        run_result = MagicMock(output=_Person(name="ok", age=1))
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=run_result)
+        mocker.patch("openextract._extract._build_agent", return_value=agent)
+
+        results = await extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+            max_concurrency=3,
+        )
+
+        assert results == [_Person(name="ok", age=1)] * 3
+
     async def test_invalid_options_are_rejected_before_agent_build(self, mocker):
         build_mock = mocker.patch("openextract._extract._build_agent")
 
@@ -1577,7 +1734,7 @@ class TestExtractManyAsync:
     async def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             if input_file.endswith("f0.txt"):
                 raise ModelError("boom first")
             await asyncio.sleep(0.01)
@@ -1595,7 +1752,7 @@ class TestExtractManyAsync:
     async def test_return_exceptions_yields_mixed_list(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             if input_file.endswith("f1.txt"):
                 raise SchemaValidationError("bad schema")
             return _Person(name=input_file, age=1)
@@ -1618,7 +1775,7 @@ class TestExtractManyAsync:
         expected = [_Person(name=f, age=i) for i, f in enumerate(files)]
         mapping = dict(zip(files, expected, strict=True))
 
-        async def fake_run(agent, input_file, media_type):
+        async def fake_run(agent, input_file, media_type, client):
             await asyncio.sleep(0)
             return mapping[input_file]
 
