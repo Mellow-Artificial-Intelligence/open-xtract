@@ -8,6 +8,8 @@ timing when that is known.
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-01
+
 ### Added
 - Explicit `RuntimeError` when `extract_many()` is called from a running event
   loop, directing callers to `extract_many_async`.
@@ -20,11 +22,19 @@ timing when that is known.
   redirects, env configuration, and non-guarantees).
 
 ### Changed
+- Async extraction now keeps disk, DNS, and file-like reads off the event loop
+  and reuses one HTTP client across each batch.
+- Model retries now reuse the original media payload, prompt, and agent instead
+  of reading or fetching the input and rebuilding the agent on every attempt.
 - Model retries now distinguish transient failures from permanent provider
   errors, honor bounded `Retry-After` values, and expose provider, status,
   retryability, and retry-after metadata on `ModelError`.
 - Added `retry_max_backoff` to all extraction APIs and
   `--retry-max-backoff` to the CLI.
+
+### Security
+- Async URL fetching retains redirect-by-redirect public-host and SSRF
+  validation while using async clients and offloaded DNS resolution.
 
 ## [0.9.0] - 2026-07-12
 
@@ -45,10 +55,6 @@ timing when that is known.
   behavior.
 
 ### Changed
-- Async extraction now keeps disk, DNS, and file-like reads off the event loop
-  and reuses one HTTP client across each batch.
-- Model retries now reuse the original media payload, prompt, and agent instead
-  of reading or fetching the input and rebuilding the agent on every attempt.
 - `max_retries`, `retry_backoff`, and `max_concurrency` now fail early with
   deterministic `ValueError` messages when invalid values are provided.
 
@@ -150,7 +156,8 @@ timing when that is known.
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.6.0...v0.7.0
