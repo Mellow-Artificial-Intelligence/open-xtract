@@ -40,6 +40,8 @@ timing when that is known.
 ### Changed
 - Async extraction now keeps disk, DNS, and file-like reads off the event loop
   and reuses one HTTP client across each batch.
+- Model retries now reuse the original media payload, prompt, and agent instead
+  of reading or fetching the input and rebuilding the agent on every attempt.
 - `max_retries`, `retry_backoff`, and `max_concurrency` now fail early with
   deterministic `ValueError` messages when invalid values are provided.
 

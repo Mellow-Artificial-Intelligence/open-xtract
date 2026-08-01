@@ -462,34 +462,75 @@ async def _prepare_run_async(
     return agent, _build_run_inputs(file_bytes, file_type)
 
 
-def _run_extraction(
+def _prepare_extraction(
     schema: type[T],
     model: str,
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
-):
-    """Run a single sync extraction and return the raw pydantic-ai result.
-
-    Centralises agent build, exception mapping, and TypeError pass-through so it
-    can be reused by ``extract`` (which discards usage) and
-    ``extract_with_usage`` (which surfaces it).
-    """
+) -> tuple[Agent, list]:
+    """Prepare one extraction while applying the public exception mapping."""
     with _extraction_errors():
-        agent, inputs = _prepare_run(schema, model, input_file, instructions, media_type)
+        return _prepare_run(schema, model, input_file, instructions, media_type)
+
+
+async def _prepare_extraction_async(
+    schema: type[T],
+    model: str,
+    input_file: str | bytes | BinaryIO,
+    instructions: str | None,
+    media_type: str | None,
+    client: httpx.AsyncClient | None = None,
+) -> tuple[Agent, list]:
+    """Prepare one async extraction while applying public exception mapping."""
+    with _extraction_errors():
+        return await _prepare_run_async(
+            schema,
+            model,
+            input_file,
+            instructions,
+            media_type,
+            client,
+        )
+
+
+async def _prepare_run_inputs_async(
+    input_file: str | bytes | BinaryIO,
+    media_type: str | None,
+    client: httpx.AsyncClient | None = None,
+) -> list:
+    """Resolve one async media input and build a prompt for retry reuse."""
+    with _extraction_errors():
+        file_bytes, file_type = await _get_media_async(
+            input_file,
+            client,
+            media_type=media_type,
+        )
+        return _build_run_inputs(file_bytes, file_type)
+
+
+def _run_extraction(
+    agent: Agent,
+    inputs: list,
+):
+    """Run a prepared sync extraction and return the raw pydantic-ai result."""
+    with _extraction_errors():
         return agent.run_sync(inputs)
 
 
 def _extract_once(
-    schema: type[T],
-    model: str,
-    input_file: str | bytes | BinaryIO,
-    instructions: str | None,
-    media_type: str | None,
+    agent: Agent,
+    inputs: list,
 ) -> T:
     """Perform a single sync extraction attempt; return the schema instance."""
-    result = _run_extraction(schema, model, input_file, instructions, media_type)
+    result = _run_extraction(agent, inputs)
     return cast(T, result.output)
+
+
+async def _run_extraction_async(agent: Agent, inputs: list):
+    """Run a prepared async extraction with public exception mapping."""
+    with _extraction_errors():
+        return await agent.run(inputs)
 
 
 def _retry_delay(retry_backoff: float, attempt: int) -> float:
@@ -595,8 +636,10 @@ def extract(
         ModelError: If retries (if any) are exhausted.
         ExtractionError: For other extraction failures.
     """
+    _validate_retry_options(max_retries, retry_backoff)
+    agent, inputs = _prepare_extraction(schema, model, input_file, instructions, media_type)
     return _run_with_retries_sync(
-        lambda: _extract_once(schema, model, input_file, instructions, media_type),
+        lambda: _extract_once(agent, inputs),
         max_retries=max_retries,
         retry_backoff=retry_backoff,
     )
@@ -617,9 +660,11 @@ def extract_with_usage(
     Same retry semantics as :func:`extract`. Returns a :class:`Usage` describing
     the tokens consumed by the successful model call.
     """
+    _validate_retry_options(max_retries, retry_backoff)
+    agent, inputs = _prepare_extraction(schema, model, input_file, instructions, media_type)
 
     def _once() -> tuple[T, Usage]:
-        result = _run_extraction(schema, model, input_file, instructions, media_type)
+        result = _run_extraction(agent, inputs)
         return cast(T, result.output), _usage_from_result(result)
 
     return _run_with_retries_sync(_once, max_retries=max_retries, retry_backoff=retry_backoff)
@@ -636,14 +681,18 @@ async def extract_with_usage_async(
     retry_backoff: float = 1.0,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
+    _validate_retry_options(max_retries, retry_backoff)
+    agent, inputs = await _prepare_extraction_async(
+        schema,
+        model,
+        input_file,
+        instructions,
+        media_type,
+    )
 
     async def _once() -> tuple[T, Usage]:
-        with _extraction_errors():
-            agent, inputs = await _prepare_run_async(
-                schema, model, input_file, instructions, media_type
-            )
-            result = await agent.run(inputs)
-            return cast(T, result.output), _usage_from_result(result)
+        result = await _run_extraction_async(agent, inputs)
+        return cast(T, result.output), _usage_from_result(result)
 
     return await _run_with_retries_async(
         _once,
@@ -663,14 +712,18 @@ async def extract_async(
     retry_backoff: float = 1.0,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
+    _validate_retry_options(max_retries, retry_backoff)
+    agent, inputs = await _prepare_extraction_async(
+        schema,
+        model,
+        input_file,
+        instructions,
+        media_type,
+    )
 
     async def _once() -> T:
-        with _extraction_errors():
-            agent, inputs = await _prepare_run_async(
-                schema, model, input_file, instructions, media_type
-            )
-            result = await agent.run(inputs)
-            return cast(T, result.output)
+        result = await _run_extraction_async(agent, inputs)
+        return cast(T, result.output)
 
     return await _run_with_retries_async(
         _once,
@@ -681,19 +734,15 @@ async def extract_async(
 
 async def _run_with_shared_agent(
     agent: Agent,
-    input_file: str | bytes | BinaryIO,
-    media_type: str | None,
-    client: httpx.AsyncClient | None = None,
+    inputs: list,
 ) -> object:
-    """Run a single extraction reusing a pre-built ``Agent``.
+    """Run prepared inputs through a pre-built shared ``Agent``.
 
     Mirrors ``extract_async``'s error mapping so callers get the same
     ``ExtractionError`` subclasses as the per-item path.
     """
-    with _extraction_errors():
-        file_bytes, file_type = await _get_media_async(input_file, client, media_type=media_type)
-        result = await agent.run(_build_run_inputs(file_bytes, file_type))
-        return result.output
+    result = await _run_extraction_async(agent, inputs)
+    return result.output
 
 
 async def _gather_extractions(
@@ -725,10 +774,12 @@ async def _gather_extractions(
     ) as client:
 
         async def _bounded(item):
-            async def _once():
-                return await _run_with_shared_agent(agent, item, media_type, client)
-
             async with semaphore:
+                inputs = await _prepare_run_inputs_async(item, media_type, client)
+
+                async def _once():
+                    return await _run_with_shared_agent(agent, inputs)
+
                 return await _run_with_retries_async(
                     _once,
                     max_retries=max_retries,

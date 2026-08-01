@@ -1061,6 +1061,10 @@ class TestExtractRetry:
 
     def test_no_retry_by_default_raises_immediately(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        prepare = mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
         once = mocker.patch(
             "openextract._extract._extract_once",
             side_effect=ModelError("upstream down"),
@@ -1070,10 +1074,15 @@ class TestExtractRetry:
             extract(schema=_Person, model="openai:gpt-5", input_file="ignored")
 
         assert once.call_count == 1
+        prepare.assert_called_once()
         sleep_mock.assert_not_called()
 
     def test_retry_succeeds_after_transient_model_errors(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        prepare = mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
         expected = _Person(name="Grace", age=85)
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1089,10 +1098,15 @@ class TestExtractRetry:
 
         assert result is expected
         assert once.call_count == 3
+        prepare.assert_called_once()
         assert sleep_mock.call_count == 2
 
     def test_retry_exhausted_raises_last_model_error(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        prepare = mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
         once = mocker.patch(
             "openextract._extract._extract_once",
             side_effect=ModelError("persistent"),
@@ -1107,10 +1121,15 @@ class TestExtractRetry:
             )
 
         assert once.call_count == 3
+        prepare.assert_called_once()
         assert sleep_mock.call_count == 2
 
     def test_backoff_schedule_uses_exponential_jitter(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
         mocker.patch(
             "openextract._extract._extract_once",
             side_effect=ModelError("nope"),
@@ -1134,6 +1153,10 @@ class TestExtractRetry:
 
     def test_schema_validation_error_is_not_retried(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        prepare = mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
         once = mocker.patch(
             "openextract._extract._extract_once",
             side_effect=SchemaValidationError("bad shape"),
@@ -1148,7 +1171,30 @@ class TestExtractRetry:
             )
 
         assert once.call_count == 1
+        prepare.assert_called_once()
         sleep_mock.assert_not_called()
+
+    def test_non_seekable_stream_and_agent_are_prepared_once_for_retries(self, mocker):
+        expected = _Person(name="Grace", age=85)
+        stream = MagicMock()
+        stream.read.return_value = b"hello"
+        run_result = MagicMock(output=expected)
+        agent_cls, agent = _make_agent_mock(mocker, output=expected)
+        agent.run_sync.side_effect = [ModelError("flaky"), run_result]
+        mocker.patch("openextract._extract.time.sleep")
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=stream,
+            media_type="text/plain",
+            max_retries=1,
+        )
+
+        assert result is expected
+        stream.read.assert_called_once_with()
+        agent_cls.assert_called_once()
+        assert agent.run_sync.call_count == 2
 
 
 class TestExtractWithUsageRetry:
@@ -1167,6 +1213,10 @@ class TestExtractWithUsageRetry:
 
     def test_retries_on_model_error(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        prepare = mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
         expected = _Person(name="Ada", age=36)
         usage = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)
         run_result = MagicMock(output=expected)
@@ -1186,6 +1236,7 @@ class TestExtractWithUsageRetry:
         assert output is expected
         assert got_usage.input_tokens == 1
         assert run_extraction.call_count == 2
+        prepare.assert_called_once()
         sleep_mock.assert_called_once()
 
 
@@ -1213,7 +1264,7 @@ class TestExtractAsyncRetry:
         expected = _Person(name="Ada", age=36)
         run_result = MagicMock()
         run_result.output = expected
-        _, agent_instance = _make_async_agent_mock(mocker)
+        agent_cls, agent_instance = _make_async_agent_mock(mocker)
         agent_instance.run = AsyncMock(side_effect=[ModelError("flaky"), run_result])
 
         result = await extract_async(
@@ -1224,8 +1275,31 @@ class TestExtractAsyncRetry:
         )
 
         assert result is expected
+        agent_cls.assert_called_once()
         assert agent_instance.run.await_count == 2
         sleep_mock.assert_awaited_once()
+
+    async def test_non_seekable_stream_is_read_once_for_retries(self, mocker):
+        expected = _Person(name="Ada", age=36)
+        stream = MagicMock()
+        stream.read.return_value = b"hello"
+        run_result = MagicMock(output=expected)
+        agent_cls, agent = _make_async_agent_mock(mocker)
+        agent.run = AsyncMock(side_effect=[ModelError("flaky"), run_result])
+        mocker.patch("openextract._extract.asyncio.sleep", new_callable=AsyncMock)
+
+        result = await extract_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=stream,
+            media_type="text/plain",
+            max_retries=1,
+        )
+
+        assert result is expected
+        stream.read.assert_called_once_with()
+        agent_cls.assert_called_once()
+        assert agent.run.await_count == 2
 
 
 # ---------------------------------------------------------------------------
@@ -1446,48 +1520,41 @@ class TestExtractWithUsageAsync:
 
 
 class TestRunWithSharedAgent:
-    async def test_runs_agent_and_returns_output(self, tmp_path):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hi")
+    async def test_runs_agent_and_returns_output(self):
         expected = _Person(name="Ada", age=36)
         agent = MagicMock()
         result = MagicMock()
         result.output = expected
         agent.run = AsyncMock(return_value=result)
+        inputs = ["prepared"]
 
-        out = await _run_with_shared_agent(agent, str(local), None)
+        out = await _run_with_shared_agent(agent, inputs)
 
         assert out is expected
-        agent.run.assert_awaited_once()
+        agent.run.assert_awaited_once_with(inputs)
 
     async def test_type_error_propagates_unchanged(self):
-        """bytes without media_type must raise TypeError, not ExtractionError."""
         agent = MagicMock()
-        agent.run = AsyncMock()
+        agent.run = AsyncMock(side_effect=TypeError("bad prepared input"))
 
-        with pytest.raises(TypeError, match="media_type is required"):
-            await _run_with_shared_agent(agent, b"abc", None)
-        agent.run.assert_not_awaited()
+        with pytest.raises(TypeError, match="bad prepared input"):
+            await _run_with_shared_agent(agent, ["prepared"])
 
-    async def test_existing_extraction_error_passes_through(self, tmp_path):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hi")
+    async def test_existing_extraction_error_passes_through(self):
         original = SchemaValidationError("already mapped")
         agent = MagicMock()
         agent.run = AsyncMock(side_effect=original)
 
         with pytest.raises(SchemaValidationError) as exc_info:
-            await _run_with_shared_agent(agent, str(local), None)
+            await _run_with_shared_agent(agent, ["prepared"])
         assert exc_info.value is original
 
-    async def test_generic_exception_is_wrapped(self, tmp_path):
-        local = tmp_path / "input.txt"
-        local.write_bytes(b"hi")
+    async def test_generic_exception_is_wrapped(self):
         agent = MagicMock()
         agent.run = AsyncMock(side_effect=RuntimeError("kaboom"))
 
         with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
-            await _run_with_shared_agent(agent, str(local), None)
+            await _run_with_shared_agent(agent, ["prepared"])
 
 
 # ---------------------------------------------------------------------------
@@ -1496,16 +1563,23 @@ class TestRunWithSharedAgent:
 
 
 def _stub_shared_agent(mocker, side_effect):
-    """Stub the batch-path agent build + per-item runner used by extract_many.
+    """Stub batch preparation and execution while preserving legacy fake signatures.
 
-    extract_many now builds a single Agent and reuses it across items via
-    ``_run_with_shared_agent``. Tests just need a no-op Agent and to drive
-    per-item behavior through the runner.
+    The prepared list deliberately carries the source arguments so focused batch
+    tests can inspect them without reading actual files.
     """
     mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+
+    async def prepare(input_file, media_type, client):
+        return [input_file, media_type, client]
+
+    async def run(agent, inputs):
+        return await side_effect(agent, inputs[0], inputs[1], inputs[2])
+
+    mocker.patch("openextract._extract._prepare_run_inputs_async", side_effect=prepare)
     mocker.patch(
         "openextract._extract._run_with_shared_agent",
-        side_effect=side_effect,
+        side_effect=run,
     )
 
 
@@ -1631,8 +1705,8 @@ class TestExtractMany:
         async def fake_run(agent, input_file, media_type, client):
             return _Person(name=input_file, age=1)
 
+        _stub_shared_agent(mocker, fake_run)
         build_mock = mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
-        mocker.patch("openextract._extract._run_with_shared_agent", side_effect=fake_run)
 
         extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
 
@@ -1730,6 +1804,31 @@ class TestExtractManyAsync:
             )
 
         build_mock.assert_not_called()
+
+    async def test_prepares_each_item_once_when_model_run_retries(self, mocker):
+        expected = _Person(name="Ada", age=36)
+        stream = MagicMock()
+        stream.read.return_value = b"hello"
+        mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+        run = mocker.patch(
+            "openextract._extract._run_with_shared_agent",
+            new_callable=AsyncMock,
+            side_effect=[ModelError("flaky"), expected],
+        )
+        mocker.patch("openextract._extract.asyncio.sleep", new_callable=AsyncMock)
+
+        results = await extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[stream],
+            media_type="text/plain",
+            max_retries=1,
+        )
+
+        assert results == [expected]
+        stream.read.assert_called_once_with()
+        assert run.await_count == 2
+        assert run.await_args_list[0].args[1] is run.await_args_list[1].args[1]
 
     async def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
         files = [str(tmp_path / f"f{i}.txt") for i in range(3)]

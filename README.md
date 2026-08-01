@@ -103,6 +103,10 @@ result = extract(
 
 `max_retries` defaults to `0` (single attempt) and must be a non-negative integer. When set, `extract` retries only on `ModelError` and sleeps `retry_backoff * (2 ** attempt)` seconds (with up to 25% jitter) between attempts. `retry_backoff` defaults to `1.0` second and must be positive and finite.
 
+The input is resolved once before the first model attempt. Retries reuse the same
+media bytes, prompt, and agent, so URLs and non-seekable streams are not fetched
+or read again.
+
 ### Inspecting token usage
 
 Use `extract_with_usage` when you want token counts alongside the extracted output (for cost tracking, logging, etc.).
