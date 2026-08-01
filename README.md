@@ -101,7 +101,13 @@ result = extract(
 )
 ```
 
-`max_retries` defaults to `0` (single attempt) and must be a non-negative integer. When set, `extract` retries only on `ModelError` and sleeps `retry_backoff * (2 ** attempt)` seconds (with up to 25% jitter) between attempts. `retry_backoff` defaults to `1.0` second and must be positive and finite.
+`max_retries` defaults to `0` (single attempt) and must be a non-negative integer.
+Only transient `ModelError` failures—timeouts, rate limits, and supported 5xx
+responses—are retried; authentication, permission, and invalid-request failures
+fail immediately. Delays use exponential backoff with up to 25% additive jitter,
+bounded by `retry_max_backoff` (60 seconds by default). A valid provider
+`Retry-After` value takes precedence but is still bounded. Both backoff values
+must be finite and non-negative.
 
 The input is resolved once before the first model attempt. Retries reuse the same
 media bytes, prompt, and agent, so URLs and non-seekable streams are not fetched
@@ -200,7 +206,8 @@ cat ./reports/q4.pdf | openextract - \
 - `--media-type` sets MIME type for stdin or overrides guessing for paths/URLs.
 - `--usage` prints a JSON object with `result` and `usage` (single input only).
 - `--output` is `json` (default) or `repr`.
-- `--max-retries` / `--retry-backoff` match the Python API retry behavior.
+- `--max-retries`, `--retry-backoff`, and `--retry-max-backoff` match the Python
+  API retry behavior.
 - `--continue-on-error` (batch only) keeps processing when an input fails; each
   failure is emitted inline as `{"input", "error", "error_type"}` and the command
   exits `7` if any input failed. Without it, a batch aborts on the first failure.
@@ -253,8 +260,9 @@ except SchemaValidationError:
     ...  # The model's output did not match your schema
 except ProviderNotInstalledError:
     ...  # The provider extra isn't installed (e.g. pip install openextract[xai])
-except ModelError:
-    ...  # The model provider returned an error
+except ModelError as exc:
+    # Structured fields are populated when the provider exposes them.
+    print(exc.provider, exc.status_code, exc.retryable, exc.retry_after)
 except ExtractionError:
     ...  # Any other extraction failure (base class)
 ```
@@ -263,7 +271,7 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 ## API reference
 
-### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
+### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 | Argument        | Type                          | Description                                                                                                       |
 | --------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -272,26 +280,27 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 | `input_file`    | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
 | `instructions`  | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
 | `media_type`    | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
-| `max_retries`   | `int` (keyword-only)          | Extra attempts after a `ModelError`. Must be a non-negative integer. Defaults to `0` (no retry).                 |
-| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter between retries. Must be positive and finite.                   |
+| `max_retries`   | `int` (keyword-only)          | Extra attempts after a transient `ModelError`. Must be a non-negative integer. Defaults to `0` (no retry).       |
+| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter. Must be non-negative and finite.                               |
+| `retry_max_backoff` | `float` (keyword-only)    | Maximum retry delay, including `Retry-After`. Must be non-negative and finite. Defaults to `60.0`.               |
 
 Returns an instance of `schema`.
 
-### `extract_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
+### `extract_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
-Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync`. Accepts the same `schema`, `model`, `input_file`, `instructions`, `media_type`, `max_retries`, and `retry_backoff` arguments.
+Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync` and accepts the same arguments.
 
 Returns an instance of `schema`.
 
-### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
+### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Like `extract`, but returns `(output, Usage)` where `Usage` is a frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. Useful for cost tracking and logging. Uses the same `ModelError` retry behavior as `extract`.
 
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0)`
+### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async sibling of `extract_with_usage`; returns `(output, Usage)`.
 
-### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0)`
+### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Run concurrent extractions from synchronous code. Each item in `input_files` is a path, URL, `bytes`, or file-like object (same rules as `extract`). Results are returned in input order.
 
@@ -306,12 +315,13 @@ Do not call `extract_many` from a running event loop (for example inside
 | `media_type`         | `str \| None` (keyword-only) | Applied uniformly to every item; required if any item is `bytes`/file-like. |
 | `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions. Must be a positive integer. Defaults to `5`. |
 | `return_exceptions`  | `bool` (keyword-only)        | If `True`, exceptions appear in the result list instead of being raised.    |
-| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a `ModelError`. Must be a non-negative integer. Defaults to `0`. |
-| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter. Must be positive and finite. |
+| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a transient `ModelError`. Must be a non-negative integer. Defaults to `0`. |
+| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter. Must be non-negative and finite. |
+| `retry_max_backoff`  | `float` (keyword-only)       | Maximum per-item retry delay, including `Retry-After`. Defaults to `60.0`. |
 
 Returns a `list` of schema instances (or exceptions when `return_exceptions=True`).
 
-### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0)`
+### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async sibling of `extract_many`; same arguments and return shape.
 
@@ -344,7 +354,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
 | `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
-| `ModelError` | Stable | Raised for provider/model API failures. Provider-specific classifiers may expand without changing the public type. |
+| `ModelError` | Stable | Raised for provider/model API failures, with `provider`, `status_code`, `retryable`, and `retry_after` metadata where available. |
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
 | `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, and partial-batch exit code `7` are intended to remain. |
 

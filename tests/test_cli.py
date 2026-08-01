@@ -164,6 +164,7 @@ class TestMainSuccess:
             media_type=None,
             max_retries=0,
             retry_backoff=1.0,
+            retry_max_backoff=60.0,
         )
 
     def test_repr_output(self, mocker, capsys):
@@ -205,7 +206,7 @@ class TestMainSuccess:
         assert exit_code == 0
         assert mock_extract.call_args.kwargs["instructions"] is None
 
-    def test_max_retries_and_retry_backoff_defaults(self, mocker):
+    def test_retry_defaults(self, mocker):
         fake = MagicMock()
         fake.model_dump_json.return_value = "{}"
         mock_extract = _patch_extract(mocker, return_value=fake)
@@ -222,8 +223,9 @@ class TestMainSuccess:
 
         assert mock_extract.call_args.kwargs["max_retries"] == 0
         assert mock_extract.call_args.kwargs["retry_backoff"] == 1.0
+        assert mock_extract.call_args.kwargs["retry_max_backoff"] == 60.0
 
-    def test_max_retries_and_retry_backoff_custom(self, mocker):
+    def test_retry_options_custom(self, mocker):
         fake = MagicMock()
         fake.model_dump_json.return_value = "{}"
         mock_extract = _patch_extract(mocker, return_value=fake)
@@ -239,11 +241,14 @@ class TestMainSuccess:
                 "3",
                 "--retry-backoff",
                 "2.5",
+                "--retry-max-backoff",
+                "12.0",
             ]
         )
 
         assert mock_extract.call_args.kwargs["max_retries"] == 3
         assert mock_extract.call_args.kwargs["retry_backoff"] == 2.5
+        assert mock_extract.call_args.kwargs["retry_max_backoff"] == 12.0
 
     def test_invalid_max_retries_returns_1(self, capsys):
         exit_code = main(
@@ -270,12 +275,28 @@ class TestMainSuccess:
                 "--model",
                 "xai:grok-4.3",
                 "--retry-backoff",
-                "0",
+                "-0.1",
             ]
         )
 
         assert exit_code == 1
         assert "retry_backoff" in capsys.readouterr().err
+
+    def test_invalid_retry_max_backoff_returns_1(self, capsys):
+        exit_code = main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "xai:grok-4.3",
+                "--retry-max-backoff",
+                "-1",
+            ]
+        )
+
+        assert exit_code == 1
+        assert "retry_max_backoff" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------

@@ -37,7 +37,13 @@ from openextract._extract import (
     _install_hint,
     _is_public_ip,
     _is_safe_host,
+    _is_transient_model_exception,
+    _map_exception,
     _max_redirects,
+    _model_retry_after,
+    _model_status_code,
+    _parse_retry_after,
+    _retry_delay,
     _run_with_shared_agent,
     _url_fetch_timeout,
 )
@@ -792,6 +798,194 @@ class TestExtract:
             extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
         assert exc_info.value is original
 
+    @pytest.mark.parametrize(
+        "status_code,retryable",
+        [(400, False), (401, False), (403, False), (429, True), (500, True), (503, True)],
+    )
+    def test_model_http_error_preserves_retry_metadata(self, status_code, retryable):
+        from pydantic_ai.exceptions import ModelHTTPError
+
+        provider_error = ModelHTTPError(
+            status_code=status_code,
+            model_name="openai:gpt-5",
+            body="provider failed",
+        )
+        provider_error.headers = {"Retry-After": "12.5"}
+
+        mapped = _map_exception(provider_error)
+
+        assert isinstance(mapped, ModelError)
+        assert mapped.provider == "openai"
+        assert mapped.status_code == status_code
+        assert mapped.retryable is retryable
+        assert mapped.retry_after == 12.5
+
+    def test_transient_transport_model_error_is_retryable(self):
+        from pydantic_ai.exceptions import ModelAPIError
+
+        class APITimeoutError(ModelAPIError):
+            pass
+
+        mapped = _map_exception(APITimeoutError(model_name="anthropic:claude", message="timed out"))
+
+        assert isinstance(mapped, ModelError)
+        assert mapped.provider == "anthropic"
+        assert mapped.status_code is None
+        assert mapped.retryable is True
+        assert mapped.retry_after is None
+
+    def test_bedrock_transport_error_is_retryable(self):
+        from botocore.exceptions import EndpointConnectionError
+
+        mapped = _map_exception(EndpointConnectionError(endpoint_url="https://bedrock.example.com"))
+
+        assert isinstance(mapped, ModelError)
+        assert mapped.provider == "bedrock"
+        assert mapped.status_code is None
+        assert mapped.retryable is True
+
+    def test_unknown_model_error_is_fail_fast(self):
+        from pydantic_ai.exceptions import ModelAPIError
+
+        mapped = _map_exception(ModelAPIError(model_name="custom-model", message="failed"))
+
+        assert isinstance(mapped, ModelError)
+        assert mapped.provider is None
+        assert mapped.retryable is False
+
+    def test_model_error_constructor_remains_backwards_compatible(self):
+        error = ModelError("flaky")
+
+        assert str(error) == "flaky"
+        assert error.provider is None
+        assert error.status_code is None
+        assert error.retryable is True
+        assert error.retry_after is None
+
+    @pytest.mark.parametrize(
+        "status_code,retryable",
+        [(400, False), (401, False), (403, False), (429, True), (503, True)],
+    )
+    def test_model_error_constructor_infers_retryability(self, status_code, retryable):
+        error = ModelError("provider failed", status_code=status_code)
+
+        assert error.retryable is retryable
+
+
+class TestModelErrorMetadataHelpers:
+    def test_status_from_response_object(self):
+        error = Exception("failed")
+        error.response = MagicMock(status_code=502)  # type: ignore[attr-defined]
+
+        assert _model_status_code(error) == 502
+
+    def test_status_and_retry_after_from_raw_response(self):
+        error = Exception("failed")
+        error.raw_response = MagicMock(  # type: ignore[attr-defined]
+            status_code=503,
+            headers={"Retry-After": "8"},
+        )
+
+        assert _model_status_code(error) == 503
+        assert _model_retry_after(error) == 8
+
+    def test_status_from_bedrock_metadata(self):
+        error = Exception("failed")
+        error.response = {  # type: ignore[attr-defined]
+            "ResponseMetadata": {"HTTPStatusCode": 429}
+        }
+
+        assert _model_status_code(error) == 429
+
+    def test_status_from_integer_code(self):
+        error = Exception("failed")
+        error.code = 503  # type: ignore[attr-defined]
+
+        assert _model_status_code(error) == 503
+
+    def test_boolean_status_values_are_ignored(self):
+        error = Exception("failed")
+        error.status_code = True  # type: ignore[attr-defined]
+        error.response = {  # type: ignore[attr-defined]
+            "ResponseMetadata": {"HTTPStatusCode": False}
+        }
+        error.code = True  # type: ignore[attr-defined]
+
+        assert _model_status_code(error) is None
+
+    def test_non_mapping_bedrock_metadata_is_ignored(self):
+        error = Exception("failed")
+        error.response = {"ResponseMetadata": None}  # type: ignore[attr-defined]
+
+        assert _model_status_code(error) is None
+
+    def test_retry_after_from_response_headers(self):
+        error = Exception("failed")
+        error.response = MagicMock(  # type: ignore[attr-defined]
+            headers={"x-request-id": "123", "Retry-After": "7"}
+        )
+
+        assert _model_retry_after(error) == 7
+
+    def test_retry_after_from_direct_attribute(self):
+        error = Exception("failed")
+        error.retry_after = 6  # type: ignore[attr-defined]
+
+        assert _model_retry_after(error) == 6
+
+    def test_invalid_direct_retry_after_falls_back_to_headers(self):
+        error = Exception("failed")
+        error.retry_after = "invalid"  # type: ignore[attr-defined]
+        error.headers = {"Retry-After": "5"}  # type: ignore[attr-defined]
+
+        assert _model_retry_after(error) == 5
+
+    def test_retry_after_from_bedrock_metadata_headers(self):
+        error = Exception("failed")
+        error.response = {  # type: ignore[attr-defined]
+            "ResponseMetadata": {"HTTPHeaders": {"retry-after": "9"}}
+        }
+
+        assert _model_retry_after(error) == 9
+
+    @pytest.mark.parametrize(
+        "response",
+        [
+            {"ResponseMetadata": None},
+            {"ResponseMetadata": {"HTTPHeaders": None}},
+            {"Error": "not-a-mapping"},
+        ],
+    )
+    def test_malformed_response_metadata_is_ignored(self, response):
+        error = Exception("failed")
+        error.response = response  # type: ignore[attr-defined]
+
+        assert _model_retry_after(error) is None
+        assert _is_transient_model_exception(error, None) is False
+
+    def test_permanent_error_name_is_not_transient(self):
+        class AuthenticationError(Exception):
+            pass
+
+        assert _is_transient_model_exception(AuthenticationError(), None) is False
+
+    def test_permanent_grpc_status_is_not_transient(self):
+        class _Code:
+            name = "PERMISSION_DENIED"
+
+        class _GrpcError(Exception):
+            def code(self):
+                return _Code()
+
+        assert _is_transient_model_exception(_GrpcError(), None) is False
+
+    def test_empty_grpc_status_falls_back_to_class_name(self):
+        class ConnectionError(Exception):
+            def code(self):
+                return object()
+
+        assert _is_transient_model_exception(ConnectionError(), None) is True
+
     def test_extract_returns_only_model_instance(self, tmp_path, mocker):
         """Regression: extract() still returns just the schema instance, not a tuple."""
         local = tmp_path / "input.txt"
@@ -1031,6 +1225,27 @@ class TestExtractWithUsage:
 # ---------------------------------------------------------------------------
 
 
+class TestRetryAfterParsing:
+    @pytest.mark.parametrize("value", ["2.5", 3, 4.5])
+    def test_parses_delta_seconds(self, value):
+        assert _parse_retry_after(value) == float(value)
+
+    def test_parses_http_date(self, mocker):
+        mocker.patch("openextract._extract.time.time", return_value=1445412450.0)
+
+        assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") == 30.0
+
+    @pytest.mark.parametrize(
+        "value",
+        [None, True, -1, float("inf"), "not-a-date"],
+    )
+    def test_rejects_invalid_values(self, value):
+        assert _parse_retry_after(value) is None
+
+    def test_extreme_attempt_count_is_bounded_without_overflow(self):
+        assert _retry_delay(1.0, 60.0, 10_000, None) == 60.0
+
+
 class TestExtractRetry:
     def test_invalid_max_retries_is_rejected_before_extraction(self, mocker):
         once = mocker.patch("openextract._extract._extract_once")
@@ -1045,7 +1260,10 @@ class TestExtractRetry:
 
         once.assert_not_called()
 
-    @pytest.mark.parametrize("retry_backoff", [0, -1.0, float("inf"), "slow", True])
+    @pytest.mark.parametrize(
+        "retry_backoff",
+        [-1.0, float("inf"), float("nan"), "slow", True],
+    )
     def test_invalid_retry_backoff_is_rejected_before_extraction(self, mocker, retry_backoff):
         once = mocker.patch("openextract._extract._extract_once")
 
@@ -1058,6 +1276,50 @@ class TestExtractRetry:
             )
 
         once.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "retry_max_backoff",
+        [-1.0, float("inf"), float("nan"), "slow", True],
+    )
+    def test_invalid_retry_max_backoff_is_rejected_before_extraction(
+        self, mocker, retry_max_backoff
+    ):
+        once = mocker.patch("openextract._extract._extract_once")
+
+        with pytest.raises(ValueError, match="retry_max_backoff"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                retry_max_backoff=retry_max_backoff,  # type: ignore[arg-type]
+            )
+
+        once.assert_not_called()
+
+    def test_zero_backoff_values_are_allowed(self, mocker):
+        expected = _Person(name="Grace", age=85)
+        mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
+        once = mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=[ModelError("flaky"), expected],
+        )
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file="ignored",
+            max_retries=1,
+            retry_backoff=0,
+            retry_max_backoff=0,
+        )
+
+        assert result is expected
+        assert once.call_count == 2
+        sleep_mock.assert_called_once_with(0)
 
     def test_no_retry_by_default_raises_immediately(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
@@ -1100,6 +1362,33 @@ class TestExtractRetry:
         assert once.call_count == 3
         prepare.assert_called_once()
         assert sleep_mock.call_count == 2
+
+    @pytest.mark.parametrize("status_code", [400, 401, 403, 422])
+    def test_permanent_model_errors_are_not_retried(self, mocker, status_code):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
+        once = mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=ModelError(
+                "permanent",
+                status_code=status_code,
+                retryable=False,
+            ),
+        )
+
+        with pytest.raises(ModelError, match="permanent"):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=3,
+            )
+
+        assert once.call_count == 1
+        sleep_mock.assert_not_called()
 
     def test_retry_exhausted_raises_last_model_error(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
@@ -1150,6 +1439,53 @@ class TestExtractRetry:
         assert 1.0 <= delays[0] <= 1.25
         assert 2.0 <= delays[1] <= 2.5
         assert 4.0 <= delays[2] <= 5.0
+
+    def test_exponential_backoff_is_bounded(self, mocker):
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
+        mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=ModelError("nope"),
+        )
+
+        with pytest.raises(ModelError):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file="ignored",
+                max_retries=2,
+                retry_backoff=10,
+                retry_max_backoff=3,
+            )
+
+        assert [call.args[0] for call in sleep_mock.call_args_list] == [3, 3]
+
+    def test_retry_after_takes_precedence_and_is_bounded(self, mocker):
+        expected = _Person(name="Grace", age=85)
+        mocker.patch(
+            "openextract._extract._prepare_extraction",
+            return_value=(MagicMock(), ["prepared"]),
+        )
+        mocker.patch(
+            "openextract._extract._extract_once",
+            side_effect=[ModelError("rate limited", retry_after=120), expected],
+        )
+        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file="ignored",
+            max_retries=1,
+            retry_backoff=0.25,
+            retry_max_backoff=15,
+        )
+
+        assert result is expected
+        sleep_mock.assert_called_once_with(15)
 
     def test_schema_validation_error_is_not_retried(self, mocker):
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
@@ -1249,7 +1585,7 @@ class TestExtractAsyncRetry:
                 schema=_Person,
                 model="openai:gpt-5",
                 input_file="ignored",
-                retry_backoff=0,
+                retry_backoff=-1,
             )
 
         agent_cls.assert_not_called()
