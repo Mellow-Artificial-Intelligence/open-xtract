@@ -38,6 +38,8 @@ _URL_PREFIXES = ("http://", "https://")
 _DEFAULT_URL_FETCH_TIMEOUT = 30.0
 _DEFAULT_MAX_REDIRECTS = 10
 _DEFAULT_RETRY_MAX_BACKOFF = 60.0
+_OPENAI_PREFIX = "openai:"
+_OPENAI_RESPONSES_PREFIX = "openai-responses:"
 _URL_TIMEOUT_ENV = "OPENEXTRACT_URL_TIMEOUT"
 _MAX_REDIRECTS_ENV = "OPENEXTRACT_MAX_REDIRECTS"
 _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
@@ -102,6 +104,8 @@ _PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
 # listed here fall back to suggesting ``openextract[all]``.
 _PROVIDER_EXTRAS: dict[str, str] = {
     "openai": "openai",
+    "openai-chat": "openai",
+    "openai-responses": "openai",
     "anthropic": "anthropic",
     "google-gla": "google",
     "google-vertex": "google",
@@ -401,6 +405,13 @@ def _install_hint(model: str) -> str:
     return f"pip install '{target}'"
 
 
+def _route_model(model: str) -> str:
+    """Route shorthand OpenAI identifiers through the Responses API."""
+    if model.startswith(_OPENAI_PREFIX):
+        return f"{_OPENAI_RESPONSES_PREFIX}{model.removeprefix(_OPENAI_PREFIX)}"
+    return model
+
+
 def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent:
     """Construct the pydantic_ai Agent, handling the ollama output-type quirk.
 
@@ -410,7 +421,7 @@ def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent
     """
     try:
         return Agent(
-            model,
+            _route_model(model),
             instructions=instructions,
             output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
         )

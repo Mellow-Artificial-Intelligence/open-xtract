@@ -12,6 +12,9 @@ Examples use **OpenAI**, **Anthropic**, and **xAI** so you can see how provider 
 
 Install provider extras as needed: `openextract[openai]`, `openextract[anthropic]`, `openextract[xai]`, or `openextract[all]`.
 
+`openai:` model identifiers use the Responses API by default. Use
+`openai-chat:` only when a model specifically requires Chat Completions.
+
 Set `OPENEXTRACT_MODEL` to override every example with a single model (useful for CI or one-off testing).
 
 If a provider SDK is missing, the Python API raises `ProviderNotInstalledError`
