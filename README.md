@@ -153,6 +153,10 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 | Outlines     | `outlines:transformers/meta-llama/Llama-3.2-1B-Instruct` | Install the matching `pydantic-ai-slim[outlines-*]` backend |
 | Ollama       | `ollama:llama3`                                          | `openextract[openai]` |
 
+OpenAI identifiers using the concise `openai:` prefix are routed through the
+Responses API by default. Use `openai-responses:` to select it explicitly or
+`openai-chat:` to force the legacy Chat Completions API.
+
 Ollama and Cerebras work via the `openai`-compatible code path &mdash; no dedicated extra is required for either.
 
 Set the corresponding provider credentials in your environment (e.g. `XAI_API_KEY` for xAI). `openextract` loads `.env` automatically.

@@ -8,6 +8,10 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Changed
+- `openai:` model identifiers now use the OpenAI Responses API by default;
+  `openai-chat:` remains available as an explicit Chat Completions opt-in.
+
 ## [0.10.0] - 2026-08-01
 
 ### Added

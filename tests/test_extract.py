@@ -637,11 +637,30 @@ class TestExtract:
 
         assert result is expected
         agent_cls.assert_called_once()
+        assert agent_cls.call_args.args == ("openai-responses:gpt-5",)
         # Non-ollama models pass the schema directly as output_type.
         kwargs = agent_cls.call_args.kwargs
         assert kwargs["instructions"] == "pull the person"
         assert kwargs["output_type"] is _Person
         agent_instance.run_sync.assert_called_once()
+
+    @pytest.mark.parametrize(
+        ("model", "expected"),
+        [
+            ("openai:gpt-5.6-luna", "openai-responses:gpt-5.6-luna"),
+            ("openai-responses:gpt-5.6-luna", "openai-responses:gpt-5.6-luna"),
+            ("openai-chat:gpt-5.6-luna", "openai-chat:gpt-5.6-luna"),
+            ("anthropic:claude-sonnet-4", "anthropic:claude-sonnet-4"),
+        ],
+    )
+    def test_model_routing(self, tmp_path, mocker, model, expected):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        agent_cls, _ = _make_agent_mock(mocker, output=_Person(name="Ada", age=36))
+
+        extract(schema=_Person, model=model, input_file=str(local))
+
+        assert agent_cls.call_args.args == (expected,)
 
     def test_ollama_model_wraps_output_in_native_output(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
@@ -1010,6 +1029,8 @@ class TestProviderNotInstalled:
         ("model", "expected"),
         [
             ("openai:gpt-4o", "openextract[openai]"),
+            ("openai-chat:gpt-4o", "openextract[openai]"),
+            ("openai-responses:gpt-5.6-luna", "openextract[openai]"),
             ("anthropic:claude-sonnet-4-20250514", "openextract[anthropic]"),
             ("google-gla:gemini-2.5-flash", "openextract[google]"),
             ("google-vertex:gemini-2.5-pro", "openextract[google]"),
