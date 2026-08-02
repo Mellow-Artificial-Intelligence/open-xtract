@@ -8,9 +8,19 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Added
+- `InputTooLargeError`, a 50 MiB default per-input cap, the
+  `OPENEXTRACT_MAX_INPUT_BYTES` environment variable, `max_input_bytes` on all
+  extraction APIs, and `--max-input-bytes` on the CLI.
+
 ### Changed
 - `openai:` model identifiers now use the OpenAI Responses API by default;
   `openai-chat:` remains available as an explicit Chat Completions opt-in.
+
+### Security
+- Paths, URLs, bytes, file-like objects, stdin, and batch inputs now fail before
+  a model call when they exceed the configured cap. URL bodies are streamed and
+  bounded even when `Content-Length` is missing or incorrect.
 
 ## [0.10.0] - 2026-08-01
 

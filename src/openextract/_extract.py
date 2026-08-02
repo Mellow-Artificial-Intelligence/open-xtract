@@ -25,6 +25,7 @@ from pydantic_ai.output import NativeOutput
 
 from .exceptions import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -38,11 +39,14 @@ _URL_PREFIXES = ("http://", "https://")
 _DEFAULT_URL_FETCH_TIMEOUT = 30.0
 _DEFAULT_MAX_REDIRECTS = 10
 _DEFAULT_RETRY_MAX_BACKOFF = 60.0
+_DEFAULT_MAX_INPUT_BYTES = 50 * 1024 * 1024
+_INPUT_READ_CHUNK_SIZE = 64 * 1024
 _OPENAI_PREFIX = "openai:"
 _OPENAI_RESPONSES_PREFIX = "openai-responses:"
 _URL_TIMEOUT_ENV = "OPENEXTRACT_URL_TIMEOUT"
 _MAX_REDIRECTS_ENV = "OPENEXTRACT_MAX_REDIRECTS"
 _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
+_MAX_INPUT_BYTES_ENV = "OPENEXTRACT_MAX_INPUT_BYTES"
 _BYTES_MEDIA_TYPE_REQUIRED = (
     "media_type is required when input_file is bytes or a file-like object; "
     "pass it explicitly, e.g. extract(..., media_type='application/pdf')."
@@ -220,6 +224,73 @@ def _max_redirects() -> int:
     return _env_positive_int(_MAX_REDIRECTS_ENV, _DEFAULT_MAX_REDIRECTS)
 
 
+def _resolve_max_input_bytes(max_input_bytes: object) -> int:
+    """Resolve and validate the per-input byte limit.
+
+    An explicit value wins over ``OPENEXTRACT_MAX_INPUT_BYTES``. Invalid
+    configured values fail closed instead of silently disabling the limit.
+    """
+    value = max_input_bytes
+    from_environment = False
+    if value is None:
+        raw = os.environ.get(_MAX_INPUT_BYTES_ENV, "").strip()
+        if not raw:
+            return _DEFAULT_MAX_INPUT_BYTES
+        from_environment = True
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise ValueError(f"{_MAX_INPUT_BYTES_ENV} must be a positive integer.") from exc
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        if from_environment:
+            raise ValueError(f"{_MAX_INPUT_BYTES_ENV} must be a positive integer.")
+        raise ValueError("max_input_bytes must be a positive integer.")
+    return value
+
+
+def _safe_source_context(source: str) -> str:
+    """Return source context without URL credentials, query strings, or fragments."""
+    if source.startswith(_URL_PREFIXES):
+        parsed = urlparse(source)
+        host = parsed.hostname or "unknown-host"
+        try:
+            parsed_port = parsed.port
+        except ValueError:
+            parsed_port = None
+        port = f":{parsed_port}" if parsed_port is not None else ""
+        return f"URL {parsed.scheme}://{host}{port}{parsed.path or '/'}"
+    return f"path {Path(source).name!r}"
+
+
+def _input_too_large(*, limit: int, observed: int, source: str) -> InputTooLargeError:
+    return InputTooLargeError(
+        f"{source} exceeds the configured size limit ({limit} bytes); "
+        f"got at least {observed} bytes. Set {_MAX_INPUT_BYTES_ENV} or pass "
+        "max_input_bytes=... if this is intentional."
+    )
+
+
+def _enforce_max_input_bytes(data: bytes, *, limit: int, source: str) -> bytes:
+    if len(data) > limit:
+        raise _input_too_large(limit=limit, observed=len(data), source=source)
+    return data
+
+
+def _read_file_like_limited(stream: BinaryIO, *, limit: int, source: str) -> bytes:
+    """Read a binary stream in bounded chunks, including non-seekable streams."""
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = stream.read(min(_INPUT_READ_CHUNK_SIZE, limit - total + 1))
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > limit:
+            raise _input_too_large(limit=limit, observed=total, source=source)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """Return True only for globally routable public unicast addresses.
 
@@ -310,28 +381,162 @@ async def _fetch_url_async(url: str, client: httpx.AsyncClient) -> httpx.Respons
     raise UrlFetchError(f"Too many redirects (>{limit})")
 
 
-def _media_from_response(file_path: str, response: httpx.Response) -> tuple[bytes, str]:
-    """Resolve response bytes and MIME type for a URL input."""
+def _response_content_length(response: httpx.Response) -> int | None:
+    raw = response.headers.get("content-length")
+    if raw is None:
+        return None
+    try:
+        value = int(raw)
+    except ValueError:
+        return None
+    return value if value >= 0 else None
+
+
+def _read_response_limited(
+    response: httpx.Response,
+    *,
+    limit: int,
+    source: str,
+) -> bytes:
+    content_length = _response_content_length(response)
+    if content_length is not None and content_length > limit:
+        raise _input_too_large(limit=limit, observed=content_length, source=source)
+
+    chunks: list[bytes] = []
+    total = 0
+    for chunk in response.iter_bytes(chunk_size=_INPUT_READ_CHUNK_SIZE):
+        total += len(chunk)
+        if total > limit:
+            raise _input_too_large(limit=limit, observed=total, source=source)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+async def _read_response_limited_async(
+    response: httpx.Response,
+    *,
+    limit: int,
+    source: str,
+) -> bytes:
+    content_length = _response_content_length(response)
+    if content_length is not None and content_length > limit:
+        raise _input_too_large(limit=limit, observed=content_length, source=source)
+
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in response.aiter_bytes(chunk_size=_INPUT_READ_CHUNK_SIZE):
+        total += len(chunk)
+        if total > limit:
+            raise _input_too_large(limit=limit, observed=total, source=source)
+        chunks.append(chunk)
+    return b"".join(chunks)
+
+
+def _read_url_with_client(
+    url: str,
+    client: httpx.Client,
+    *,
+    limit: int,
+) -> tuple[bytes, Mapping[str, str]]:
+    """Fetch a URL and stream its final response through the byte cap."""
+    current = url
+    redirect_limit = _max_redirects()
+    for _ in range(redirect_limit):
+        host = urlparse(current).hostname
+        if not _is_safe_host(host):
+            raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
+        response = client.send(client.build_request("GET", current), stream=True)
+        try:
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    raise UrlFetchError(f"Redirect from {current!r} missing Location header")
+                current = str(httpx.URL(current).join(location))
+                continue
+            response.raise_for_status()
+            content = _read_response_limited(
+                response,
+                limit=limit,
+                source=_safe_source_context(current),
+            )
+            return content, dict(response.headers)
+        finally:
+            response.close()
+    raise UrlFetchError(f"Too many redirects (>{redirect_limit})")
+
+
+async def _read_url_with_client_async(
+    url: str,
+    client: httpx.AsyncClient,
+    *,
+    limit: int,
+) -> tuple[bytes, Mapping[str, str]]:
+    """Async counterpart to :func:`_read_url_with_client`."""
+    current = url
+    redirect_limit = _max_redirects()
+    for _ in range(redirect_limit):
+        host = urlparse(current).hostname
+        if not await asyncio.to_thread(_is_safe_host, host):
+            raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
+        response = await client.send(client.build_request("GET", current), stream=True)
+        try:
+            if response.is_redirect:
+                location = response.headers.get("location")
+                if not location:
+                    raise UrlFetchError(f"Redirect from {current!r} missing Location header")
+                current = str(httpx.URL(current).join(location))
+                continue
+            response.raise_for_status()
+            content = await _read_response_limited_async(
+                response,
+                limit=limit,
+                source=_safe_source_context(current),
+            )
+            return content, dict(response.headers)
+        finally:
+            await response.aclose()
+    raise UrlFetchError(f"Too many redirects (>{redirect_limit})")
+
+
+def _read_url(url: str, *, limit: int) -> tuple[bytes, Mapping[str, str]]:
+    with httpx.Client(follow_redirects=False, timeout=_url_fetch_timeout()) as client:
+        return _read_url_with_client(url, client, limit=limit)
+
+
+def _media_from_content(
+    file_path: str,
+    content: bytes,
+    headers: Mapping[str, str],
+) -> tuple[bytes, str]:
     media_type = _get_media_type(file_path)
     if media_type == _DEFAULT_MEDIA_TYPE:
-        header = response.headers.get("content-type", "").split(";", 1)[0].strip()
+        header = headers.get("content-type", "").split(";", 1)[0].strip()
         if header:
             media_type = header
-    return response.content, media_type
+    return content, media_type
 
 
-def _read_from_path(file_path: str) -> tuple[bytes, str]:
+def _read_from_path(file_path: str, *, max_input_bytes: int) -> tuple[bytes, str]:
     """Read bytes from a local path or http(s) URL; return (bytes, media_type)."""
     if file_path.startswith(_URL_PREFIXES):
-        response = _fetch_url(file_path)
-        return _media_from_response(file_path, response)
+        content, headers = _read_url(file_path, limit=max_input_bytes)
+        return _media_from_content(file_path, content, headers)
 
-    return Path(file_path).read_bytes(), _get_media_type(file_path)
+    path = Path(file_path)
+    source = _safe_source_context(file_path)
+    size = path.stat().st_size
+    if size > max_input_bytes:
+        raise _input_too_large(limit=max_input_bytes, observed=size, source=source)
+    with path.open("rb") as stream:
+        content = _read_file_like_limited(stream, limit=max_input_bytes, source=source)
+    return content, _get_media_type(file_path)
 
 
 async def _read_from_path_async(
     file_path: str,
     client: httpx.AsyncClient | None,
+    *,
+    max_input_bytes: int,
 ) -> tuple[bytes, str]:
     """Async counterpart to :func:`_read_from_path`."""
     if file_path.startswith(_URL_PREFIXES):
@@ -340,18 +545,31 @@ async def _read_from_path_async(
                 follow_redirects=False,
                 timeout=_url_fetch_timeout(),
             ) as owned_client:
-                response = await _fetch_url_async(file_path, owned_client)
+                content, headers = await _read_url_with_client_async(
+                    file_path,
+                    owned_client,
+                    limit=max_input_bytes,
+                )
         else:
-            response = await _fetch_url_async(file_path, client)
-        return _media_from_response(file_path, response)
+            content, headers = await _read_url_with_client_async(
+                file_path,
+                client,
+                limit=max_input_bytes,
+            )
+        return _media_from_content(file_path, content, headers)
 
-    media_bytes = await asyncio.to_thread(Path(file_path).read_bytes)
-    return media_bytes, _get_media_type(file_path)
+    return await asyncio.to_thread(
+        _read_from_path,
+        file_path,
+        max_input_bytes=max_input_bytes,
+    )
 
 
 def _get_media(
     input_file: str | bytes | BinaryIO,
     media_type: str | None = None,
+    *,
+    max_input_bytes: int | None = None,
 ) -> tuple[bytes, str]:
     """Resolve ``input_file`` to ``(bytes, media_type)``.
 
@@ -359,19 +577,26 @@ def _get_media(
     objects (anything with a ``.read()`` method) are passed through. For the
     latter two, ``media_type`` is required.
     """
+    limit = _resolve_max_input_bytes(max_input_bytes)
     if isinstance(input_file, str):
-        file_bytes, resolved_type = _read_from_path(input_file)
+        file_bytes, resolved_type = _read_from_path(input_file, max_input_bytes=limit)
         return file_bytes, media_type or resolved_type
 
     if isinstance(input_file, bytes):
         if media_type is None:
             raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
-        return input_file, media_type
+        return (
+            _enforce_max_input_bytes(input_file, limit=limit, source="bytes input"),
+            media_type,
+        )
 
     if hasattr(input_file, "read"):
         if media_type is None:
             raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
-        return input_file.read(), media_type
+        return (
+            _read_file_like_limited(input_file, limit=limit, source="file-like input"),
+            media_type,
+        )
 
     raise TypeError(
         "input_file must be a str path/URL, bytes, or a file-like object with a .read() method."
@@ -382,19 +607,31 @@ async def _get_media_async(
     input_file: str | bytes | BinaryIO,
     client: httpx.AsyncClient | None = None,
     media_type: str | None = None,
+    *,
+    max_input_bytes: int | None = None,
 ) -> tuple[bytes, str]:
     """Resolve media without blocking the event loop on disk, DNS, or stream I/O."""
+    limit = _resolve_max_input_bytes(max_input_bytes)
     if isinstance(input_file, str):
-        file_bytes, resolved_type = await _read_from_path_async(input_file, client)
+        file_bytes, resolved_type = await _read_from_path_async(
+            input_file,
+            client,
+            max_input_bytes=limit,
+        )
         return file_bytes, media_type or resolved_type
 
     if isinstance(input_file, bytes):
-        return _get_media(input_file, media_type=media_type)
+        return _get_media(input_file, media_type=media_type, max_input_bytes=limit)
 
     if hasattr(input_file, "read"):
-        return await asyncio.to_thread(_get_media, input_file, media_type)
+        return await asyncio.to_thread(
+            _get_media,
+            input_file,
+            media_type,
+            max_input_bytes=limit,
+        )
 
-    return _get_media(input_file, media_type=media_type)
+    return _get_media(input_file, media_type=media_type, max_input_bytes=limit)
 
 
 def _install_hint(model: str) -> str:
@@ -619,10 +856,15 @@ def _prepare_run(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int,
 ) -> tuple[Agent, list]:
     """Load env, resolve the media payload, and build the agent + run inputs."""
     _ensure_dotenv_loaded()
-    file_bytes, file_type = _get_media(input_file, media_type=media_type)
+    file_bytes, file_type = _get_media(
+        input_file,
+        media_type=media_type,
+        max_input_bytes=max_input_bytes,
+    )
     agent = _build_agent(schema, model, instructions)
     return agent, _build_run_inputs(file_bytes, file_type)
 
@@ -633,11 +875,17 @@ async def _prepare_run_async(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[Agent, list]:
     """Async media preparation plus agent construction."""
     _ensure_dotenv_loaded()
-    file_bytes, file_type = await _get_media_async(input_file, client, media_type=media_type)
+    file_bytes, file_type = await _get_media_async(
+        input_file,
+        client,
+        media_type=media_type,
+        max_input_bytes=max_input_bytes,
+    )
     agent = _build_agent(schema, model, instructions)
     return agent, _build_run_inputs(file_bytes, file_type)
 
@@ -648,10 +896,18 @@ def _prepare_extraction(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int,
 ) -> tuple[Agent, list]:
     """Prepare one extraction while applying the public exception mapping."""
     with _extraction_errors():
-        return _prepare_run(schema, model, input_file, instructions, media_type)
+        return _prepare_run(
+            schema,
+            model,
+            input_file,
+            instructions,
+            media_type,
+            max_input_bytes,
+        )
 
 
 async def _prepare_extraction_async(
@@ -660,6 +916,7 @@ async def _prepare_extraction_async(
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
+    max_input_bytes: int,
     client: httpx.AsyncClient | None = None,
 ) -> tuple[Agent, list]:
     """Prepare one async extraction while applying public exception mapping."""
@@ -670,6 +927,7 @@ async def _prepare_extraction_async(
             input_file,
             instructions,
             media_type,
+            max_input_bytes,
             client,
         )
 
@@ -678,6 +936,8 @@ async def _prepare_run_inputs_async(
     input_file: str | bytes | BinaryIO,
     media_type: str | None,
     client: httpx.AsyncClient | None = None,
+    *,
+    max_input_bytes: int,
 ) -> list:
     """Resolve one async media input and build a prompt for retry reuse."""
     with _extraction_errors():
@@ -685,6 +945,7 @@ async def _prepare_run_inputs_async(
             input_file,
             client,
             media_type=media_type,
+            max_input_bytes=max_input_bytes,
         )
         return _build_run_inputs(file_bytes, file_type)
 
@@ -810,6 +1071,7 @@ def extract(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_input_bytes: int | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
@@ -826,6 +1088,8 @@ def extract(
         instructions: Optional natural-language guidance for the LLM.
         media_type: Optional MIME type. Required for ``bytes`` and file-like
             inputs; overrides the guess for ``str`` inputs when provided.
+        max_input_bytes: Maximum bytes to load for this input. ``None`` uses
+            ``OPENEXTRACT_MAX_INPUT_BYTES`` or the 50 MiB default.
         max_retries: Number of additional attempts after a transient
             ``ModelError``. Defaults to 0 (no retries, single attempt).
         retry_backoff: Base backoff in seconds. Sleep between attempts is
@@ -840,13 +1104,22 @@ def extract(
     Raises:
         TypeError: If ``input_file`` is bytes or file-like and ``media_type``
             is not provided.
+        InputTooLargeError: If the resolved input exceeds ``max_input_bytes``.
         UrlFetchError: If the URL cannot be fetched or returns a non-2xx status.
         SchemaValidationError: If the model output doesn't match the schema.
         ModelError: If retries (if any) are exhausted.
         ExtractionError: For other extraction failures.
     """
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
-    agent, inputs = _prepare_extraction(schema, model, input_file, instructions, media_type)
+    limit = _resolve_max_input_bytes(max_input_bytes)
+    agent, inputs = _prepare_extraction(
+        schema,
+        model,
+        input_file,
+        instructions,
+        media_type,
+        limit,
+    )
     return _run_with_retries_sync(
         lambda: _extract_once(agent, inputs),
         max_retries=max_retries,
@@ -862,6 +1135,7 @@ def extract_with_usage(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_input_bytes: int | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
@@ -872,7 +1146,15 @@ def extract_with_usage(
     the tokens consumed by the successful model call.
     """
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
-    agent, inputs = _prepare_extraction(schema, model, input_file, instructions, media_type)
+    limit = _resolve_max_input_bytes(max_input_bytes)
+    agent, inputs = _prepare_extraction(
+        schema,
+        model,
+        input_file,
+        instructions,
+        media_type,
+        limit,
+    )
 
     def _once() -> tuple[T, Usage]:
         result = _run_extraction(agent, inputs)
@@ -893,18 +1175,21 @@ async def extract_with_usage_async(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_input_bytes: int | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
+    limit = _resolve_max_input_bytes(max_input_bytes)
     agent, inputs = await _prepare_extraction_async(
         schema,
         model,
         input_file,
         instructions,
         media_type,
+        limit,
     )
 
     async def _once() -> tuple[T, Usage]:
@@ -926,18 +1211,21 @@ async def extract_async(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_input_bytes: int | None = None,
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
+    limit = _resolve_max_input_bytes(max_input_bytes)
     agent, inputs = await _prepare_extraction_async(
         schema,
         model,
         input_file,
         instructions,
         media_type,
+        limit,
     )
 
     async def _once() -> T:
@@ -973,12 +1261,14 @@ async def _gather_extractions(
     max_concurrency: int,
     return_exceptions: bool,
     media_type: str | None,
+    max_input_bytes: int | None,
     max_retries: int,
     retry_backoff: float,
     retry_max_backoff: float,
 ) -> list:
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     _validate_max_concurrency(max_concurrency)
+    limit = _resolve_max_input_bytes(max_input_bytes)
     files = list(input_files)
     if not files:
         return []
@@ -995,8 +1285,15 @@ async def _gather_extractions(
     ) as client:
 
         async def _bounded(item):
+            # Keep preparation under the semaphore for the full model call so
+            # at most ``max_concurrency`` resolved payloads are buffered.
             async with semaphore:
-                inputs = await _prepare_run_inputs_async(item, media_type, client)
+                inputs = await _prepare_run_inputs_async(
+                    item,
+                    media_type,
+                    client,
+                    max_input_bytes=limit,
+                )
 
                 async def _once():
                     return await _run_with_shared_agent(agent, inputs)
@@ -1019,6 +1316,7 @@ def extract_many(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_input_bytes: int | None = None,
     max_concurrency: int = 5,
     return_exceptions: bool = False,
     max_retries: int = 0,
@@ -1035,6 +1333,8 @@ def extract_many(
         media_type: Optional MIME type applied uniformly to every item.  Required
             when ``input_files`` contains ``bytes`` or file-like objects; optional
             override for path/URL items.
+        max_input_bytes: Per-item byte limit. ``None`` uses
+            ``OPENEXTRACT_MAX_INPUT_BYTES`` or the 50 MiB default.
         max_concurrency: Maximum number of in-flight extractions.
         return_exceptions: If True, exceptions are returned in-place instead of raised
             (mirrors :func:`asyncio.gather`).
@@ -1072,6 +1372,7 @@ def extract_many(
             max_concurrency,
             return_exceptions,
             media_type,
+            max_input_bytes,
             max_retries,
             retry_backoff,
             retry_max_backoff,
@@ -1086,6 +1387,7 @@ async def extract_many_async(
     instructions: str | None = None,
     *,
     media_type: str | None = None,
+    max_input_bytes: int | None = None,
     max_concurrency: int = 5,
     return_exceptions: bool = False,
     max_retries: int = 0,
@@ -1101,6 +1403,7 @@ async def extract_many_async(
         max_concurrency,
         return_exceptions,
         media_type,
+        max_input_bytes,
         max_retries,
         retry_backoff,
         retry_max_backoff,
