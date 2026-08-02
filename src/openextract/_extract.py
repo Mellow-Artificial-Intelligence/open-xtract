@@ -9,7 +9,7 @@ import os
 import random
 import socket
 import time
-from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
@@ -1234,6 +1234,136 @@ async def _run_with_shared_agent(
     return result.output
 
 
+async def _cancel_tasks(tasks: Iterable[asyncio.Task[object]]) -> None:
+    """Cancel and await every task so no batch work outlives its caller."""
+    task_list = list(tasks)
+    for task in task_list:
+        task.cancel()
+    if task_list:
+        await asyncio.gather(*task_list, return_exceptions=True)
+
+
+async def _iter_extractions(
+    schema: type[T],
+    model: str,
+    input_files: Iterable[str | bytes | BinaryIO],
+    instructions: str | None,
+    max_concurrency: int,
+    return_exceptions: bool,
+    media_type: str | None,
+    max_input_bytes: int,
+    max_retries: int,
+    retry_backoff: float,
+    retry_max_backoff: float,
+) -> AsyncIterator[tuple[int, T | Exception]]:
+    """Yield indexed batch results in completion order with bounded work."""
+    file_iterator = iter(input_files)
+    try:
+        first_item = next(file_iterator)
+    except StopIteration:
+        return
+
+    # Building the Agent (and its provider HTTP client) is ~32 ms; sharing one
+    # across the batch saves ~32 ms × (N-1) per call. The Agent is stateless
+    # between runs and stays inside this event loop, so this is safe.
+    agent = _build_agent(schema, model, instructions)
+    stop = asyncio.Event()
+    pending: dict[asyncio.Task[object], int] = {}
+    next_index = 0
+    exhausted = False
+
+    async with httpx.AsyncClient(
+        follow_redirects=False,
+        timeout=_url_fetch_timeout(),
+    ) as client:
+
+        async def _run_item(item: str | bytes | BinaryIO) -> object:
+            try:
+                inputs = await _prepare_run_inputs_async(
+                    item,
+                    media_type,
+                    client,
+                    max_input_bytes=max_input_bytes,
+                )
+
+                async def _once():
+                    # A sibling may have failed while this item was being prepared
+                    # or waiting to retry. Do not begin another model call afterward.
+                    if stop.is_set():
+                        raise asyncio.CancelledError
+                    return await _run_with_shared_agent(agent, inputs)
+
+                return await _run_with_retries_async(
+                    _once,
+                    max_retries=max_retries,
+                    retry_backoff=retry_backoff,
+                    retry_max_backoff=retry_max_backoff,
+                )
+            except Exception:
+                if not return_exceptions:
+                    stop.set()
+                raise
+
+        def _schedule(item: str | bytes | BinaryIO) -> None:
+            nonlocal next_index
+            task = asyncio.create_task(_run_item(item))
+            pending[task] = next_index
+            next_index += 1
+
+        def _fill_slots() -> None:
+            nonlocal exhausted
+            while len(pending) < max_concurrency and not exhausted:
+                if next_index == 0:
+                    item = first_item
+                else:
+                    try:
+                        item = next(file_iterator)
+                    except StopIteration:
+                        exhausted = True
+                        break
+                _schedule(item)
+
+        try:
+            _fill_slots()
+            while pending:
+                done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+                completed: list[tuple[int, T | Exception]] = []
+                failures: list[Exception] = []
+                child_cancelled = False
+
+                # Stable index ordering makes simultaneous completions deterministic.
+                for task in sorted(done, key=pending.__getitem__):
+                    index = pending.pop(task)
+                    if task.cancelled():
+                        child_cancelled = True
+                        continue
+                    try:
+                        result = task.result()
+                    except Exception as exc:
+                        if return_exceptions:
+                            completed.append((index, exc))
+                        else:
+                            failures.append(exc)
+                    else:
+                        completed.append((index, cast(T, result)))
+
+                if failures:
+                    await _cancel_tasks(pending)
+                    pending.clear()
+                    raise failures[0]
+                if child_cancelled:
+                    raise asyncio.CancelledError
+
+                # Refill only after every completion has been checked for a
+                # fail-fast error. Pending tasks therefore stay O(concurrency).
+                _fill_slots()
+                for indexed_result in completed:
+                    yield indexed_result
+        finally:
+            await _cancel_tasks(pending)
+            pending.clear()
+
+
 async def _gather_extractions(
     schema: type[T],
     model: str,
@@ -1250,43 +1380,24 @@ async def _gather_extractions(
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     _validate_max_concurrency(max_concurrency)
     limit = _resolve_max_input_bytes(max_input_bytes)
-    files = list(input_files)
-    if not files:
-        return []
-    # Building the Agent (and its provider HTTP client) is ~32 ms; sharing one
-    # across the batch saves ~32 ms × (N-1) per call. The Agent is stateless
-    # between runs and stays inside this event loop, so this is safe.
-    agent = _build_agent(schema, model, instructions)
-    semaphore = asyncio.Semaphore(max_concurrency)
-
-    async with httpx.AsyncClient(
-        follow_redirects=False,
-        timeout=_url_fetch_timeout(),
-    ) as client:
-
-        async def _bounded(item):
-            # Keep preparation under the semaphore for the full model call so
-            # at most ``max_concurrency`` resolved payloads are buffered.
-            async with semaphore:
-                inputs = await _prepare_run_inputs_async(
-                    item,
-                    media_type,
-                    client,
-                    max_input_bytes=limit,
-                )
-
-                async def _once():
-                    return await _run_with_shared_agent(agent, inputs)
-
-                return await _run_with_retries_async(
-                    _once,
-                    max_retries=max_retries,
-                    retry_backoff=retry_backoff,
-                    retry_max_backoff=retry_max_backoff,
-                )
-
-        tasks = [_bounded(item) for item in files]
-        return await asyncio.gather(*tasks, return_exceptions=return_exceptions)
+    indexed_results = [
+        item
+        async for item in _iter_extractions(
+            schema,
+            model,
+            input_files,
+            instructions,
+            max_concurrency,
+            return_exceptions,
+            media_type,
+            limit,
+            max_retries,
+            retry_backoff,
+            retry_max_backoff,
+        )
+    ]
+    indexed_results.sort(key=lambda item: item[0])
+    return [result for _, result in indexed_results]
 
 
 def extract_many(
@@ -1384,6 +1495,52 @@ async def extract_many_async(
         return_exceptions,
         media_type,
         max_input_bytes,
+        max_retries,
+        retry_backoff,
+        retry_max_backoff,
+    )
+
+
+def iter_extract_many_async(
+    schema: type[T],
+    model: str,
+    input_files: Iterable[str | bytes | BinaryIO],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> AsyncIterator[tuple[int, T | Exception]]:
+    """Stream ``(input_index, result)`` pairs in completion order.
+
+    Unlike :func:`extract_many_async`, this API does not eagerly consume
+    ``input_files`` and does not wait for the complete batch before yielding.
+    At most ``max_concurrency`` items are scheduled at once. If
+    ``return_exceptions`` is true, item failures are yielded as the result;
+    otherwise the first failure cancels and awaits all outstanding work.
+    ``max_input_bytes`` applies the same per-item cap as the list APIs.
+
+    The function itself is synchronous because it returns an async iterator::
+
+        async for index, result in iter_extract_many_async(...):
+            ...
+    """
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
+    _validate_max_concurrency(max_concurrency)
+    limit = _resolve_max_input_bytes(max_input_bytes)
+    return _iter_extractions(
+        schema,
+        model,
+        input_files,
+        instructions,
+        max_concurrency,
+        return_exceptions,
+        media_type,
+        limit,
         max_retries,
         retry_backoff,
         retry_max_backoff,

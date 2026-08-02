@@ -29,6 +29,7 @@ from openextract import (
     extract_many_async,
     extract_with_usage,
     extract_with_usage_async,
+    iter_extract_many_async,
 )
 from openextract._extract import (
     _fetch_url,
@@ -115,6 +116,7 @@ def test_star_import_exposes_only_existing_names():
         "extract_async",
         "extract_many",
         "extract_many_async",
+        "iter_extract_many_async",
         "extract_with_usage",
         "extract_with_usage_async",
         "Usage",
@@ -2623,3 +2625,216 @@ class TestExtractManyAsync:
         )
 
         assert results == expected
+
+
+# ---------------------------------------------------------------------------
+# iter_extract_many_async
+# ---------------------------------------------------------------------------
+
+
+class TestIterExtractManyAsync:
+    async def test_yields_in_completion_order_before_batch_finishes(self, mocker):
+        release_first = asyncio.Event()
+
+        async def fake_run(agent, input_file, media_type, client):
+            if input_file == "slow":
+                await release_first.wait()
+            return _Person(name=input_file, age=1)
+
+        _stub_shared_agent(mocker, fake_run)
+        results = iter_extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=["slow", "fast"],
+            max_concurrency=2,
+        )
+
+        first = await anext(results)
+        assert first == (1, _Person(name="fast", age=1))
+
+        release_first.set()
+        assert await anext(results) == (0, _Person(name="slow", age=1))
+        with pytest.raises(StopAsyncIteration):
+            await anext(results)
+
+    async def test_generator_consumption_and_scheduling_are_bounded(self, mocker):
+        consumed: list[int] = []
+        started: list[int] = []
+        all_started = asyncio.Event()
+        release = asyncio.Event()
+
+        def inputs():
+            for index in range(100):
+                consumed.append(index)
+                yield index
+
+        async def fake_run(agent, input_file, media_type, client):
+            started.append(input_file)
+            if len(started) == 3:
+                all_started.set()
+            await release.wait()
+            return _Person(name=str(input_file), age=1)
+
+        _stub_shared_agent(mocker, fake_run)
+        results = iter_extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=inputs(),
+            max_concurrency=3,
+        )
+        first_result = asyncio.create_task(anext(results))
+
+        await asyncio.wait_for(all_started.wait(), timeout=1)
+        assert consumed == [0, 1, 2]
+        assert started == [0, 1, 2]
+
+        release.set()
+        await first_result
+        await results.aclose()
+
+    async def test_fail_fast_cancels_and_awaits_without_starting_more(self, mocker):
+        consumed: list[int] = []
+        started: list[int] = []
+        both_started = asyncio.Event()
+        sibling_cancelled = asyncio.Event()
+
+        def inputs():
+            for index in range(10):
+                consumed.append(index)
+                yield index
+
+        async def fake_run(agent, input_file, media_type, client):
+            started.append(input_file)
+            if len(started) == 2:
+                both_started.set()
+            await both_started.wait()
+            if input_file == 0:
+                raise ModelError("stop")
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                sibling_cancelled.set()
+                raise
+
+        _stub_shared_agent(mocker, fake_run)
+        results = iter_extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=inputs(),
+            max_concurrency=2,
+        )
+
+        with pytest.raises(ModelError, match="stop"):
+            await anext(results)
+
+        assert sibling_cancelled.is_set()
+        assert consumed == [0, 1]
+        assert started == [0, 1]
+
+    async def test_return_exceptions_continues_stream(self, mocker):
+        async def fake_run(agent, input_file, media_type, client):
+            if input_file == "bad":
+                raise SchemaValidationError("bad schema")
+            return _Person(name=input_file, age=1)
+
+        _stub_shared_agent(mocker, fake_run)
+        results = [
+            item
+            async for item in iter_extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["first", "bad", "last"],
+                max_concurrency=2,
+                return_exceptions=True,
+            )
+        ]
+        by_index = dict(results)
+
+        assert by_index[0] == _Person(name="first", age=1)
+        assert isinstance(by_index[1], SchemaValidationError)
+        assert by_index[2] == _Person(name="last", age=1)
+
+    async def test_input_size_errors_are_yielded_in_place(self, mocker):
+        expected = _Person(name="ok", age=1)
+        run_result = MagicMock(output=expected)
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=run_result)
+        mocker.patch("openextract._extract._build_agent", return_value=agent)
+
+        results = [
+            item
+            async for item in iter_extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=[b"ok", b"too-large"],
+                media_type="text/plain",
+                max_input_bytes=5,
+                return_exceptions=True,
+            )
+        ]
+        by_index = dict(results)
+
+        assert by_index[0] is expected
+        assert isinstance(by_index[1], InputTooLargeError)
+        assert agent.run.await_count == 1
+
+    async def test_child_cancellation_propagates_and_cleans_up(self, mocker):
+        sibling_cancelled = asyncio.Event()
+
+        async def fake_run(agent, input_file, media_type, client):
+            if input_file == "cancel":
+                raise asyncio.CancelledError
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                sibling_cancelled.set()
+                raise
+
+        _stub_shared_agent(mocker, fake_run)
+        results = iter_extract_many_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=["cancel", "sibling"],
+            max_concurrency=2,
+        )
+
+        with pytest.raises(asyncio.CancelledError):
+            await anext(results)
+
+        assert sibling_cancelled.is_set()
+
+    async def test_empty_input_does_not_build_agent(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        results = [
+            item
+            async for item in iter_extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=iter(()),
+            )
+        ]
+
+        assert results == []
+        build_mock.assert_not_called()
+
+    def test_invalid_options_fail_when_iterator_is_created(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        with pytest.raises(ValueError, match="max_concurrency"):
+            iter_extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["a.txt"],
+                max_concurrency=-1,
+            )
+
+        with pytest.raises(ValueError, match="max_input_bytes"):
+            iter_extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["a.txt"],
+                max_input_bytes=0,
+            )
+
+        build_mock.assert_not_called()

@@ -41,6 +41,17 @@ Do not call this function from a running event loop; use
 Async counterpart to `extract_many`; it has the same arguments, result ordering,
 and per-item retry behavior.
 
+### `iter_extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Return an async iterator of `(input_index, result)` pairs in completion order.
+Inputs are consumed lazily, at most `max_concurrency` items are scheduled, and
+results are available before the complete batch finishes. Simultaneous
+completions are yielded in input-index order.
+
+With `return_exceptions=False`, the first failure cancels and awaits outstanding
+work before being raised. With `return_exceptions=True`, item exceptions are
+yielded in the result position and streaming continues.
+
 ## Common arguments
 
 | Argument | Type | Description |

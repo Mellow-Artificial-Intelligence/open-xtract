@@ -322,6 +322,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |
 | `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain. Calling it from a running event loop raises `RuntimeError`; use `extract_many_async` in async code. |
 | `extract_many_async` | Provisional | Async batch API with the same return shape, option constraints, and per-item retry behavior as `extract_many`. |
+| `iter_extract_many_async` | Provisional | Bounded async iterator yielding `(input_index, result)` pairs in completion order. |
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |

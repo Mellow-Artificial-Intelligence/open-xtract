@@ -10,6 +10,7 @@ from ._extract import (
     extract_many_async,
     extract_with_usage,
     extract_with_usage_async,
+    iter_extract_many_async,
 )
 from .exceptions import (
     ExtractionError,
@@ -25,6 +26,7 @@ __all__ = [
     "extract_async",
     "extract_many",
     "extract_many_async",
+    "iter_extract_many_async",
     "extract_with_usage",
     "extract_with_usage_async",
     "Usage",
