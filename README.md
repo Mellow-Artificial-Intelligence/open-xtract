@@ -90,6 +90,27 @@ result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=pdf_bytes, med
 result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=open("q4.pdf", "rb"), media_type="application/pdf")
 ```
 
+### Input size limits
+
+Every input is capped at 50 MiB (`52_428_800` bytes) before a model call.
+Local paths are checked before and during reading, URL bodies are streamed
+through the cap even when `Content-Length` is missing or incorrect, and binary
+streams are read in bounded chunks. Override the limit for one call with
+`max_input_bytes`, or set `OPENEXTRACT_MAX_INPUT_BYTES` for the process:
+
+```python
+result = extract(
+    schema=PdfInfo,
+    model="xai:grok-4.3",
+    input_file="./reports/large.pdf",
+    max_input_bytes=100 * 1024 * 1024,
+)
+```
+
+Oversized inputs raise `InputTooLargeError` before a model request. The CLI
+exposes the same control as `--max-input-bytes` and reports the error with exit
+code `5`.
+
 ### Retry on transient model errors
 
 ```python
@@ -159,7 +180,9 @@ Responses API by default. Use `openai-responses:` to select it explicitly or
 
 Ollama and Cerebras work via the `openai`-compatible code path &mdash; no dedicated extra is required for either.
 
-Set the corresponding provider credentials in your environment (e.g. `XAI_API_KEY` for xAI). `openextract` loads `.env` automatically.
+Set the corresponding provider credentials in your environment (e.g.
+`XAI_API_KEY` for xAI). The CLI and bundled examples load `.env` files; the
+Python library leaves environment configuration to the host application.
 
 OpenRouter and Cerebras are openai-compatible (they go through the `openai` client under the hood), so their errors are already classified via the existing openai path &mdash; no separate exception handling is needed.
 
@@ -212,6 +235,7 @@ cat ./reports/q4.pdf | openextract - \
 - `--output` is `json` (default) or `repr`.
 - `--max-retries`, `--retry-backoff`, and `--retry-max-backoff` match the Python
   API retry behavior.
+- `--max-input-bytes` overrides the 50 MiB per-input cap.
 - `--continue-on-error` (batch only) keeps processing when an input fails; each
   failure is emitted inline as `{"input", "error", "error_type"}` and the command
   exits `7` if any input failed. Without it, a batch aborts on the first failure.
@@ -236,10 +260,10 @@ Runnable scripts live in [`examples/`](examples/), grouped by use case (local fi
 
 ```bash
 # Run all fixture-based examples (uses OpenAI, Anthropic, and xAI — see examples/README.md)
-uv run python examples/run_all.py
+uv run python -m examples.run_all
 
 # Single example with the bundled sample image
-uv run python examples/basic/local_file.py --fixture
+uv run python -m examples.basic.local_file --fixture
 ```
 
 [See the examples/ directory](examples/) for the full source.
@@ -249,6 +273,7 @@ uv run python examples/basic/local_file.py --fixture
 ```python
 from openextract import (
     extract,
+    InputTooLargeError,
     UrlFetchError,
     SchemaValidationError,
     ModelError,
@@ -260,6 +285,8 @@ try:
     result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=url)
 except UrlFetchError:
     ...  # The URL could not be fetched
+except InputTooLargeError:
+    ...  # The input exceeded the configured byte limit
 except SchemaValidationError:
     ...  # The model's output did not match your schema
 except ProviderNotInstalledError:
@@ -275,91 +302,10 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 ## API reference
 
-### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-| Argument        | Type                          | Description                                                                                                       |
-| --------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `schema`        | `type[BaseModel]`             | A Pydantic model class describing the desired output shape.                                                       |
-| `model`         | `str`                         | A `pydantic-ai` model identifier (e.g. `"xai:grok-4.3"`).                                                         |
-| `input_file`    | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
-| `instructions`  | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
-| `media_type`    | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
-| `max_retries`   | `int` (keyword-only)          | Extra attempts after a transient `ModelError`. Must be a non-negative integer. Defaults to `0` (no retry).       |
-| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter. Must be non-negative and finite.                               |
-| `retry_max_backoff` | `float` (keyword-only)    | Maximum retry delay, including `Retry-After`. Must be non-negative and finite. Defaults to `60.0`.               |
-
-Returns an instance of `schema`.
-
-### `extract_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync` and accepts the same arguments.
-
-Returns an instance of `schema`.
-
-### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Like `extract`, but returns `(output, Usage)` where `Usage` is a frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. Useful for cost tracking and logging. Uses the same `ModelError` retry behavior as `extract`.
-
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Async sibling of `extract_with_usage`; returns `(output, Usage)`.
-
-### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Run concurrent extractions from synchronous code. Each item in `input_files` is a path, URL, `bytes`, or file-like object (same rules as `extract`). Results are returned in input order.
-
-Do not call `extract_many` from a running event loop (for example inside
-`async def` or a notebook with an active loop). It uses `asyncio.run` and raises
-`RuntimeError` with a pointer to `extract_many_async`. Async callers should use
-`await extract_many_async(...)`.
-
-| Argument             | Type                         | Description                                                                 |
-| -------------------- | ---------------------------- | --------------------------------------------------------------------------- |
-| `input_files`        | `Iterable[str \| bytes \| BinaryIO]` | One input per extraction.                                          |
-| `media_type`         | `str \| None` (keyword-only) | Applied uniformly to every item; required if any item is `bytes`/file-like. |
-| `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions. Must be a positive integer. Defaults to `5`. |
-| `return_exceptions`  | `bool` (keyword-only)        | If `True`, exceptions appear in the result list instead of being raised.    |
-| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a transient `ModelError`. Must be a non-negative integer. Defaults to `0`. |
-| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter. Must be non-negative and finite. |
-| `retry_max_backoff`  | `float` (keyword-only)       | Maximum per-item retry delay, including `Retry-After`. Defaults to `60.0`. |
-
-Returns a `list` of schema instances (or exceptions when `return_exceptions=True`).
-
-### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Async sibling of `extract_many`; same arguments and return shape.
-
-### `iter_extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Return an async iterator of `(input_index, result)` pairs in completion order.
-It consumes generator inputs lazily, keeps at most `max_concurrency` items
-scheduled, and yields results before the whole batch finishes. The index maps
-each result back to its original input position; simultaneous completions are
-yielded in index order.
-
-With `return_exceptions=False` (the default), the first failure cancels and
-awaits all outstanding work before it is raised. With `True`, item exceptions
-are yielded in the `result` position and the rest of the stream continues.
-
-```python
-async for index, result in iter_extract_many_async(
-    schema=Invoice,
-    model="openai:gpt-5",
-    input_files=invoice_paths,
-    max_concurrency=4,
-):
-    print(index, result)
-```
-
-### `Usage`
-
-Frozen dataclass returned by `extract_with_usage` / `extract_with_usage_async`:
-
-| Field            | Type  | Description              |
-| ---------------- | ----- | ------------------------ |
-| `input_tokens`   | `int` | Prompt tokens consumed.  |
-| `output_tokens`  | `int` | Completion tokens.       |
-| `total_tokens`   | `int` | Total tokens for the call. |
+The canonical public API reference lives in
+[docs/api-reference.md](docs/api-reference.md). CI verifies every documented
+function signature against the installed package so signature drift fails the
+build.
 
 ## Public API stability
 
@@ -380,6 +326,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
+| `InputTooLargeError` | Stable | Raised before a model call when resolved media exceeds the configured per-input byte limit. |
 | `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
 | `ModelError` | Stable | Raised for provider/model API failures, with `provider`, `status_code`, `retryable`, and `retry_after` metadata where available. |
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
@@ -421,9 +368,12 @@ reporting, and provider-specific error shapes can change outside an
 but provider-specific compatibility notes may be updated as upstream behavior
 changes.
 
-Python support follows `requires-python` in `pyproject.toml`; the current minimum
-is Python 3.12. Dropping support for a Python minor version is a breaking change
-and should be announced in `CHANGELOG.md`.
+Python support follows `requires-python` in `pyproject.toml`; the current
+supported versions are Python 3.12 and 3.13, both exercised in CI. Python 3.10
+and 3.11 are not supported: retaining the 3.12 minimum avoids carrying syntax
+compatibility changes for versions outside the project's declared support
+window. Dropping support for a Python minor version is a breaking change and
+should be announced in `CHANGELOG.md`.
 
 ## Security
 
@@ -439,6 +389,8 @@ limits. Summary:
 - Hosts are re-validated at every redirect hop
 - `OPENEXTRACT_URL_TIMEOUT` (default `30`) and `OPENEXTRACT_MAX_REDIRECTS`
   (default `10`) tune fetch behavior
+- `OPENEXTRACT_MAX_INPUT_BYTES` (default `52428800`) caps each resolved input,
+  including streamed URL bodies with missing or incorrect length headers
 
 Full model, remaining risk boundaries (including DNS rebinding), and reporting
 process: [SECURITY.md](SECURITY.md#url-input-security-model).

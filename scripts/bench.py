@@ -2,9 +2,9 @@
 
 We don't (and can't) benchmark the LLM round-trip itself — that's network +
 inference and dwarfs everything else. What we *can* measure is the local CPU
-work that happens around it on every call: import cost, ``_get_media``,
-agent construction, and the per-call ``load_dotenv`` overhead. Anything we
-shave here compounds across ``extract_many``.
+work that happens around it on every call: import cost, ``_get_media``, agent
+construction, and extraction dispatch. Anything we shave here compounds across
+``extract_many``.
 """
 
 from __future__ import annotations
@@ -20,11 +20,9 @@ from unittest.mock import MagicMock, patch
 
 from pydantic import BaseModel
 
-# Stub credentials so pydantic-ai provider clients can be instantiated locally.
-# These are never used for real calls: the extract benchmarks mock the Agent,
-# and the agent-construction benchmark only needs the provider to initialize.
+# Stub a credential so pydantic-ai can construct an OpenAI client locally. This
+# is not a real credential and is never used: no benchmark performs network I/O.
 os.environ.setdefault("OPENAI_API_KEY", "sk-bench-dummy")
-os.environ.setdefault("XAI_API_KEY", "xai-bench-dummy")
 os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
 
@@ -100,20 +98,13 @@ def bench_get_media(tmp: Path) -> None:
     _bench("guess_type('foo.pdf')", lambda: _get_media_type("foo.pdf"), iters=20000)
 
 
-def bench_load_dotenv() -> None:
-    from dotenv import load_dotenv
-
-    print("\n[dotenv] per-call cost of load_dotenv()  (called inside every extract!)")
-    _bench("load_dotenv() (no .env present)", lambda: load_dotenv(), iters=2000)
-
-
 def bench_build_agent() -> None:
     from openextract._extract import _build_agent
 
     print("\n[_build_agent] constructing a pydantic_ai.Agent")
     _bench(
         "_build_agent(non-ollama)",
-        lambda: _build_agent(_Person, "xai:grok-4.3", "extract"),
+        lambda: _build_agent(_Person, "openai:gpt-5", "extract"),
         iters=200,
     )
     _bench(
@@ -125,7 +116,7 @@ def bench_build_agent() -> None:
 
 def bench_extract_end_to_end(tmp: Path) -> None:
     """End-to-end extract() with the LLM call mocked out — measures everything
-    *except* the network/inference: dotenv, media read, agent build, dispatch.
+    *except* the network/inference: media read, agent build, dispatch.
     """
     from openextract import extract, extract_many
 
@@ -140,8 +131,8 @@ def bench_extract_end_to_end(tmp: Path) -> None:
     print("\n[extract] sync extract() with Agent mocked (all-local cost per call)")
     with patch("openextract._extract.Agent", return_value=agent_instance):
         _bench(
-            "extract(path, xai:grok-4.3)",
-            lambda: extract(_Person, "xai:grok-4.3", str(src)),
+            "extract(path, openai:gpt-5)",
+            lambda: extract(_Person, "openai:gpt-5", str(src)),
             iters=500,
         )
 
@@ -170,7 +161,6 @@ def main() -> int:
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
         bench_get_media(tmp)
-        bench_load_dotenv()
         bench_build_agent()
         bench_extract_end_to_end(tmp)
     return 0

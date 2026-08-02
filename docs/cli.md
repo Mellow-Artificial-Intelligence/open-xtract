@@ -24,11 +24,11 @@ exit code `7` is returned — the batch array is still written.
 | Code | Meaning | Typical cause |
 | ---- | ------- | ------------- |
 | `0` | Success | Single-file or full-batch success |
-| `1` | Usage / setup error | Bad `--schema`, stdin without `--media-type`, `--usage` with multiple inputs, invalid retry options, argparse failures |
+| `1` | Usage / setup error | Bad `--schema`, stdin without `--media-type`, `--usage` with multiple inputs, invalid retry/size options, argparse failures |
 | `2` | URL fetch error | `UrlFetchError` (network failure, HTTP error, SSRF refusal) |
 | `3` | Schema validation error | `SchemaValidationError` |
 | `4` | Model API error | `ModelError` |
-| `5` | Other extraction error | Other `ExtractionError` subclasses |
+| `5` | Other extraction error | `InputTooLargeError` and other `ExtractionError` subclasses |
 | `6` | Missing provider SDK | `ProviderNotInstalledError` |
 | `7` | Partial batch failure | `--continue-on-error` with one or more per-item failures |
 
@@ -101,6 +101,7 @@ cat ./reports/q4.pdf | openextract - \
 ```
 
 - `-` reads raw bytes from stdin.
+- Stdin is read in bounded chunks under the same input-size limit as files and URLs.
 - `--media-type` is required.
 - `-` cannot be combined with other input paths (exit `1`).
 
@@ -136,6 +137,13 @@ openextract ./ok.pdf ./missing.pdf \
 and `--retry-max-backoff` caps both calculated delays and provider
 `Retry-After` values. Authentication, permission, and invalid-request failures
 exit immediately with code `4`.
+
+## Input size limit
+
+`--max-input-bytes N` sets the maximum bytes loaded for each input. Without the
+flag, the CLI uses `OPENEXTRACT_MAX_INPUT_BYTES` or the 50 MiB default. Values
+must be positive integers. Oversized inputs fail before a model call and exit
+`5`; URL bodies and stdin remain bounded even without a reliable length header.
 
 ## Related docs
 

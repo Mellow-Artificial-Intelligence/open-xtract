@@ -1,13 +1,8 @@
 """Extract structured data from raw bytes with an explicit media type."""
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, anthropic_model
 from pydantic import BaseModel
 
+from examples._shared import DOCUMENT_PAGE, anthropic_model
 from openextract import extract
 
 

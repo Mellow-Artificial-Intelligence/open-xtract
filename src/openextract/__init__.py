@@ -14,6 +14,7 @@ from ._extract import (
 )
 from .exceptions import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -30,6 +31,7 @@ __all__ = [
     "extract_with_usage_async",
     "Usage",
     "ExtractionError",
+    "InputTooLargeError",
     "ModelError",
     "ProviderNotInstalledError",
     "SchemaValidationError",

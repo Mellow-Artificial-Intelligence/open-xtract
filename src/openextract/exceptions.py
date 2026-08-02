@@ -44,6 +44,10 @@ class ProviderNotInstalledError(ExtractionError):
     """
 
 
+class InputTooLargeError(ExtractionError):
+    """Input media exceeded the configured byte limit."""
+
+
 class SchemaValidationError(ExtractionError):
     """Model output did not match the expected schema."""
 

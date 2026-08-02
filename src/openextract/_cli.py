@@ -7,8 +7,9 @@ import importlib
 import json
 import sys
 from collections.abc import Sequence
-from typing import Any, cast
+from typing import Any, BinaryIO, cast
 
+from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ._extract import extract, extract_many, extract_with_usage
@@ -50,16 +51,16 @@ def _resolve_input_files(
     raw_inputs: list[str],
     *,
     media_type: str | None,
-) -> list[str | bytes]:
+) -> list[str | bytes | BinaryIO]:
     """Resolve CLI paths, URLs, or stdin ``-`` to values accepted by ``extract``."""
     if "-" in raw_inputs:
         if len(raw_inputs) > 1:
             raise ValueError("stdin (-) cannot be combined with other input files")
         if not media_type:
             raise ValueError("--media-type is required when reading from stdin (-)")
-        return [sys.stdin.buffer.read()]
+        return [sys.stdin.buffer]
 
-    return cast(list[str | bytes], raw_inputs)
+    return cast(list[str | bytes | BinaryIO], raw_inputs)
 
 
 def _usage_payload(usage) -> dict[str, int]:
@@ -70,7 +71,10 @@ def _usage_payload(usage) -> dict[str, int]:
     }
 
 
-def _batch_payload(results: list, inputs: list[str | bytes]) -> tuple[list[Any], int]:
+def _batch_payload(
+    results: list,
+    inputs: list[str | bytes | BinaryIO],
+) -> tuple[list[Any], int]:
     """Build the JSON entries for a batch run and count per-item failures.
 
     Successful items serialize to their model dump. Failed items (only present
@@ -160,6 +164,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Retry up to N times on ModelError with exponential backoff (default 0).",
     )
     parser.add_argument(
+        "--max-input-bytes",
+        type=int,
+        default=None,
+        metavar="N",
+        help=(
+            "Maximum bytes to load per input (default: OPENEXTRACT_MAX_INPUT_BYTES or 52428800)."
+        ),
+    )
+    parser.add_argument(
         "--retry-backoff",
         type=float,
         default=1.0,
@@ -178,6 +191,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the openextract CLI. Returns the exit code."""
+    load_dotenv()
     parser = _build_parser()
     args = parser.parse_args(argv)
 
@@ -210,6 +224,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     input_file=input_file,
                     instructions=args.instructions,
                     media_type=media_type,
+                    max_input_bytes=args.max_input_bytes,
                     max_retries=args.max_retries,
                     retry_backoff=args.retry_backoff,
                     retry_max_backoff=args.retry_max_backoff,
@@ -222,6 +237,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     input_file=input_file,
                     instructions=args.instructions,
                     media_type=media_type,
+                    max_input_bytes=args.max_input_bytes,
                     max_retries=args.max_retries,
                     retry_backoff=args.retry_backoff,
                     retry_max_backoff=args.retry_max_backoff,
@@ -233,6 +249,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 input_files=input_files,
                 instructions=args.instructions,
                 media_type=media_type,
+                max_input_bytes=args.max_input_bytes,
                 max_retries=args.max_retries,
                 retry_backoff=args.retry_backoff,
                 retry_max_backoff=args.retry_max_backoff,

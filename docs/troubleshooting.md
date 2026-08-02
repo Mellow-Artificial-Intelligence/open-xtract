@@ -45,9 +45,10 @@ The provider SDK is installed, but no API key / cloud credentials are available.
 
 **Next step**
 
-Set the provider env var (loaded automatically from `.env`), for example
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`. See the
-[provider matrix](providers.md) for the credential column.
+Set the provider environment variable. The CLI and bundled examples load
+`.env`; library callers should load application configuration explicitly. For
+example: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`. See the [provider
+matrix](providers.md) for the credential column.
 
 ## URL fetch failures
 
@@ -118,6 +119,14 @@ transport failures, and supported 5xx responses retry; authentication,
 permission, and invalid-request failures do not. Provider `Retry-After` values
 take precedence over exponential backoff but remain bounded by
 `retry_max_backoff`. Invalid option values raise `ValueError` (CLI exit `1`).
+
+## Input exceeds the configured size limit
+
+`InputTooLargeError` means openextract stopped reading an input before calling
+the model. The default limit is 50 MiB per input. If a larger input is expected,
+pass `max_input_bytes=...`, use `--max-input-bytes`, or set
+`OPENEXTRACT_MAX_INPUT_BYTES`. Keep the smallest practical limit for untrusted
+paths, URLs, streams, and batch jobs.
 
 ## CLI schema import errors
 
