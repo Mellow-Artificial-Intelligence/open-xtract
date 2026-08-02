@@ -11,6 +11,13 @@ timing when that is known.
 ### Changed
 - `openai:` model identifiers now use the OpenAI Responses API by default;
   `openai-chat:` remains available as an explicit Chat Completions opt-in.
+- Batch execution now schedules at most `max_concurrency` inputs, consumes
+  generator inputs lazily, and cancels and awaits outstanding work on fail-fast
+  errors while preserving input order in the existing list APIs.
+
+### Added
+- `iter_extract_many_async()` streams `(input_index, result)` pairs in
+  completion order without waiting for the full batch.
 
 ## [0.10.0] - 2026-08-01
 

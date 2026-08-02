@@ -329,6 +329,28 @@ Returns a `list` of schema instances (or exceptions when `return_exceptions=True
 
 Async sibling of `extract_many`; same arguments and return shape.
 
+### `iter_extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Return an async iterator of `(input_index, result)` pairs in completion order.
+It consumes generator inputs lazily, keeps at most `max_concurrency` items
+scheduled, and yields results before the whole batch finishes. The index maps
+each result back to its original input position; simultaneous completions are
+yielded in index order.
+
+With `return_exceptions=False` (the default), the first failure cancels and
+awaits all outstanding work before it is raised. With `True`, item exceptions
+are yielded in the `result` position and the rest of the stream continues.
+
+```python
+async for index, result in iter_extract_many_async(
+    schema=Invoice,
+    model="openai:gpt-5",
+    input_files=invoice_paths,
+    max_concurrency=4,
+):
+    print(index, result)
+```
+
 ### `Usage`
 
 Frozen dataclass returned by `extract_with_usage` / `extract_with_usage_async`:
@@ -354,6 +376,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |
 | `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain. Calling it from a running event loop raises `RuntimeError`; use `extract_many_async` in async code. |
 | `extract_many_async` | Provisional | Async batch API with the same return shape, option constraints, and per-item retry behavior as `extract_many`. |
+| `iter_extract_many_async` | Provisional | Bounded async iterator yielding `(input_index, result)` pairs in completion order. |
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
