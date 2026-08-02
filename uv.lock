@@ -1232,6 +1232,7 @@ name = "openextract"
 version = "0.10.0"
 source = { editable = "." }
 dependencies = [
+    { name = "httpx" },
     { name = "pydantic" },
     { name = "pydantic-ai-slim" },
     { name = "python-dotenv" },
@@ -1288,6 +1289,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "httpx", specifier = ">=0.28.1" },
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "pydantic-ai-slim", specifier = ">=1.37.0" },
     { name = "pydantic-ai-slim", extras = ["anthropic"], marker = "extra == 'anthropic'", specifier = ">=1.37.0" },

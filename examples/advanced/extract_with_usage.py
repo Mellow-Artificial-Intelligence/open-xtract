@@ -1,13 +1,10 @@
 """Extract structured data and print token usage for cost tracking."""
 
 import sys
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import _bootstrap  # noqa: F401
-from _shared import DOCUMENT_PAGE, require_input, xai_model
 from pydantic import BaseModel
 
+from examples._shared import DOCUMENT_PAGE, require_input, xai_model
 from openextract import extract_with_usage
 
 

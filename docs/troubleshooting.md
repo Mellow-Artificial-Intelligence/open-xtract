@@ -45,9 +45,10 @@ The provider SDK is installed, but no API key / cloud credentials are available.
 
 **Next step**
 
-Set the provider env var (loaded automatically from `.env`), for example
-`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`. See the
-[provider matrix](providers.md) for the credential column.
+Set the provider environment variable. The CLI and bundled examples load
+`.env`; library callers should load application configuration explicitly. For
+example: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `XAI_API_KEY`. See the [provider
+matrix](providers.md) for the credential column.
 
 ## URL fetch failures
 

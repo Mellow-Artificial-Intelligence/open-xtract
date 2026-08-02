@@ -12,32 +12,31 @@ ROOT = Path(__file__).resolve().parents[1]
 EXAMPLES = ROOT / "examples"
 
 API_EXAMPLES: list[tuple[str, list[str]]] = [
-    ("basic/local_file.py", ["--fixture"]),
-    ("basic/bytes_input.py", []),
-    ("images/document_summary.py", []),
-    ("advanced/extract_with_usage.py", ["--fixture"]),
+    ("examples.basic.local_file", ["--fixture"]),
+    ("examples.basic.bytes_input", []),
+    ("examples.images.document_summary", []),
+    ("examples.advanced.extract_with_usage", ["--fixture"]),
 ]
 
-ALL_SCRIPTS = [
-    "basic/local_file.py",
-    "basic/bytes_input.py",
-    "basic/url_extract.py",
-    "images/document_summary.py",
-    "images/receipt_extraction.py",
-    "documents/invoice_extraction.py",
-    "batch/batch_extract.py",
-    "async/async_extract.py",
-    "advanced/extract_with_usage.py",
-    "advanced/retry_extract.py",
-    "advanced/error_handling.py",
-    "audio/meeting_notes.py",
+ALL_MODULES = [
+    "examples.basic.local_file",
+    "examples.basic.bytes_input",
+    "examples.basic.url_extract",
+    "examples.images.document_summary",
+    "examples.images.receipt_extraction",
+    "examples.documents.invoice_extraction",
+    "examples.batch.batch_extract",
+    "examples.async.async_extract",
+    "examples.advanced.extract_with_usage",
+    "examples.advanced.retry_extract",
+    "examples.advanced.error_handling",
+    "examples.audio.meeting_notes",
 ]
 
 
-def _run(relative: str, extra: list[str] | None = None) -> subprocess.CompletedProcess[str]:
-    path = EXAMPLES / relative
+def _run(module: str, extra: list[str] | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        [sys.executable, str(path), *(extra or [])],
+        [sys.executable, "-m", module, *(extra or [])],
         cwd=ROOT,
         capture_output=True,
         text=True,
@@ -45,47 +44,48 @@ def _run(relative: str, extra: list[str] | None = None) -> subprocess.CompletedP
     )
 
 
-@pytest.mark.parametrize("relative", ALL_SCRIPTS)
-def test_example_script_is_runnable(relative: str) -> None:
-    """Each example at least starts; audio/meeting_notes exits 1 without args."""
-    path = EXAMPLES / relative
-    assert path.is_file(), relative
-    if relative == "audio/meeting_notes.py":
-        result = _run(relative)
+@pytest.mark.parametrize("module", ALL_MODULES)
+def test_example_module_is_runnable(module: str) -> None:
+    """Each example module at least starts; input-driven examples exit 1."""
+    if module == "examples.audio.meeting_notes":
+        result = _run(module)
         assert result.returncode == 1
         assert "Usage:" in result.stdout + result.stderr
         return
-    if relative == "basic/local_file.py":
-        result = _run(relative)
+    if module == "examples.basic.local_file":
+        result = _run(module)
         assert result.returncode == 1
         assert "Usage:" in result.stdout + result.stderr
         return
-    if relative in {"images/receipt_extraction.py", "documents/invoice_extraction.py"}:
-        result = _run(relative)
+    if module in {
+        "examples.images.receipt_extraction",
+        "examples.documents.invoice_extraction",
+    }:
+        result = _run(module)
         assert result.returncode == 1
         assert "Usage:" in result.stdout + result.stderr
         return
-    if relative == "advanced/extract_with_usage.py":
-        result = _run(relative)
+    if module == "examples.advanced.extract_with_usage":
+        result = _run(module)
         assert result.returncode == 1
         assert "Usage:" in result.stdout + result.stderr
         return
 
 
 def test_error_handling_example() -> None:
-    result = _run("advanced/error_handling.py")
+    result = _run("examples.advanced.error_handling")
     assert result.returncode == 0, result.stderr
     assert "UrlFetchError" in result.stdout
     assert "completed successfully" in result.stdout
 
 
 @pytest.mark.integration
-@pytest.mark.parametrize("relative,args", API_EXAMPLES)
-def test_api_examples_with_fixture(relative: str, args: list[str]) -> None:
+@pytest.mark.parametrize("module,args", API_EXAMPLES)
+def test_api_examples_with_fixture(module: str, args: list[str]) -> None:
     """Live model call; skipped in CI unless OPENEXTRACT_RUN_EXAMPLES=1."""
     import os
 
     if not os.environ.get("OPENEXTRACT_RUN_EXAMPLES"):
         pytest.skip("Set OPENEXTRACT_RUN_EXAMPLES=1 to run live example tests")
-    result = _run(relative, args)
+    result = _run(module, args)
     assert result.returncode == 0, result.stderr or result.stdout
