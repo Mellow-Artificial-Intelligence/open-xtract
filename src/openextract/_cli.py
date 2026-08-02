@@ -9,6 +9,7 @@ import sys
 from collections.abc import Sequence
 from typing import Any, BinaryIO, cast
 
+from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ._extract import extract, extract_many, extract_with_usage
@@ -190,6 +191,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> int:
     """Run the openextract CLI. Returns the exit code."""
+    load_dotenv()
     parser = _build_parser()
     args = parser.parse_args(argv)
 

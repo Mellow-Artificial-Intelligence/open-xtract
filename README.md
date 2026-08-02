@@ -180,7 +180,9 @@ Responses API by default. Use `openai-responses:` to select it explicitly or
 
 Ollama and Cerebras work via the `openai`-compatible code path &mdash; no dedicated extra is required for either.
 
-Set the corresponding provider credentials in your environment (e.g. `XAI_API_KEY` for xAI). `openextract` loads `.env` automatically.
+Set the corresponding provider credentials in your environment (e.g.
+`XAI_API_KEY` for xAI). The CLI and bundled examples load `.env` files; the
+Python library leaves environment configuration to the host application.
 
 OpenRouter and Cerebras are openai-compatible (they go through the `openai` client under the hood), so their errors are already classified via the existing openai path &mdash; no separate exception handling is needed.
 
@@ -258,10 +260,10 @@ Runnable scripts live in [`examples/`](examples/), grouped by use case (local fi
 
 ```bash
 # Run all fixture-based examples (uses OpenAI, Anthropic, and xAI — see examples/README.md)
-uv run python examples/run_all.py
+uv run python -m examples.run_all
 
 # Single example with the bundled sample image
-uv run python examples/basic/local_file.py --fixture
+uv run python -m examples.basic.local_file --fixture
 ```
 
 [See the examples/ directory](examples/) for the full source.
@@ -300,71 +302,10 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 
 ## API reference
 
-### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-| Argument        | Type                          | Description                                                                                                       |
-| --------------- | ----------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `schema`        | `type[BaseModel]`             | A Pydantic model class describing the desired output shape.                                                       |
-| `model`         | `str`                         | A `pydantic-ai` model identifier (e.g. `"xai:grok-4.3"`).                                                         |
-| `input_file`    | `str \| bytes \| BinaryIO`    | A local file path, an `https://` URL, raw `bytes`, or a binary file-like object with a `.read()` method.          |
-| `instructions`  | `str \| None`                 | Optional natural-language guidance for the model.                                                                 |
-| `media_type`    | `str \| None` (keyword-only)  | MIME type. Required for `bytes` and file-like inputs; overrides the guessed type for `str` inputs when provided.  |
-| `max_input_bytes` | `int \| None` (keyword-only) | Per-input byte cap. `None` uses the environment or 50 MiB default. |
-| `max_retries`   | `int` (keyword-only)          | Extra attempts after a transient `ModelError`. Must be a non-negative integer. Defaults to `0` (no retry).       |
-| `retry_backoff` | `float` (keyword-only)        | Base seconds for exponential backoff with jitter. Must be non-negative and finite.                               |
-| `retry_max_backoff` | `float` (keyword-only)    | Maximum retry delay, including `Retry-After`. Must be non-negative and finite. Defaults to `60.0`.               |
-
-Returns an instance of `schema`.
-
-### `extract_async(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Async counterpart to `extract`. Uses `Agent.run` instead of `run_sync` and accepts the same arguments.
-
-Returns an instance of `schema`.
-
-### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Like `extract`, but returns `(output, Usage)` where `Usage` is a frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. Useful for cost tracking and logging. Uses the same `ModelError` retry behavior as `extract`.
-
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Async sibling of `extract_with_usage`; returns `(output, Usage)`.
-
-### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Run concurrent extractions from synchronous code. Each item in `input_files` is a path, URL, `bytes`, or file-like object (same rules as `extract`). Results are returned in input order.
-
-Do not call `extract_many` from a running event loop (for example inside
-`async def` or a notebook with an active loop). It uses `asyncio.run` and raises
-`RuntimeError` with a pointer to `extract_many_async`. Async callers should use
-`await extract_many_async(...)`.
-
-| Argument             | Type                         | Description                                                                 |
-| -------------------- | ---------------------------- | --------------------------------------------------------------------------- |
-| `input_files`        | `Iterable[str \| bytes \| BinaryIO]` | One input per extraction.                                          |
-| `media_type`         | `str \| None` (keyword-only) | Applied uniformly to every item; required if any item is `bytes`/file-like. |
-| `max_input_bytes`    | `int \| None` (keyword-only) | Per-item byte cap. `None` uses the environment or 50 MiB default. |
-| `max_concurrency`    | `int` (keyword-only)         | Maximum in-flight extractions. Must be a positive integer. Defaults to `5`. |
-| `return_exceptions`  | `bool` (keyword-only)        | If `True`, exceptions appear in the result list instead of being raised.    |
-| `max_retries`        | `int` (keyword-only)         | Per-item extra attempts after a transient `ModelError`. Must be a non-negative integer. Defaults to `0`. |
-| `retry_backoff`      | `float` (keyword-only)       | Base seconds for per-item exponential backoff with jitter. Must be non-negative and finite. |
-| `retry_max_backoff`  | `float` (keyword-only)       | Maximum per-item retry delay, including `Retry-After`. Defaults to `60.0`. |
-
-Returns a `list` of schema instances (or exceptions when `return_exceptions=True`).
-
-### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
-
-Async sibling of `extract_many`; same arguments and return shape.
-
-### `Usage`
-
-Frozen dataclass returned by `extract_with_usage` / `extract_with_usage_async`:
-
-| Field            | Type  | Description              |
-| ---------------- | ----- | ------------------------ |
-| `input_tokens`   | `int` | Prompt tokens consumed.  |
-| `output_tokens`  | `int` | Completion tokens.       |
-| `total_tokens`   | `int` | Total tokens for the call. |
+The canonical public API reference lives in
+[docs/api-reference.md](docs/api-reference.md). CI verifies every documented
+function signature against the installed package so signature drift fails the
+build.
 
 ## Public API stability
 
@@ -426,9 +367,12 @@ reporting, and provider-specific error shapes can change outside an
 but provider-specific compatibility notes may be updated as upstream behavior
 changes.
 
-Python support follows `requires-python` in `pyproject.toml`; the current minimum
-is Python 3.12. Dropping support for a Python minor version is a breaking change
-and should be announced in `CHANGELOG.md`.
+Python support follows `requires-python` in `pyproject.toml`; the current
+supported versions are Python 3.12 and 3.13, both exercised in CI. Python 3.10
+and 3.11 are not supported: retaining the 3.12 minimum avoids carrying syntax
+compatibility changes for versions outside the project's declared support
+window. Dropping support for a Python minor version is a breaking change and
+should be announced in `CHANGELOG.md`.
 
 ## Security
 

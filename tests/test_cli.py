@@ -160,6 +160,26 @@ class TestMainSuccess:
         assert mock_extract.call_args.kwargs["max_input_bytes"] == 1024
         capsys.readouterr()
 
+    def test_loads_dotenv_at_application_boundary(self, mocker, capsys):
+        load_dotenv = mocker.patch("openextract._cli.load_dotenv")
+        _patch_extract(mocker, return_value=_FixtureSchema(name="Ada", age=36))
+
+        assert (
+            main(
+                [
+                    "input.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--model",
+                    "openai:gpt-5",
+                ]
+            )
+            == 0
+        )
+
+        load_dotenv.assert_called_once_with()
+        capsys.readouterr()
+
     def test_json_output_default(self, mocker, capsys):
         fake = _FixtureSchema(name="Ada", age=36)
         mock_extract = _patch_extract(mocker, return_value=fake)

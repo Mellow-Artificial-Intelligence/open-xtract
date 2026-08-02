@@ -18,7 +18,6 @@ from typing import BinaryIO, TypeVar, cast
 from urllib.parse import urlparse
 
 import httpx
-from dotenv import load_dotenv
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import Agent, BinaryContent
 from pydantic_ai.output import NativeOutput
@@ -152,22 +151,6 @@ def _collect_model_error_types() -> tuple[type[BaseException], ...]:
 
 
 _MODEL_ERROR_TYPES: tuple[type[BaseException], ...] | None = None
-
-
-_DOTENV_LOADED = False
-
-
-def _ensure_dotenv_loaded() -> None:
-    """Run ``load_dotenv()`` at most once per process.
-
-    Re-scanning the filesystem on every extract added ~50 µs/call and changed
-    nothing — the loaded env vars persist after the first call.
-    """
-    global _DOTENV_LOADED
-    if _DOTENV_LOADED:
-        return
-    load_dotenv()
-    _DOTENV_LOADED = True
 
 
 @dataclass(frozen=True)
@@ -858,8 +841,7 @@ def _prepare_run(
     media_type: str | None,
     max_input_bytes: int,
 ) -> tuple[Agent, list]:
-    """Load env, resolve the media payload, and build the agent + run inputs."""
-    _ensure_dotenv_loaded()
+    """Resolve the media payload and build the agent + run inputs."""
     file_bytes, file_type = _get_media(
         input_file,
         media_type=media_type,
@@ -879,7 +861,6 @@ async def _prepare_run_async(
     client: httpx.AsyncClient | None = None,
 ) -> tuple[Agent, list]:
     """Async media preparation plus agent construction."""
-    _ensure_dotenv_loaded()
     file_bytes, file_type = await _get_media_async(
         input_file,
         client,
@@ -1272,7 +1253,6 @@ async def _gather_extractions(
     files = list(input_files)
     if not files:
         return []
-    _ensure_dotenv_loaded()
     # Building the Agent (and its provider HTTP client) is ~32 ms; sharing one
     # across the batch saves ~32 ms × (N-1) per call. The Agent is stateless
     # between runs and stays inside this event loop, so this is safe.
