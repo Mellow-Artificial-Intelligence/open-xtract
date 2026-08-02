@@ -8,9 +8,16 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Added
+- Drift-checked canonical API reference, supported-Python CI matrix, and wheel
+  and source-distribution install smoke tests.
+
 ### Changed
 - `openai:` model identifiers now use the OpenAI Responses API by default;
   `openai-chat:` remains available as an explicit Chat Completions opt-in.
+- Python API calls no longer load `.env` into process-wide state. The CLI and
+  bundled examples continue to load `.env` explicitly.
+- Examples run as `python -m examples.<module>` without mutating `sys.path`.
 
 ## [0.10.0] - 2026-08-01
 

@@ -16,41 +16,40 @@ ROOT = EXAMPLES_DIR.parent
 
 # Scripts that run with bundled fixtures only (no API key needed for error_handling).
 API_EXAMPLES: list[tuple[str, list[str]]] = [
-    ("basic/local_file.py", ["--fixture"]),
-    ("basic/bytes_input.py", []),
-    ("basic/url_extract.py", []),
-    ("images/document_summary.py", []),
-    ("images/receipt_extraction.py", ["--fixture"]),
-    ("documents/invoice_extraction.py", ["--fixture"]),
-    ("batch/batch_extract.py", []),
-    ("async/async_extract.py", []),
-    ("advanced/extract_with_usage.py", ["--fixture"]),
-    ("advanced/retry_extract.py", []),
+    ("examples.basic.local_file", ["--fixture"]),
+    ("examples.basic.bytes_input", []),
+    ("examples.basic.url_extract", []),
+    ("examples.images.document_summary", []),
+    ("examples.images.receipt_extraction", ["--fixture"]),
+    ("examples.documents.invoice_extraction", ["--fixture"]),
+    ("examples.batch.batch_extract", []),
+    ("examples.async.async_extract", []),
+    ("examples.advanced.extract_with_usage", ["--fixture"]),
+    ("examples.advanced.retry_extract", []),
 ]
 
 NO_API_EXAMPLES: list[str] = [
-    "advanced/error_handling.py",
+    "examples.advanced.error_handling",
 ]
 
 
-def run_script(relative: str, extra_args: list[str] | None = None) -> None:
-    path = EXAMPLES_DIR / relative
-    cmd = [sys.executable, str(path), *(extra_args or [])]
+def run_module(module: str, extra_args: list[str] | None = None) -> None:
+    cmd = [sys.executable, "-m", module, *(extra_args or [])]
     print(f"\n>>> {' '.join(cmd)}")
     subprocess.run(cmd, cwd=ROOT, check=True)
 
 
 def main() -> None:
     print("Running examples that do not require a model API key...")
-    for script in NO_API_EXAMPLES:
-        run_script(script)
+    for module in NO_API_EXAMPLES:
+        run_module(module)
 
     print(
         "\nRunning examples that call a model "
         "(OPENAI_API_KEY, ANTHROPIC_API_KEY, XAI_API_KEY — or OPENEXTRACT_MODEL to override all)..."
     )
-    for script, args in API_EXAMPLES:
-        run_script(script, args)
+    for module, args in API_EXAMPLES:
+        run_module(module, args)
 
     print("\nAll runnable examples completed successfully.")
 

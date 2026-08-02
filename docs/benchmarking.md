@@ -35,13 +35,11 @@ reports `median`, `best`, and `worst` over a fixed 5 runs:
 - **`[_get_media]`** — resolving an `input_file` to `(bytes, media_type)` for a
   small text file, a ~50 KB PDF, a ~5 MB PDF, and raw `bytes` input.
 - **`[_get_media_type]`** — `mimetypes.guess_type` on a filename.
-- **`[dotenv]`** — per-call cost of `load_dotenv()` (invoked inside every
-  extract).
 - **`[_build_agent]`** — constructing a `pydantic_ai.Agent` for a non-Ollama
   and an Ollama model.
 - **`[extract]` / `[extract_many]`** — the full `extract()` / `extract_many()`
-  path with the `Agent` **mocked out**: all per-call local cost (dotenv + media
-  read + agent build + dispatch) *except* the model call.
+  path with the `Agent` **mocked out**: all per-call local cost (media read +
+  agent build + dispatch) *except* the model call.
 
 ## What it intentionally does NOT measure
 
@@ -60,7 +58,6 @@ compare the two runs on the **same machine**:
 - changes to `import openextract` or module-level import work,
 - `_get_media` / media handling,
 - `_build_agent` / agent construction,
-- the per-call `load_dotenv()` behavior,
 - `extract` / `extract_many` dispatch and concurrency.
 
 It is also useful when investigating a reported startup or import-time

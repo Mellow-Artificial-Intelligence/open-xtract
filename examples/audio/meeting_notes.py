@@ -2,13 +2,10 @@
 
 import sys
 from datetime import date
-from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import _bootstrap  # noqa: F401
-from _shared import require_input, xai_model
 from pydantic import BaseModel
 
+from examples._shared import require_input, xai_model
 from openextract import extract
 
 

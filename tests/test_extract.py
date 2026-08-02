@@ -3,6 +3,7 @@
 import asyncio
 import io
 import ipaddress
+import os
 import socket
 import threading
 import time
@@ -622,6 +623,18 @@ def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None)
 
 
 class TestExtract:
+    def test_library_does_not_load_dotenv(self, tmp_path, monkeypatch, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        (tmp_path / ".env").write_text("OPENEXTRACT_TEST_DOTENV=loaded\n")
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.delenv("OPENEXTRACT_TEST_DOTENV", raising=False)
+        _make_agent_mock(mocker, output=_Person(name="Ada", age=36))
+
+        extract(schema=_Person, model="openai:gpt-5", input_file=str(local))
+
+        assert "OPENEXTRACT_TEST_DOTENV" not in os.environ
+
     def test_returns_schema_instance_from_local_file(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")

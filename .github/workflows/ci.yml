@@ -16,14 +16,44 @@ jobs:
       - run: uv run ruff check .
       - run: uv run ruff format --check .
       - run: uv run ty check
+      - run: uv run python scripts/check_api_reference.py
 
   test:
+    name: Test (Python ${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        with:
+          python-version: ${{ matrix.python-version }}
       - run: uv sync --dev
       - name: Run tests
         run: uv run pytest -v --cov=openextract --cov-report=term-missing --cov-fail-under=0
       - name: Check coverage threshold
         run: uv run coverage report --fail-under=100
+
+  package:
+    name: Build and install distributions
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
+      - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        with:
+          python-version: "3.12"
+      - run: uv build
+      - name: Smoke-test wheel
+        run: |
+          uv venv .venv-wheel
+          uv pip install --python .venv-wheel/bin/python dist/*.whl
+          .venv-wheel/bin/python -c "import openextract; assert callable(openextract.extract)"
+          .venv-wheel/bin/openextract --help
+      - name: Smoke-test source distribution
+        run: |
+          uv venv .venv-sdist
+          uv pip install --python .venv-sdist/bin/python dist/*.tar.gz
+          .venv-sdist/bin/python -c "import openextract; assert callable(openextract.extract)"
+          .venv-sdist/bin/openextract --help
