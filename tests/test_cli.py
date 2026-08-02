@@ -7,6 +7,7 @@ from pydantic import BaseModel
 
 from openextract import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -137,6 +138,28 @@ class TestArgparse:
 
 
 class TestMainSuccess:
+    def test_max_input_bytes_is_forwarded(self, mocker, capsys):
+        fake = _FixtureSchema(name="Ada", age=36)
+        mock_extract = _patch_extract(mocker, return_value=fake)
+
+        assert (
+            main(
+                [
+                    "input.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--model",
+                    "openai:gpt-5",
+                    "--max-input-bytes",
+                    "1024",
+                ]
+            )
+            == 0
+        )
+
+        assert mock_extract.call_args.kwargs["max_input_bytes"] == 1024
+        capsys.readouterr()
+
     def test_loads_dotenv_at_application_boundary(self, mocker, capsys):
         load_dotenv = mocker.patch("openextract._cli.load_dotenv")
         _patch_extract(mocker, return_value=_FixtureSchema(name="Ada", age=36))
@@ -182,6 +205,7 @@ class TestMainSuccess:
             input_file="input.txt",
             instructions="find the person",
             media_type=None,
+            max_input_bytes=None,
             max_retries=0,
             retry_backoff=1.0,
             retry_max_backoff=60.0,
@@ -325,6 +349,22 @@ class TestMainSuccess:
 
 
 class TestMainErrorCodes:
+    def test_input_too_large_returns_5(self, mocker, capsys):
+        _patch_extract(mocker, side_effect=InputTooLargeError("too large"))
+
+        exit_code = main(
+            [
+                "input.txt",
+                "--schema",
+                "tests.test_cli:_FixtureSchema",
+                "--model",
+                "openai:gpt-5",
+            ]
+        )
+
+        assert exit_code == 5
+        assert "too large" in capsys.readouterr().err
+
     def _invoke(self, mocker, exc):
         _patch_extract(mocker, side_effect=exc)
         return main(
@@ -566,12 +606,11 @@ class TestMainBatchAndUsage:
         assert exit_code == 1
         assert "stdin" in capsys.readouterr().err.lower()
 
-    def test_stdin_reads_buffer(self, mocker, capsys):
+    def test_stdin_passes_buffer_for_bounded_reading(self, mocker, capsys):
         fake = MagicMock()
         fake.model_dump_json.return_value = "{}"
         mock_extract = _patch_extract(mocker, return_value=fake)
         stdin = mocker.patch("openextract._cli.sys.stdin")
-        stdin.buffer.read.return_value = b"%PDF-bytes"
 
         exit_code = main(
             [
@@ -586,5 +625,6 @@ class TestMainBatchAndUsage:
         )
 
         assert exit_code == 0
-        assert mock_extract.call_args.kwargs["input_file"] == b"%PDF-bytes"
+        assert mock_extract.call_args.kwargs["input_file"] is stdin.buffer
         assert mock_extract.call_args.kwargs["media_type"] == "application/pdf"
+        stdin.buffer.read.assert_not_called()

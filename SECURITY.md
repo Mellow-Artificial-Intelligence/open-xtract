@@ -63,8 +63,11 @@ Default maximum hops: `10` (`OPENEXTRACT_MAX_REDIRECTS`).
 | `OPENEXTRACT_URL_TIMEOUT` | `30` | HTTP timeout in seconds |
 | `OPENEXTRACT_MAX_REDIRECTS` | `10` | Maximum redirect hops |
 | `OPENEXTRACT_ALLOW_PRIVATE_URLS` | unset | Set to `1` / `true` / `yes` to disable host validation |
+| `OPENEXTRACT_MAX_INPUT_BYTES` | `52428800` | Maximum bytes loaded per input |
 
-Invalid or non-positive timeout/redirect values fall back to the defaults.
+Invalid or non-positive timeout/redirect values fall back to the defaults. An
+invalid or non-positive input-size limit raises `ValueError` so a bad
+configuration cannot silently disable the cap.
 
 `OPENEXTRACT_ALLOW_PRIVATE_URLS` is intended for trusted environments (local
 tests, on-prem services). Enabling it removes the private-host guardrail.
@@ -76,11 +79,12 @@ tests, on-prem services). Enabling it removes the private-host guardrail.
 - Direct requests to private/loopback/link-local/metadata IPs
 - Redirect chains that land on non-public hosts
 - Basic timeout and redirect-count limits
+- A per-input 50 MiB default cap for paths, URLs, bytes, and binary streams
+- URL response streaming that enforces the cap when `Content-Length` is absent or incorrect
 
 **Not guaranteed:**
 
 - DNS rebinding (a hostname resolving to different IPs across lookups)
-- Response body size limits (see the [input size limits design](docs/design/input-size-limits.md))
 - Safety of the model provider after bytes are fetched
 - Non-HTTP SSRF channels outside this fetcher
 

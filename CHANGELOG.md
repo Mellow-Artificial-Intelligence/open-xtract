@@ -9,6 +9,9 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- `InputTooLargeError`, a 50 MiB default per-input cap, the
+  `OPENEXTRACT_MAX_INPUT_BYTES` environment variable, `max_input_bytes` on all
+  extraction APIs, and `--max-input-bytes` on the CLI.
 - Drift-checked canonical API reference, supported-Python CI matrix, and wheel
   and source-distribution install smoke tests.
 
@@ -18,6 +21,11 @@ timing when that is known.
 - Python API calls no longer load `.env` into process-wide state. The CLI and
   bundled examples continue to load `.env` explicitly.
 - Examples run as `python -m examples.<module>` without mutating `sys.path`.
+
+### Security
+- Paths, URLs, bytes, file-like objects, stdin, and batch inputs now fail before
+  a model call when they exceed the configured cap. URL bodies are streamed and
+  bounded even when `Content-Length` is missing or incorrect.
 
 ## [0.10.0] - 2026-08-01
 

@@ -90,6 +90,27 @@ result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=pdf_bytes, med
 result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=open("q4.pdf", "rb"), media_type="application/pdf")
 ```
 
+### Input size limits
+
+Every input is capped at 50 MiB (`52_428_800` bytes) before a model call.
+Local paths are checked before and during reading, URL bodies are streamed
+through the cap even when `Content-Length` is missing or incorrect, and binary
+streams are read in bounded chunks. Override the limit for one call with
+`max_input_bytes`, or set `OPENEXTRACT_MAX_INPUT_BYTES` for the process:
+
+```python
+result = extract(
+    schema=PdfInfo,
+    model="xai:grok-4.3",
+    input_file="./reports/large.pdf",
+    max_input_bytes=100 * 1024 * 1024,
+)
+```
+
+Oversized inputs raise `InputTooLargeError` before a model request. The CLI
+exposes the same control as `--max-input-bytes` and reports the error with exit
+code `5`.
+
 ### Retry on transient model errors
 
 ```python
@@ -214,6 +235,7 @@ cat ./reports/q4.pdf | openextract - \
 - `--output` is `json` (default) or `repr`.
 - `--max-retries`, `--retry-backoff`, and `--retry-max-backoff` match the Python
   API retry behavior.
+- `--max-input-bytes` overrides the 50 MiB per-input cap.
 - `--continue-on-error` (batch only) keeps processing when an input fails; each
   failure is emitted inline as `{"input", "error", "error_type"}` and the command
   exits `7` if any input failed. Without it, a batch aborts on the first failure.
@@ -251,6 +273,7 @@ uv run python -m examples.basic.local_file --fixture
 ```python
 from openextract import (
     extract,
+    InputTooLargeError,
     UrlFetchError,
     SchemaValidationError,
     ModelError,
@@ -262,6 +285,8 @@ try:
     result = extract(schema=PdfInfo, model="xai:grok-4.3", input_file=url)
 except UrlFetchError:
     ...  # The URL could not be fetched
+except InputTooLargeError:
+    ...  # The input exceeded the configured byte limit
 except SchemaValidationError:
     ...  # The model's output did not match your schema
 except ProviderNotInstalledError:
@@ -300,6 +325,7 @@ the compatibility notes below even though it is not exported from `__all__`.
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
+| `InputTooLargeError` | Stable | Raised before a model call when resolved media exceeds the configured per-input byte limit. |
 | `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
 | `ModelError` | Stable | Raised for provider/model API failures, with `provider`, `status_code`, `retryable`, and `retry_after` metadata where available. |
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
@@ -362,6 +388,8 @@ limits. Summary:
 - Hosts are re-validated at every redirect hop
 - `OPENEXTRACT_URL_TIMEOUT` (default `30`) and `OPENEXTRACT_MAX_REDIRECTS`
   (default `10`) tune fetch behavior
+- `OPENEXTRACT_MAX_INPUT_BYTES` (default `52428800`) caps each resolved input,
+  including streamed URL bodies with missing or incorrect length headers
 
 Full model, remaining risk boundaries (including DNS rebinding), and reporting
 process: [SECURITY.md](SECURITY.md#url-input-security-model).

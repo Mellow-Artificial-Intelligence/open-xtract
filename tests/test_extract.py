@@ -17,6 +17,7 @@ from pydantic_ai import BinaryContent
 
 from openextract import (
     ExtractionError,
+    InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
     SchemaValidationError,
@@ -44,8 +45,11 @@ from openextract._extract import (
     _model_retry_after,
     _model_status_code,
     _parse_retry_after,
+    _read_from_path,
+    _resolve_max_input_bytes,
     _retry_delay,
     _run_with_shared_agent,
+    _safe_source_context,
     _url_fetch_timeout,
 )
 
@@ -57,6 +61,7 @@ def _build_response(
     is_redirect: bool = False,
     status_code: int = 200,
     location: str | None = None,
+    content_length: int | str | None = None,
 ) -> MagicMock:
     """Build a MagicMock that behaves like an httpx.Response."""
     response = MagicMock()
@@ -66,20 +71,32 @@ def _build_response(
         headers["content-type"] = content_type
     if location is not None:
         headers["location"] = location
+    if content_length is not None:
+        headers["content-length"] = str(content_length)
     response.headers = headers
     response.is_redirect = is_redirect
     response.status_code = status_code
     response.raise_for_status.return_value = None
+    response.iter_bytes.return_value = iter([content])
+
+    async def aiter_bytes(*, chunk_size):
+        yield content
+
+    response.aiter_bytes = MagicMock(side_effect=aiter_bytes)
+    response.aclose = AsyncMock()
     return response
 
 
 def _mock_sync_http_client(mocker, *, response=None, side_effect=None):
     client_cls = mocker.patch("openextract._extract.httpx.Client")
     client = client_cls.return_value.__enter__.return_value
+    client.build_request.return_value = MagicMock()
     if side_effect is not None:
         client.get.side_effect = side_effect
+        client.send.side_effect = side_effect
     else:
         client.get.return_value = response
+        client.send.return_value = response
     return client_cls, client
 
 
@@ -102,6 +119,7 @@ def test_star_import_exposes_only_existing_names():
         "extract_with_usage_async",
         "Usage",
         "ExtractionError",
+        "InputTooLargeError",
         "ModelError",
         "ProviderNotInstalledError",
         "SchemaValidationError",
@@ -176,7 +194,8 @@ class TestGetMedia:
         media_bytes, media_type = _get_media("https://example.com/page.html")
 
         client_cls.assert_called_once_with(follow_redirects=False, timeout=30.0)
-        client.get.assert_called_once_with("https://example.com/page.html")
+        client.build_request.assert_called_once_with("GET", "https://example.com/page.html")
+        client.send.assert_called_once_with(client.build_request.return_value, stream=True)
         # follow_redirects is disabled at the httpx layer; redirects are followed
         # manually in _fetch_url so the SSRF host check runs at every hop.
         assert media_bytes == b"<html>remote</html>"
@@ -230,6 +249,158 @@ class TestGetMedia:
 
         with pytest.raises(httpx.HTTPStatusError):
             _get_media("https://example.com/missing.pdf")
+
+    def test_bytes_at_limit_are_allowed(self):
+        assert _get_media(
+            b"12345",
+            media_type="text/plain",
+            max_input_bytes=5,
+        ) == (b"12345", "text/plain")
+
+    def test_oversized_bytes_are_rejected(self):
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            _get_media(
+                b"123456",
+                media_type="text/plain",
+                max_input_bytes=5,
+            )
+
+    def test_local_path_is_rejected_before_read(self, tmp_path, mocker):
+        local = tmp_path / "large.bin"
+        local.write_bytes(b"123456")
+        open_mock = mocker.patch.object(Path, "open")
+
+        with pytest.raises(InputTooLargeError, match="large.bin"):
+            _get_media(str(local), max_input_bytes=5)
+
+        open_mock.assert_not_called()
+
+    def test_non_seekable_stream_is_read_in_bounded_chunks(self):
+        class NonSeekable:
+            def __init__(self, data: bytes):
+                self.data = data
+                self.offset = 0
+                self.read_sizes: list[int] = []
+
+            def read(self, size: int) -> bytes:
+                self.read_sizes.append(size)
+                chunk = self.data[self.offset : self.offset + size]
+                self.offset += len(chunk)
+                return chunk
+
+        stream = NonSeekable(b"123456")
+
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            _get_media(
+                stream,  # type: ignore[arg-type]
+                media_type="text/plain",
+                max_input_bytes=5,
+            )
+
+        assert stream.read_sizes == [6]
+
+    def test_url_content_length_fast_fails_before_iteration(self, mocker):
+        response = _build_response(content=b"", content_length=6)
+        _mock_sync_http_client(mocker, response=response)
+
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            _get_media("https://example.com/file.bin", max_input_bytes=5)
+
+        response.iter_bytes.assert_not_called()
+
+    @pytest.mark.parametrize("content_length", [None, -1, 2, "invalid"])
+    def test_url_stream_cap_catches_missing_or_incorrect_length(
+        self,
+        mocker,
+        content_length,
+    ):
+        response = _build_response(content=b"123456", content_length=content_length)
+        _mock_sync_http_client(mocker, response=response)
+
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            _get_media("https://example.com/file.bin", max_input_bytes=5)
+
+    def test_url_error_context_does_not_leak_credentials_or_query(self, mocker):
+        response = _build_response(content=b"123456")
+        _mock_sync_http_client(mocker, response=response)
+
+        with pytest.raises(InputTooLargeError) as exc_info:
+            _get_media(
+                "https://user:secret@example.com/file.bin?token=sensitive#fragment",
+                max_input_bytes=5,
+            )
+
+        message = str(exc_info.value)
+        assert "example.com/file.bin" in message
+        assert "secret" not in message
+        assert "sensitive" not in message
+
+    def test_streaming_fetch_follows_redirect_and_closes_each_response(self, mocker):
+        redirect = _build_response(
+            is_redirect=True,
+            status_code=302,
+            location="https://2.2.2.2/final.bin",
+        )
+        final = _build_response(content=b"ok")
+        _, client = _mock_sync_http_client(mocker, side_effect=[redirect, final])
+
+        assert _get_media("https://1.1.1.1/start", max_input_bytes=5)[0] == b"ok"
+
+        assert client.send.call_count == 2
+        redirect.close.assert_called_once_with()
+        final.close.assert_called_once_with()
+
+    def test_streaming_redirect_without_location_is_rejected(self, mocker):
+        response = _build_response(is_redirect=True, status_code=302)
+        _mock_sync_http_client(mocker, response=response)
+
+        with pytest.raises(UrlFetchError, match="missing Location"):
+            _get_media("https://1.1.1.1/start", max_input_bytes=5)
+
+    def test_streaming_redirect_limit_is_enforced(self, mocker, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_REDIRECTS", "2")
+        redirect = _build_response(
+            is_redirect=True,
+            status_code=302,
+            location="https://1.1.1.1/loop",
+        )
+        _mock_sync_http_client(mocker, response=redirect)
+
+        with pytest.raises(UrlFetchError, match="Too many redirects"):
+            _get_media("https://1.1.1.1/loop", max_input_bytes=5)
+
+        assert redirect.close.call_count == 2
+
+
+class TestMaxInputBytesConfiguration:
+    def test_default_is_50_mib(self, monkeypatch):
+        monkeypatch.delenv("OPENEXTRACT_MAX_INPUT_BYTES", raising=False)
+        assert _resolve_max_input_bytes(None) == 52_428_800
+
+    def test_environment_override(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", "123")
+        assert _resolve_max_input_bytes(None) == 123
+
+    def test_kwarg_wins_over_environment(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", "123")
+        assert _resolve_max_input_bytes(456) == 456
+
+    @pytest.mark.parametrize("value", [0, -1, True, 1.5, "100"])
+    def test_invalid_explicit_value_is_rejected(self, value):
+        with pytest.raises(ValueError, match="max_input_bytes"):
+            _resolve_max_input_bytes(value)
+
+    @pytest.mark.parametrize("value", ["0", "-1", "abc", "1.5"])
+    def test_invalid_environment_value_is_rejected(self, monkeypatch, value):
+        monkeypatch.setenv("OPENEXTRACT_MAX_INPUT_BYTES", value)
+        with pytest.raises(ValueError, match="OPENEXTRACT_MAX_INPUT_BYTES"):
+            _resolve_max_input_bytes(None)
+
+    def test_safe_url_context_tolerates_invalid_port(self):
+        context = _safe_source_context("https://example.com:not-a-port/file?secret=yes")
+
+        assert context == "URL https://example.com/file"
+        assert "secret" not in context
 
 
 # ---------------------------------------------------------------------------
@@ -424,7 +595,8 @@ class TestGetMediaAsync:
     async def test_url_without_client_owns_client_lifecycle(self, mocker):
         response = _build_response(content=b"pdf", content_type="application/pdf")
         client = MagicMock()
-        client.get = AsyncMock(return_value=response)
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(return_value=response)
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
         client_cls = mocker.patch("openextract._extract.httpx.AsyncClient", return_value=client)
@@ -438,7 +610,8 @@ class TestGetMediaAsync:
     async def test_fetches_url_and_uses_response_media_type(self):
         response = _build_response(content=b"pdf", content_type="application/pdf")
         client = MagicMock()
-        client.get = AsyncMock(return_value=response)
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(return_value=response)
 
         media_bytes, media_type = await _get_media_async("https://1.1.1.1/download", client)
 
@@ -462,6 +635,104 @@ class TestGetMediaAsync:
         result = await _get_media_async(io.BytesIO(b"hello"), MagicMock(), media_type="text/plain")
 
         assert result == (b"hello", "text/plain")
+
+    async def test_oversized_url_is_rejected_while_streaming(self):
+        response = _build_response(content=b"123456")
+        client = MagicMock()
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(return_value=response)
+
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            await _get_media_async(
+                "https://1.1.1.1/file.bin",
+                client,
+                max_input_bytes=5,
+            )
+
+        response.aclose.assert_awaited_once()
+
+    async def test_content_length_fast_fails_before_async_iteration(self):
+        response = _build_response(content=b"", content_length=6)
+        client = MagicMock()
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(return_value=response)
+
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            await _get_media_async(
+                "https://1.1.1.1/file.bin",
+                client,
+                max_input_bytes=5,
+            )
+
+        response.aiter_bytes.assert_not_called()
+
+    async def test_streaming_fetch_refuses_private_host_before_request(self):
+        client = MagicMock()
+        client.send = AsyncMock()
+
+        with pytest.raises(UrlFetchError, match="non-public host"):
+            await _get_media_async(
+                "http://127.0.0.1/secret",
+                client,
+                max_input_bytes=5,
+            )
+
+        client.send.assert_not_awaited()
+
+    async def test_streaming_fetch_follows_redirect(self):
+        redirect = _build_response(
+            is_redirect=True,
+            status_code=302,
+            location="https://2.2.2.2/final.bin",
+        )
+        final = _build_response(content=b"ok")
+        client = MagicMock()
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(side_effect=[redirect, final])
+
+        result = await _get_media_async(
+            "https://1.1.1.1/start",
+            client,
+            max_input_bytes=5,
+        )
+
+        assert result[0] == b"ok"
+        assert client.send.await_count == 2
+        redirect.aclose.assert_awaited_once()
+        final.aclose.assert_awaited_once()
+
+    async def test_streaming_redirect_without_location_is_rejected(self):
+        response = _build_response(is_redirect=True, status_code=302)
+        client = MagicMock()
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(return_value=response)
+
+        with pytest.raises(UrlFetchError, match="missing Location"):
+            await _get_media_async(
+                "https://1.1.1.1/start",
+                client,
+                max_input_bytes=5,
+            )
+
+    async def test_streaming_redirect_limit_is_enforced(self, monkeypatch):
+        monkeypatch.setenv("OPENEXTRACT_MAX_REDIRECTS", "2")
+        response = _build_response(
+            is_redirect=True,
+            status_code=302,
+            location="https://1.1.1.1/loop",
+        )
+        client = MagicMock()
+        client.build_request.return_value = MagicMock()
+        client.send = AsyncMock(return_value=response)
+
+        with pytest.raises(UrlFetchError, match="Too many redirects"):
+            await _get_media_async(
+                "https://1.1.1.1/loop",
+                client,
+                max_input_bytes=5,
+            )
+
+        assert response.aclose.await_count == 2
 
     async def test_unsupported_input_preserves_type_error(self):
         with pytest.raises(TypeError, match="input_file must be"):
@@ -623,6 +894,37 @@ def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None)
 
 
 class TestExtract:
+    def test_oversized_input_fails_before_agent_build(self, mocker):
+        agent = mocker.patch("openextract._extract.Agent")
+        sleep = mocker.patch("openextract._extract.time.sleep")
+
+        with pytest.raises(InputTooLargeError):
+            extract(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=b"123456",
+                media_type="text/plain",
+                max_input_bytes=5,
+                max_retries=3,
+            )
+
+        agent.assert_not_called()
+        sleep.assert_not_called()
+
+    def test_usage_helper_enforces_input_limit(self, mocker):
+        agent = mocker.patch("openextract._extract.Agent")
+
+        with pytest.raises(InputTooLargeError):
+            extract_with_usage(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=b"123456",
+                media_type="text/plain",
+                max_input_bytes=5,
+            )
+
+        agent.assert_not_called()
+
     def test_library_does_not_load_dotenv(self, tmp_path, monkeypatch, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
@@ -1079,6 +1381,9 @@ class TestProviderNotInstalled:
 
     def test_provider_not_installed_is_extraction_error(self):
         assert issubclass(ProviderNotInstalledError, ExtractionError)
+
+    def test_input_too_large_is_extraction_error(self):
+        assert issubclass(InputTooLargeError, ExtractionError)
 
 
 # ---------------------------------------------------------------------------
@@ -1547,7 +1852,7 @@ class TestExtractRetry:
     def test_non_seekable_stream_and_agent_are_prepared_once_for_retries(self, mocker):
         expected = _Person(name="Grace", age=85)
         stream = MagicMock()
-        stream.read.return_value = b"hello"
+        stream.read.side_effect = [b"hello", b""]
         run_result = MagicMock(output=expected)
         agent_cls, agent = _make_agent_mock(mocker, output=expected)
         agent.run_sync.side_effect = [ModelError("flaky"), run_result]
@@ -1562,7 +1867,7 @@ class TestExtractRetry:
         )
 
         assert result is expected
-        stream.read.assert_called_once_with()
+        assert stream.read.call_count == 2
         agent_cls.assert_called_once()
         assert agent.run_sync.call_count == 2
 
@@ -1652,7 +1957,7 @@ class TestExtractAsyncRetry:
     async def test_non_seekable_stream_is_read_once_for_retries(self, mocker):
         expected = _Person(name="Ada", age=36)
         stream = MagicMock()
-        stream.read.return_value = b"hello"
+        stream.read.side_effect = [b"hello", b""]
         run_result = MagicMock(output=expected)
         agent_cls, agent = _make_async_agent_mock(mocker)
         agent.run = AsyncMock(side_effect=[ModelError("flaky"), run_result])
@@ -1667,7 +1972,7 @@ class TestExtractAsyncRetry:
         )
 
         assert result is expected
-        stream.read.assert_called_once_with()
+        assert stream.read.call_count == 2
         agent_cls.assert_called_once()
         assert agent.run.await_count == 2
 
@@ -1698,16 +2003,43 @@ def _make_async_agent_mock(mocker, output=None, run_side_effect=None, usage=None
 
 
 class TestExtractAsync:
+    async def test_oversized_input_fails_before_agent_build(self, mocker):
+        agent = mocker.patch("openextract._extract.Agent")
+
+        with pytest.raises(InputTooLargeError):
+            await extract_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=b"123456",
+                media_type="text/plain",
+                max_input_bytes=5,
+            )
+
+        agent.assert_not_called()
+
+    async def test_async_usage_helper_enforces_input_limit(self, mocker):
+        agent = mocker.patch("openextract._extract.Agent")
+
+        with pytest.raises(InputTooLargeError):
+            await extract_with_usage_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_file=b"123456",
+                media_type="text/plain",
+                max_input_bytes=5,
+            )
+
+        agent.assert_not_called()
+
     async def test_local_read_does_not_block_event_loop(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hi")
-        original_read_bytes = Path.read_bytes
 
-        def slow_read_bytes(path):
+        def slow_read(file_path, *, max_input_bytes):
             time.sleep(0.05)
-            return original_read_bytes(path)
+            return _read_from_path(file_path, max_input_bytes=max_input_bytes)
 
-        mocker.patch.object(Path, "read_bytes", slow_read_bytes)
+        mocker.patch("openextract._extract._read_from_path", side_effect=slow_read)
         _make_async_agent_mock(mocker, output=_Person(name="Grace", age=85))
         heartbeat = asyncio.create_task(asyncio.sleep(0.01))
 
@@ -1940,7 +2272,7 @@ def _stub_shared_agent(mocker, side_effect):
     """
     mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
 
-    async def prepare(input_file, media_type, client):
+    async def prepare(input_file, media_type, client, *, max_input_bytes):
         return [input_file, media_type, client]
 
     async def run(agent, inputs):
@@ -1979,6 +2311,40 @@ class TestExtractMany:
             )
 
         build_mock.assert_not_called()
+
+    def test_invalid_max_input_bytes_is_rejected_before_agent_build(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        with pytest.raises(ValueError, match="max_input_bytes"):
+            extract_many(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=[b"x"],
+                media_type="text/plain",
+                max_input_bytes=0,
+            )
+
+        build_mock.assert_not_called()
+
+    def test_size_errors_are_returned_in_place(self, mocker):
+        expected = _Person(name="ok", age=1)
+        run_result = MagicMock(output=expected)
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=run_result)
+        mocker.patch("openextract._extract._build_agent", return_value=agent)
+
+        results = extract_many(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[b"ok", b"too-large"],
+            media_type="text/plain",
+            max_input_bytes=5,
+            return_exceptions=True,
+        )
+
+        assert results[0] is expected
+        assert isinstance(results[1], InputTooLargeError)
+        assert agent.run.await_count == 1
 
     def test_preserves_input_order(self, tmp_path, mocker):
         files = []
@@ -2143,11 +2509,11 @@ class TestExtractManyAsync:
 
         barrier = threading.Barrier(3)
 
-        def concurrent_read_bytes(path):
+        def concurrent_read(file_path, *, max_input_bytes):
             barrier.wait(timeout=1)
-            return b"x"
+            return _read_from_path(file_path, max_input_bytes=max_input_bytes)
 
-        mocker.patch.object(Path, "read_bytes", concurrent_read_bytes)
+        mocker.patch("openextract._extract._read_from_path", side_effect=concurrent_read)
         run_result = MagicMock(output=_Person(name="ok", age=1))
         agent = MagicMock()
         agent.run = AsyncMock(return_value=run_result)
@@ -2178,7 +2544,7 @@ class TestExtractManyAsync:
     async def test_prepares_each_item_once_when_model_run_retries(self, mocker):
         expected = _Person(name="Ada", age=36)
         stream = MagicMock()
-        stream.read.return_value = b"hello"
+        stream.read.side_effect = [b"hello", b""]
         mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
         run = mocker.patch(
             "openextract._extract._run_with_shared_agent",
@@ -2196,7 +2562,7 @@ class TestExtractManyAsync:
         )
 
         assert results == [expected]
-        stream.read.assert_called_once_with()
+        assert stream.read.call_count == 2
         assert run.await_count == 2
         assert run.await_args_list[0].args[1] is run.await_args_list[1].args[1]
 

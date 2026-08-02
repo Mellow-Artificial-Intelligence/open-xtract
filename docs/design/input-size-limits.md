@@ -5,12 +5,11 @@ title: Design — input size limits
 
 # Design: input size limits
 
-Proposal for bounding how much data `openextract` loads before sending media to
-a model. Today, local paths, URL responses, `bytes`, and file-like objects are
-read fully into memory with no size cap.
+Implementation notes for bounding how much data `openextract` loads before
+sending media to a model.
 
-**Status:** proposal (not implemented)  
-**Related issue:** [#125](https://github.com/Mellow-Artificial-Intelligence/openextract/issues/125)
+**Status:** implemented
+**Related issue:** [#163](https://github.com/Mellow-Artificial-Intelligence/openextract/issues/163)
 
 ## Goals
 
@@ -25,7 +24,7 @@ read fully into memory with no size cap.
 - Per-modality compression / preprocessing.
 - Guaranteeing provider-side upload limits (those remain upstream).
 
-## Proposed defaults
+## Defaults
 
 | Knob | Default | Notes |
 | ---- | ------- | ----- |
@@ -33,13 +32,13 @@ read fully into memory with no size cap.
 | URL pre-check via `Content-Length` | enabled when header present | Missing/invalid header → stream/read with hard cap |
 | Config surface | env + kwarg | Kwarg wins when both are set |
 
-Suggested names:
+Configuration names:
 
 - Env: `OPENEXTRACT_MAX_INPUT_BYTES`
 - Kwarg on extract APIs: `max_input_bytes: int | None = None`
   (`None` means “use env/default”)
 
-`0` or negative values should be rejected with `ValueError`.
+`0` or negative values are rejected with `ValueError`.
 
 ## Behavior by input type
 
@@ -47,7 +46,7 @@ Suggested names:
 
 1. `Path.stat().st_size` when available.
 2. If `st_size > limit` → raise before reading.
-3. Otherwise `read_bytes()` and re-check `len(data)`.
+3. Otherwise read in bounded chunks and enforce the final byte count.
 
 ### URLs
 
@@ -70,21 +69,20 @@ assume `.seek()` / `.tell()` exist.
 
 ### CLI
 
-Inherit the same default and env var. Optional follow-up flag:
-`--max-input-bytes N`. Stdin (`-`) uses the file-like path.
+The CLI inherits the same default and environment variable and exposes
+`--max-input-bytes N`. Stdin (`-`) is passed through the bounded file-like path
+instead of being read eagerly by argument handling.
 
 ## Error type and messages
 
-Add `InputTooLargeError(ExtractionError)`:
+`InputTooLargeError(ExtractionError)` reports the safe source context and limit:
 
 ```text
 Input exceeds the configured size limit (52428800 bytes); got at least 60000000 bytes.
 Set OPENEXTRACT_MAX_INPUT_BYTES or pass max_input_bytes=... if this is intentional.
 ```
 
-CLI mapping: new exit code **or** fold into `5` (`ExtractionError`) for the
-first release to avoid expanding the provisional CLI contract. Prefer exit `5`
-initially; document clearly.
+The CLI maps this error to the existing `5` (`ExtractionError`) exit code.
 
 ## Backward compatibility
 
@@ -103,20 +101,13 @@ in a minor pre-1.0 release and be called out as breaking in `CHANGELOG.md`.
 - Complements SSRF controls (which do not limit response body size today).
 - Reduces accidental cost from uploading enormous payloads to paid model APIs.
 
-## Smallest safe implementation
+## Implementation
 
-1. Shared helper `_enforce_max_input_bytes(data: bytes, *, limit: int) -> bytes`.
-2. Apply in `_get_media` after resolution (and URL `Content-Length` fast-fail in
-   `_fetch_url` / `_read_from_path`).
-3. Thread `max_input_bytes` through sync/async/batch/usage APIs.
-4. Unit tests: local oversize, bytes oversize, URL with large `Content-Length`,
-   URL with missing header + oversized body, env override, kwarg override.
-5. Docs: README + troubleshooting entry.
-
-## Follow-up implementation issues (when accepted)
-
-1. Implement `InputTooLargeError` + 50 MiB default + env/kwarg.
-2. Cap URL body reads when `Content-Length` is absent.
-3. Optional CLI `--max-input-bytes`.
-4. Evaluate whether a dedicated CLI exit code is warranted after the Python API
-   lands.
+1. `_resolve_max_input_bytes` applies explicit-call, environment, and default
+   precedence with positive-integer validation.
+2. Local paths use `stat()` before opening and a capped chunk reader afterward.
+3. URLs use streaming HTTP responses, `Content-Length` fast-fail, and an actual
+   byte-count cap on every redirect's final response.
+4. Raw bytes and non-seekable binary streams share the same cap.
+5. Batch preparation remains inside the concurrency semaphore, bounding
+   simultaneous buffered payloads to `max_concurrency`.
