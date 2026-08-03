@@ -26,6 +26,9 @@ timing when that is known.
 - Python API calls no longer load `.env` into process-wide state. The CLI and
   bundled examples continue to load `.env` explicitly.
 - Examples run as `python -m examples.<module>` without mutating `sys.path`.
+- Package import defers Pydantic AI runtime modules, and model-error
+  classification inspects the raised exception's MRO without importing
+  unrelated provider SDKs.
 
 ### Security
 - Paths, URLs, bytes, file-like objects, stdin, and batch inputs now fail before

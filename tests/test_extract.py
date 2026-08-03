@@ -5,6 +5,8 @@ import io
 import ipaddress
 import os
 import socket
+import subprocess
+import sys
 import threading
 import time
 from pathlib import Path
@@ -15,6 +17,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import BinaryContent
 
+import openextract._extract as extract_module
 from openextract import (
     ExtractionError,
     InputTooLargeError,
@@ -895,6 +898,59 @@ def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None)
     return agent_cls, agent_instance
 
 
+def test_model_error_classification_does_not_import_provider_sdks():
+    from pydantic_ai.exceptions import ModelAPIError
+
+    provider_prefixes = (
+        "openai",
+        "anthropic",
+        "google.genai",
+        "botocore",
+        "cohere",
+        "huggingface_hub",
+        "groq",
+        "mistralai",
+        "grpc",
+    )
+    modules_before = set(sys.modules)
+
+    mapped = _map_exception(ModelAPIError(model_name="openai:gpt-5", message="failed"))
+
+    newly_loaded_provider_modules = {
+        module_name
+        for module_name in set(sys.modules) - modules_before
+        if any(
+            module_name == prefix or module_name.startswith(f"{prefix}.")
+            for prefix in provider_prefixes
+        )
+    }
+    assert isinstance(mapped, ModelError)
+    assert newly_loaded_provider_modules == set()
+
+
+def test_package_import_defers_pydantic_ai_runtime():
+    subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys; import openextract; assert 'pydantic_ai' not in sys.modules",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+
+def test_lazy_agent_proxy_constructs_pydantic_agent(mocker):
+    expected = MagicMock()
+    pydantic_agent = mocker.patch("pydantic_ai.Agent", return_value=expected)
+
+    result = extract_module.Agent("openai:gpt-5", output_type=_Person)
+
+    assert result is expected
+    pydantic_agent.assert_called_once_with("openai:gpt-5", output_type=_Person)
+
+
 class TestExtract:
     def test_oversized_input_fails_before_agent_build(self, mocker):
         agent = mocker.patch("openextract._extract.Agent")
@@ -1051,6 +1107,10 @@ class TestExtract:
                 "anthropic:claude-sonnet-4",
             ),
             (
+                lambda msg: _make_bare_provider_error("google.genai.errors", "APIError", msg),
+                "google-gla:gemini-2.5-pro",
+            ),
+            (
                 lambda msg: _make_bedrock_error(msg),
                 "bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
             ),
@@ -1072,6 +1132,7 @@ class TestExtract:
             "pydantic_ai_ModelHTTPError",
             "openai_APIError",
             "anthropic_APIError",
+            "google_APIError",
             "bedrock_ClientError",
             "cohere_ApiError",
             "huggingface_HfHubHTTPError",

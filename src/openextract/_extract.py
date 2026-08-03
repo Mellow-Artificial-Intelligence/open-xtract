@@ -1,7 +1,6 @@
 """Core extraction functionality."""
 
 import asyncio
-import importlib
 import ipaddress
 import math
 import mimetypes
@@ -14,13 +13,22 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import BinaryIO, TypeVar, cast
+from typing import TYPE_CHECKING, BinaryIO, TypeVar, cast
 from urllib.parse import urlparse
 
 import httpx
 from pydantic import BaseModel, ValidationError
-from pydantic_ai import Agent, BinaryContent
-from pydantic_ai.output import NativeOutput
+
+if TYPE_CHECKING:
+    from pydantic_ai import Agent
+else:
+
+    def Agent(*args, **kwargs):
+        """Construct a Pydantic AI agent without loading it at package import time."""
+        from pydantic_ai import Agent as PydanticAgent
+
+        return PydanticAgent(*args, **kwargs)
+
 
 from .exceptions import (
     ExtractionError,
@@ -84,21 +92,24 @@ _PERMANENT_ERROR_NAMES = (
     "accessdenied",
 )
 
-# (module, attribute) pairs for provider/model error base classes we want to
-# classify as ``ModelError``. ``openai.APIError`` also covers OpenRouter and
+# Exact (module, class) signatures for provider/model error bases we classify
+# as ``ModelError``. The classifier checks the exception's existing MRO instead
+# of importing provider SDKs. ``openai.APIError`` also covers OpenRouter and
 # Cerebras since both go through the openai SDK.
-_PROVIDER_ERROR_PATHS: tuple[tuple[str, str], ...] = (
-    ("pydantic_ai.exceptions", "ModelAPIError"),
-    ("openai", "APIError"),
-    ("anthropic", "APIError"),
-    ("google.genai.errors", "APIError"),
-    ("botocore.exceptions", "ClientError"),
-    ("botocore.exceptions", "BotoCoreError"),
-    ("cohere.core.api_error", "ApiError"),
-    ("huggingface_hub.errors", "HfHubHTTPError"),
-    ("groq", "APIError"),
-    ("mistralai.client.errors.mistralerror", "MistralError"),
-    ("grpc", "RpcError"),  # xAI SDK uses gRPC; pydantic-ai may surface this directly
+_MODEL_ERROR_SIGNATURES = frozenset(
+    {
+        ("pydantic_ai.exceptions", "ModelAPIError"),
+        ("openai", "APIError"),
+        ("anthropic", "APIError"),
+        ("google.genai.errors", "APIError"),
+        ("botocore.exceptions", "ClientError"),
+        ("botocore.exceptions", "BotoCoreError"),
+        ("cohere.core.api_error", "ApiError"),
+        ("huggingface_hub.errors", "HfHubHTTPError"),
+        ("groq", "APIError"),
+        ("mistralai.client.errors.mistralerror", "MistralError"),
+        ("grpc", "RpcError"),  # xAI SDK uses gRPC; pydantic-ai may surface this directly
+    }
 )
 
 # pydantic-ai model-id prefix -> the openextract optional-dependency extra that
@@ -124,33 +135,17 @@ _PROVIDER_EXTRAS: dict[str, str] = {
 }
 
 
-def _collect_model_error_types() -> tuple[type[BaseException], ...]:
-    """Resolve ``_PROVIDER_ERROR_PATHS`` to importable exception classes.
+def _is_model_exception(exc: BaseException) -> bool:
+    """Return whether an exception inherits from a supported model error base.
 
-    Each import is guarded so a missing optional provider does not break the
-    package. The returned tuple is suitable for use with ``isinstance``.
-
-    Cached after the first call. Deferred (rather than run at module import)
-    because importing every provider SDK eagerly added ~2 s to cold start —
-    ``google.genai`` alone is over a second — and is wasted work unless we
-    actually need to classify an exception.
+    Provider SDKs have already created the exception by the time this runs, so
+    their classes are present in its MRO. Comparing exact module/class
+    signatures preserves subclass handling without importing unrelated SDKs.
     """
-    global _MODEL_ERROR_TYPES
-    if _MODEL_ERROR_TYPES is not None:
-        return _MODEL_ERROR_TYPES
-
-    error_types: list[type[BaseException]] = []
-    for module_name, attr in _PROVIDER_ERROR_PATHS:
-        try:
-            module = importlib.import_module(module_name)
-        except ImportError:  # pragma: no cover - all provider extras are installed
-            continue
-        error_types.append(getattr(module, attr))
-    _MODEL_ERROR_TYPES = tuple(error_types)
-    return _MODEL_ERROR_TYPES
-
-
-_MODEL_ERROR_TYPES: tuple[type[BaseException], ...] | None = None
+    return any(
+        (error_type.__module__, error_type.__name__) in _MODEL_ERROR_SIGNATURES
+        for error_type in type(exc).__mro__
+    )
 
 
 @dataclass(frozen=True)
@@ -640,10 +635,15 @@ def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent
     :class:`ProviderNotInstalledError`.
     """
     try:
+        output_type = schema
+        if model.startswith("ollama"):
+            from pydantic_ai.output import NativeOutput
+
+            output_type = NativeOutput(schema)
         return Agent(
             _route_model(model),
             instructions=instructions,
-            output_type=NativeOutput(schema) if model.startswith("ollama") else schema,
+            output_type=output_type,
         )
     except ImportError as exc:
         raise ProviderNotInstalledError(
@@ -655,6 +655,8 @@ def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent
 
 def _build_run_inputs(file_bytes: bytes, file_type: str) -> list:
     """Build the prompt inputs passed to the agent run."""
+    from pydantic_ai import BinaryContent
+
     return [
         "Extract the requested information from this document.",
         BinaryContent(data=file_bytes, media_type=file_type),
@@ -795,7 +797,7 @@ def _map_exception(exc: BaseException) -> ExtractionError:
         return UrlFetchError(f"Failed to fetch URL: {exc}")
     if isinstance(exc, ValidationError):
         return SchemaValidationError(f"Model output did not match schema: {exc}")
-    if isinstance(exc, _collect_model_error_types()):
+    if _is_model_exception(exc):
         status_code = _model_status_code(exc)
         return ModelError(
             f"Model API error: {exc}",
