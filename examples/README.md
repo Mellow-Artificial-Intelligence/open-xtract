@@ -49,6 +49,7 @@ uv run python -m examples.run_all
 | `async/` | `async_extract.py` | Anthropic | `extract_async()` |
 | `advanced/` | `extract_with_usage.py` | xAI | `extract_with_usage()` and token counts |
 | `advanced/` | `retry_extract.py` | OpenAI | `max_retries` / `retry_backoff` |
+| `advanced/` | `reusable_sessions.py` | TestModel | Sync/async sessions and dependency-injected agents |
 | `advanced/` | `error_handling.py` | — | Catching `UrlFetchError` (no model call) |
 | `audio/` | `meeting_notes.py` | xAI | Audio → structured meeting notes (bring your own file) |
 | `cli/` | `schemas.py` | — | Pydantic models for CLI `--schema` |

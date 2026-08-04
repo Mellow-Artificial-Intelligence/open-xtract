@@ -1,5 +1,7 @@
 """Core extraction functionality."""
 
+from __future__ import annotations
+
 import asyncio
 import ipaddress
 import math
@@ -7,6 +9,7 @@ import mimetypes
 import os
 import random
 import socket
+import threading
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator, Mapping
 from contextlib import contextmanager
@@ -20,7 +23,10 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 if TYPE_CHECKING:
-    from pydantic_ai import Agent
+    from pydantic_ai import Agent as PydanticAgent
+    from pydantic_ai.models import Model
+    from pydantic_ai.models.instrumented import InstrumentationSettings
+    from pydantic_ai.settings import ModelSettings
 else:
 
     def Agent(*args, **kwargs):
@@ -155,6 +161,18 @@ class Usage:
     input_tokens: int
     output_tokens: int
     total_tokens: int
+
+
+@dataclass(frozen=True)
+class RetryPolicy:
+    """Retry configuration shared by every call made through an extractor session."""
+
+    max_retries: int = 0
+    backoff: float = 1.0
+    max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF
+
+    def __post_init__(self) -> None:
+        _validate_retry_options(self.max_retries, self.backoff, self.max_backoff)
 
 
 def _get_media_type(file_path: str) -> str:
@@ -494,10 +512,22 @@ def _media_from_content(
     return content, media_type
 
 
-def _read_from_path(file_path: str, *, max_input_bytes: int) -> tuple[bytes, str]:
+def _read_from_path(
+    file_path: str,
+    *,
+    max_input_bytes: int,
+    client: httpx.Client | None = None,
+) -> tuple[bytes, str]:
     """Read bytes from a local path or http(s) URL; return (bytes, media_type)."""
     if file_path.startswith(_URL_PREFIXES):
-        content, headers = _read_url(file_path, limit=max_input_bytes)
+        if client is None:
+            content, headers = _read_url(file_path, limit=max_input_bytes)
+        else:
+            content, headers = _read_url_with_client(
+                file_path,
+                client,
+                limit=max_input_bytes,
+            )
         return _media_from_content(file_path, content, headers)
 
     path = Path(file_path)
@@ -548,6 +578,7 @@ def _get_media(
     media_type: str | None = None,
     *,
     max_input_bytes: int | None = None,
+    client: httpx.Client | None = None,
 ) -> tuple[bytes, str]:
     """Resolve ``input_file`` to ``(bytes, media_type)``.
 
@@ -557,7 +588,11 @@ def _get_media(
     """
     limit = _resolve_max_input_bytes(max_input_bytes)
     if isinstance(input_file, str):
-        file_bytes, resolved_type = _read_from_path(input_file, max_input_bytes=limit)
+        file_bytes, resolved_type = _read_from_path(
+            input_file,
+            max_input_bytes=limit,
+            client=client,
+        )
         return file_bytes, media_type or resolved_type
 
     if isinstance(input_file, bytes):
@@ -627,7 +662,37 @@ def _route_model(model: str) -> str:
     return model
 
 
-def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent:
+def _instrumentation_capabilities(
+    instrument: bool | InstrumentationSettings,
+) -> tuple[list[object], dict[str, object]]:
+    """Return version-compatible Pydantic AI instrumentation arguments."""
+    if instrument is False:
+        return [], {}
+
+    from pydantic_ai.models.instrumented import InstrumentationSettings
+
+    if instrument is True:
+        settings = InstrumentationSettings()
+    elif isinstance(instrument, InstrumentationSettings):
+        settings = instrument
+    else:
+        raise TypeError("instrument must be a bool or InstrumentationSettings instance.")
+
+    try:
+        from pydantic_ai.capabilities import Instrumentation
+    except ImportError:  # pragma: no cover - compatibility with older pydantic-ai
+        return [], {"instrument": settings}
+    return [Instrumentation(settings)], {}
+
+
+def _build_agent(
+    schema: type[T],
+    model: str | Model,
+    instructions: str | None,
+    *,
+    model_settings: ModelSettings | None = None,
+    instrument: bool | InstrumentationSettings = False,
+) -> PydanticAgent:
     """Construct the pydantic_ai Agent, handling the ollama output-type quirk.
 
     A missing provider SDK surfaces here as ``ImportError`` (pydantic-ai infers
@@ -636,21 +701,34 @@ def _build_agent(schema: type[T], model: str, instructions: str | None) -> Agent
     """
     try:
         output_type = schema
-        if model.startswith("ollama"):
+        if isinstance(model, str) and model.startswith("ollama"):
             from pydantic_ai.output import NativeOutput
 
             output_type = NativeOutput(schema)
+        capabilities, compatibility_kwargs = _instrumentation_capabilities(instrument)
+        routed_model = _route_model(model) if isinstance(model, str) else model
+        agent_kwargs: dict[str, object] = {
+            "instructions": instructions,
+            "output_type": output_type,
+            "model_settings": model_settings,
+            **compatibility_kwargs,
+        }
+        if capabilities:
+            agent_kwargs["capabilities"] = capabilities
         return Agent(
-            _route_model(model),
-            instructions=instructions,
-            output_type=output_type,
+            routed_model,
+            **agent_kwargs,
         )
     except ImportError as exc:
-        raise ProviderNotInstalledError(
-            f"Model {model!r} needs a provider SDK that is not installed. "
-            f"Install it with: {_install_hint(model)} "
-            f"(or 'pip install openextract[all]'). Original error: {exc}"
-        ) from exc
+        if isinstance(model, str):
+            message = (
+                f"Model {model!r} needs a provider SDK that is not installed. "
+                f"Install it with: {_install_hint(model)} "
+                f"(or 'pip install openextract[all]'). Original error: {exc}"
+            )
+        else:
+            message = f"The configured model needs a provider SDK that is not installed: {exc}"
+        raise ProviderNotInstalledError(message) from exc
 
 
 def _build_run_inputs(file_bytes: bytes, file_type: str) -> list:
@@ -827,7 +905,12 @@ def _extraction_errors() -> Iterator[None]:
 
 def _usage_from_result(result) -> Usage:
     """Build a ``Usage`` from a pydantic-ai run result."""
-    raw = result.usage()
+    usage_descriptor = getattr(type(result), "usage", None)
+    raw = (
+        result.usage
+        if usage_descriptor is not None and not callable(usage_descriptor)
+        else result.usage()
+    )
     return Usage(
         input_tokens=getattr(raw, "input_tokens", 0) or 0,
         output_tokens=getattr(raw, "output_tokens", 0) or 0,
@@ -837,12 +920,12 @@ def _usage_from_result(result) -> Usage:
 
 def _prepare_run(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
-) -> tuple[Agent, list]:
+) -> tuple[PydanticAgent, list]:
     """Resolve the media payload and build the agent + run inputs."""
     file_bytes, file_type = _get_media(
         input_file,
@@ -855,13 +938,13 @@ def _prepare_run(
 
 async def _prepare_run_async(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
     client: httpx.AsyncClient | None = None,
-) -> tuple[Agent, list]:
+) -> tuple[PydanticAgent, list]:
     """Async media preparation plus agent construction."""
     file_bytes, file_type = await _get_media_async(
         input_file,
@@ -875,12 +958,12 @@ async def _prepare_run_async(
 
 def _prepare_extraction(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
-) -> tuple[Agent, list]:
+) -> tuple[PydanticAgent, list]:
     """Prepare one extraction while applying the public exception mapping."""
     with _extraction_errors():
         return _prepare_run(
@@ -895,13 +978,13 @@ def _prepare_extraction(
 
 async def _prepare_extraction_async(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
     client: httpx.AsyncClient | None = None,
-) -> tuple[Agent, list]:
+) -> tuple[PydanticAgent, list]:
     """Prepare one async extraction while applying public exception mapping."""
     with _extraction_errors():
         return await _prepare_run_async(
@@ -933,8 +1016,26 @@ async def _prepare_run_inputs_async(
         return _build_run_inputs(file_bytes, file_type)
 
 
+def _prepare_run_inputs_sync(
+    input_file: str | bytes | BinaryIO,
+    media_type: str | None,
+    client: httpx.Client | None = None,
+    *,
+    max_input_bytes: int,
+) -> list:
+    """Resolve one sync media input and build a prompt for retry reuse."""
+    with _extraction_errors():
+        file_bytes, file_type = _get_media(
+            input_file,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
+            client=client,
+        )
+        return _build_run_inputs(file_bytes, file_type)
+
+
 def _run_extraction(
-    agent: Agent,
+    agent: PydanticAgent,
     inputs: list,
 ):
     """Run a prepared sync extraction and return the raw pydantic-ai result."""
@@ -943,7 +1044,7 @@ def _run_extraction(
 
 
 def _extract_once(
-    agent: Agent,
+    agent: PydanticAgent,
     inputs: list,
 ) -> T:
     """Perform a single sync extraction attempt; return the schema instance."""
@@ -951,7 +1052,7 @@ def _extract_once(
     return cast(T, result.output)
 
 
-async def _run_extraction_async(agent: Agent, inputs: list):
+async def _run_extraction_async(agent: PydanticAgent, inputs: list):
     """Run a prepared async extraction with public exception mapping."""
     with _extraction_errors():
         return await agent.run(inputs)
@@ -1047,9 +1148,392 @@ async def _run_with_retries_async[R](
             attempt += 1
 
 
+def _validate_timeout(value: object, *, name: str) -> float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or value <= 0
+    ):
+        raise ValueError(f"{name} must be a finite positive number of seconds.")
+    return float(value)
+
+
+def _session_model_settings(
+    model_settings: ModelSettings | None,
+    timeout: float | None,
+) -> ModelSettings | None:
+    settings = dict(model_settings) if model_settings is not None else {}
+    if timeout is not None:
+        settings["timeout"] = _validate_timeout(timeout, name="timeout")
+    return cast("ModelSettings | None", settings or None)
+
+
+class _ExtractorSession[T: BaseModel]:
+    """Configuration and output validation shared by sync and async sessions."""
+
+    def __init__(
+        self,
+        schema: type[T],
+        model: str | Model | None,
+        instructions: str | None,
+        *,
+        agent: PydanticAgent | None,
+        model_settings: ModelSettings | None,
+        timeout: float | None,
+        instrument: bool | InstrumentationSettings,
+        retry_policy: RetryPolicy | None,
+        max_input_bytes: int | None,
+        url_timeout: float | None,
+    ) -> None:
+        if agent is not None:
+            if model is not None:
+                raise ValueError("model and agent are mutually exclusive; provide exactly one.")
+            if instructions is not None or model_settings is not None or timeout is not None:
+                raise ValueError(
+                    "instructions, model_settings, and timeout must be configured "
+                    "on an injected agent."
+                )
+            if instrument is not False:
+                raise ValueError("instrument must be configured on an injected agent.")
+            configured_agent = agent
+        else:
+            if model is None:
+                raise TypeError("model is required unless agent is provided.")
+            configured_agent = _build_agent(
+                schema,
+                model,
+                instructions,
+                model_settings=_session_model_settings(model_settings, timeout),
+                instrument=instrument,
+            )
+
+        if retry_policy is None:
+            retry_policy = RetryPolicy()
+        elif not isinstance(retry_policy, RetryPolicy):
+            raise TypeError("retry_policy must be a RetryPolicy instance.")
+
+        self._schema = schema
+        self._agent = configured_agent
+        self._retry_policy = retry_policy
+        self._max_input_bytes = _resolve_max_input_bytes(max_input_bytes)
+        self._url_timeout = (
+            _url_fetch_timeout()
+            if url_timeout is None
+            else _validate_timeout(url_timeout, name="url_timeout")
+        )
+        self._entered = False
+        self._closed = False
+
+    def _validate_output(self, output: object) -> T:
+        with _extraction_errors():
+            return self._schema.model_validate(output)
+
+    def _ensure_enterable(self, class_name: str) -> None:
+        if self._closed:
+            raise RuntimeError(f"{class_name} is closed and cannot be reused.")
+        if self._entered:
+            raise RuntimeError(f"{class_name} is already entered.")
+
+    def _ensure_open(self, class_name: str) -> None:
+        if not self._entered:
+            raise RuntimeError(f"{class_name} must be used as a context manager before extraction.")
+
+
+class Extractor(_ExtractorSession[T]):
+    """Reusable synchronous extraction session.
+
+    An ``Extractor`` is bound to the thread that enters it and is not
+    thread-safe. Use one session per thread and close it deterministically with
+    a ``with`` block.
+    """
+
+    def __init__(
+        self,
+        schema: type[T],
+        model: str | Model | None = None,
+        instructions: str | None = None,
+        *,
+        agent: PydanticAgent | None = None,
+        model_settings: ModelSettings | None = None,
+        timeout: float | None = None,
+        instrument: bool | InstrumentationSettings = False,
+        retry_policy: RetryPolicy | None = None,
+        max_input_bytes: int | None = None,
+        url_timeout: float | None = None,
+    ) -> None:
+        super().__init__(
+            schema,
+            model,
+            instructions,
+            agent=agent,
+            model_settings=model_settings,
+            timeout=timeout,
+            instrument=instrument,
+            retry_policy=retry_policy,
+            max_input_bytes=max_input_bytes,
+            url_timeout=url_timeout,
+        )
+        self._client: httpx.Client | None = None
+        self._runner: asyncio.Runner | None = None
+        self._thread_id: int | None = None
+
+    def __enter__(self) -> Extractor[T]:
+        self._ensure_enterable(type(self).__name__)
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            pass
+        else:
+            raise RuntimeError(
+                "Extractor cannot be entered from a running event loop; use AsyncExtractor instead."
+            )
+
+        client = httpx.Client(follow_redirects=False, timeout=self._url_timeout)
+        # Keep the session loop private so entering an Extractor does not replace
+        # or clear the caller's process-wide current event loop.
+        runner = asyncio.Runner(loop_factory=asyncio.new_event_loop)
+        runner.__enter__()
+        try:
+            runner.run(self._agent.__aenter__())
+        except BaseException:
+            client.close()
+            runner.close()
+            raise
+
+        self._client = client
+        self._runner = runner
+        self._thread_id = threading.get_ident()
+        self._entered = True
+        return self
+
+    def __exit__(self, *exc_info: object) -> bool:
+        return self._close(exc_info)
+
+    def _close(self, exc_info: tuple[object, ...]) -> bool:
+        if not self._entered:
+            self._closed = True
+            return False
+        if self._thread_id != threading.get_ident():
+            raise RuntimeError("Extractor can only be closed from the thread that entered it.")
+        assert self._runner is not None
+        assert self._client is not None
+        suppressed = False
+        try:
+            suppressed = bool(self._runner.run(self._agent.__aexit__(*exc_info)))
+        finally:
+            self._client.close()
+            self._runner.close()
+            self._entered = False
+            self._closed = True
+            self._client = None
+            self._runner = None
+        return suppressed
+
+    def close(self) -> None:
+        """Close the owned agent/provider and input HTTP client."""
+        self._close((None, None, None))
+
+    def _ensure_sync_open(self) -> httpx.Client:
+        self._ensure_open(type(self).__name__)
+        if self._thread_id != threading.get_ident():
+            raise RuntimeError("Extractor can only be used from the thread that entered it.")
+        assert self._client is not None
+        return self._client
+
+    def _run_agent(self, inputs: list):
+        assert self._runner is not None
+        return self._runner.run(_run_extraction_async(self._agent, inputs))
+
+    def extract(
+        self,
+        input_file: str | bytes | BinaryIO,
+        *,
+        media_type: str | None = None,
+    ) -> T:
+        """Extract one input using the session's reusable agent and clients."""
+        client = self._ensure_sync_open()
+        inputs = _prepare_run_inputs_sync(
+            input_file,
+            media_type,
+            client,
+            max_input_bytes=self._max_input_bytes,
+        )
+
+        def _once() -> T:
+            return self._validate_output(self._run_agent(inputs).output)
+
+        return _run_with_retries_sync(
+            _once,
+            max_retries=self._retry_policy.max_retries,
+            retry_backoff=self._retry_policy.backoff,
+            retry_max_backoff=self._retry_policy.max_backoff,
+        )
+
+    def extract_with_usage(
+        self,
+        input_file: str | bytes | BinaryIO,
+        *,
+        media_type: str | None = None,
+    ) -> tuple[T, Usage]:
+        """Extract one input and return its successful-call token usage."""
+        client = self._ensure_sync_open()
+        inputs = _prepare_run_inputs_sync(
+            input_file,
+            media_type,
+            client,
+            max_input_bytes=self._max_input_bytes,
+        )
+
+        def _once() -> tuple[T, Usage]:
+            result = self._run_agent(inputs)
+            return self._validate_output(result.output), _usage_from_result(result)
+
+        return _run_with_retries_sync(
+            _once,
+            max_retries=self._retry_policy.max_retries,
+            retry_backoff=self._retry_policy.backoff,
+            retry_max_backoff=self._retry_policy.max_backoff,
+        )
+
+
+class AsyncExtractor(_ExtractorSession[T]):
+    """Reusable async extraction session bound to one event loop."""
+
+    def __init__(
+        self,
+        schema: type[T],
+        model: str | Model | None = None,
+        instructions: str | None = None,
+        *,
+        agent: PydanticAgent | None = None,
+        model_settings: ModelSettings | None = None,
+        timeout: float | None = None,
+        instrument: bool | InstrumentationSettings = False,
+        retry_policy: RetryPolicy | None = None,
+        max_input_bytes: int | None = None,
+        url_timeout: float | None = None,
+    ) -> None:
+        super().__init__(
+            schema,
+            model,
+            instructions,
+            agent=agent,
+            model_settings=model_settings,
+            timeout=timeout,
+            instrument=instrument,
+            retry_policy=retry_policy,
+            max_input_bytes=max_input_bytes,
+            url_timeout=url_timeout,
+        )
+        self._client: httpx.AsyncClient | None = None
+        self._loop: asyncio.AbstractEventLoop | None = None
+
+    async def __aenter__(self) -> AsyncExtractor[T]:
+        self._ensure_enterable(type(self).__name__)
+        client = httpx.AsyncClient(follow_redirects=False, timeout=self._url_timeout)
+        try:
+            await self._agent.__aenter__()
+        except BaseException:
+            await client.aclose()
+            raise
+        self._client = client
+        self._loop = asyncio.get_running_loop()
+        self._entered = True
+        return self
+
+    async def __aexit__(self, *exc_info: object) -> bool:
+        return await self._close(exc_info)
+
+    async def _close(self, exc_info: tuple[object, ...]) -> bool:
+        if not self._entered:
+            self._closed = True
+            return False
+        if self._loop is not asyncio.get_running_loop():
+            raise RuntimeError(
+                "AsyncExtractor can only be closed from the event loop that entered it."
+            )
+        assert self._client is not None
+        suppressed = False
+        try:
+            suppressed = bool(await self._agent.__aexit__(*exc_info))
+        finally:
+            await self._client.aclose()
+            self._entered = False
+            self._closed = True
+            self._client = None
+            self._loop = None
+        return suppressed
+
+    async def aclose(self) -> None:
+        """Close the owned agent/provider and input HTTP client."""
+        await self._close((None, None, None))
+
+    def _ensure_async_open(self) -> httpx.AsyncClient:
+        self._ensure_open(type(self).__name__)
+        if self._loop is not asyncio.get_running_loop():
+            raise RuntimeError(
+                "AsyncExtractor can only be used from the event loop that entered it."
+            )
+        assert self._client is not None
+        return self._client
+
+    async def extract(
+        self,
+        input_file: str | bytes | BinaryIO,
+        *,
+        media_type: str | None = None,
+    ) -> T:
+        """Extract one input using the session's reusable agent and clients."""
+        client = self._ensure_async_open()
+        inputs = await _prepare_run_inputs_async(
+            input_file,
+            media_type,
+            client,
+            max_input_bytes=self._max_input_bytes,
+        )
+
+        async def _once() -> T:
+            result = await _run_extraction_async(self._agent, inputs)
+            return self._validate_output(result.output)
+
+        return await _run_with_retries_async(
+            _once,
+            max_retries=self._retry_policy.max_retries,
+            retry_backoff=self._retry_policy.backoff,
+            retry_max_backoff=self._retry_policy.max_backoff,
+        )
+
+    async def extract_with_usage(
+        self,
+        input_file: str | bytes | BinaryIO,
+        *,
+        media_type: str | None = None,
+    ) -> tuple[T, Usage]:
+        """Extract one input and return its successful-call token usage."""
+        client = self._ensure_async_open()
+        inputs = await _prepare_run_inputs_async(
+            input_file,
+            media_type,
+            client,
+            max_input_bytes=self._max_input_bytes,
+        )
+
+        async def _once() -> tuple[T, Usage]:
+            result = await _run_extraction_async(self._agent, inputs)
+            return self._validate_output(result.output), _usage_from_result(result)
+
+        return await _run_with_retries_async(
+            _once,
+            max_retries=self._retry_policy.max_retries,
+            retry_backoff=self._retry_policy.backoff,
+            retry_max_backoff=self._retry_policy.max_backoff,
+        )
+
+
 def extract(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None = None,
     *,
@@ -1113,7 +1597,7 @@ def extract(
 
 def extract_with_usage(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None = None,
     *,
@@ -1153,7 +1637,7 @@ def extract_with_usage(
 
 async def extract_with_usage_async(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None = None,
     *,
@@ -1189,7 +1673,7 @@ async def extract_with_usage_async(
 
 async def extract_async(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_file: str | bytes | BinaryIO,
     instructions: str | None = None,
     *,
@@ -1224,7 +1708,7 @@ async def extract_async(
 
 
 async def _run_with_shared_agent(
-    agent: Agent,
+    agent: PydanticAgent,
     inputs: list,
 ) -> object:
     """Run prepared inputs through a pre-built shared ``Agent``.
@@ -1247,7 +1731,7 @@ async def _cancel_tasks(tasks: Iterable[asyncio.Task[object]]) -> None:
 
 async def _iter_extractions(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None,
     max_concurrency: int,
@@ -1368,7 +1852,7 @@ async def _iter_extractions(
 
 async def _gather_extractions(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None,
     max_concurrency: int,
@@ -1404,7 +1888,7 @@ async def _gather_extractions(
 
 def extract_many(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None = None,
     *,
@@ -1475,7 +1959,7 @@ def extract_many(
 
 async def extract_many_async(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None = None,
     *,
@@ -1505,7 +1989,7 @@ async def extract_many_async(
 
 def iter_extract_many_async(
     schema: type[T],
-    model: str,
+    model: str | Model,
     input_files: Iterable[str | bytes | BinaryIO],
     instructions: str | None = None,
     *,

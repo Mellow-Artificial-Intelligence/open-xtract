@@ -9,6 +9,9 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Reusable `Extractor` and `AsyncExtractor` sessions with deterministic agent
+  and HTTP-client cleanup, configured Pydantic AI model or agent injection,
+  model settings/timeouts/instrumentation, and typed `RetryPolicy` support.
 - `InputTooLargeError`, a 50 MiB default per-input cap, the
   `OPENEXTRACT_MAX_INPUT_BYTES` environment variable, `max_input_bytes` on all
   extraction APIs, and `--max-input-bytes` on the CLI.

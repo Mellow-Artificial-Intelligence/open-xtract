@@ -115,6 +115,9 @@ def test_star_import_exposes_only_existing_names():
     exec("from openextract import *", namespace)
     exported = {name for name in namespace if not name.startswith("_")}
     assert exported == {
+        "Extractor",
+        "AsyncExtractor",
+        "RetryPolicy",
         "extract",
         "extract_async",
         "extract_many",

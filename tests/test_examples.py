@@ -29,6 +29,7 @@ ALL_MODULES = [
     "examples.async.async_extract",
     "examples.advanced.extract_with_usage",
     "examples.advanced.retry_extract",
+    "examples.advanced.reusable_sessions",
     "examples.advanced.error_handling",
     "examples.audio.meeting_notes",
 ]
@@ -77,6 +78,12 @@ def test_error_handling_example() -> None:
     assert result.returncode == 0, result.stderr
     assert "UrlFetchError" in result.stdout
     assert "completed successfully" in result.stdout
+
+
+def test_reusable_sessions_example() -> None:
+    result = _run("examples.advanced.reusable_sessions")
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.count("ada@example.com") == 2
 
 
 @pytest.mark.integration
