@@ -70,6 +70,70 @@ print(result.language)
 
 `result` is a fully-validated `PdfInfo` instance &mdash; not a dict, not a string.
 
+## Reusable sessions
+
+For repeated extractions with the same schema and model, use `Extractor` or
+`AsyncExtractor`. A session constructs one Pydantic AI agent, reuses its
+provider and input-fetch HTTP clients, and closes them deterministically.
+
+```python
+from openextract import Extractor, RetryPolicy
+
+with Extractor(
+    schema=PdfInfo,
+    model="openai:gpt-5",
+    instructions="Extract the summary and primary language.",
+    model_settings={"temperature": 0},
+    timeout=30,
+    retry_policy=RetryPolicy(max_retries=3),
+) as extractor:
+    first = extractor.extract("./reports/q3.pdf")
+    second, usage = extractor.extract_with_usage("./reports/q4.pdf")
+```
+
+The async session is bound to the event loop that enters it and supports
+concurrent calls on that loop:
+
+```python
+import asyncio
+from openextract import AsyncExtractor
+
+async def main() -> None:
+    async with AsyncExtractor(PdfInfo, "openai:gpt-5") as extractor:
+        q3, q4 = await asyncio.gather(
+            extractor.extract("./reports/q3.pdf"),
+            extractor.extract("./reports/q4.pdf"),
+        )
+
+asyncio.run(main())
+```
+
+`model` may also be a configured `pydantic_ai.models.Model`, preserving custom
+providers, endpoints, credentials, and model defaults without string-prefix
+routing. For advanced dependency injection, pass a fully configured
+`pydantic_ai.Agent` as `agent=` instead of `model=`. Openextract revalidates the
+agent output against `schema`; agent instructions, model settings, timeout, and
+instrumentation must be configured on the injected agent itself.
+
+```python
+from pydantic_ai import Agent
+from pydantic_ai.models.test import TestModel
+from openextract import Extractor
+
+test_agent = Agent(
+    TestModel(custom_output_args={"summary": "Test", "language": "en"}),
+    output_type=PdfInfo,
+)
+with Extractor(PdfInfo, agent=test_agent) as extractor:
+    assert extractor.extract(b"fixture", media_type="text/plain").language == "en"
+```
+
+`Extractor` is thread-bound and not thread-safe; use one per thread.
+`AsyncExtractor` must be entered and used on one event loop, though calls may
+overlap within that loop. Both classes must be used as context managers (or
+closed explicitly with `close()` / `aclose()`). Set `instrument=True` to enable
+Pydantic AI instrumentation, or pass an `InstrumentationSettings` instance.
+
 ## Usage
 
 ### Local files

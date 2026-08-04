@@ -3,6 +3,9 @@ openextract - Extract structured data from documents, images, audio, and video u
 """
 
 from ._extract import (
+    AsyncExtractor,
+    Extractor,
+    RetryPolicy,
     Usage,
     extract,
     extract_async,
@@ -22,6 +25,9 @@ from .exceptions import (
 )
 
 __all__ = [
+    "Extractor",
+    "AsyncExtractor",
+    "RetryPolicy",
     "extract",
     "extract_async",
     "extract_many",

@@ -11,6 +11,31 @@ in the same change as any public signature.
 
 ## Extraction
 
+### `Extractor(schema, model=None, instructions=None, *, agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
+
+Reusable synchronous extraction session. Enter it with `with`; then call
+`extract(input_file, *, media_type=None)` or
+`extract_with_usage(input_file, *, media_type=None)`. The agent, model provider
+client, and URL-fetch client are constructed once and closed on context exit.
+
+`model` accepts either a known model string or a configured
+`pydantic_ai.models.Model`. As an advanced alternative, `agent` accepts a fully
+configured Pydantic AI `Agent`; it is mutually exclusive with `model`, and its
+output is revalidated against `schema`.
+
+### `AsyncExtractor(schema, model=None, instructions=None, *, agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
+
+Async session counterpart. Enter it with `async with`; then await `extract` or
+`extract_with_usage`. It shares one async HTTP client and one agent across
+calls, including concurrent calls made on the entering event loop. Close it
+manually with `aclose()` only when a context manager is impractical.
+
+### `RetryPolicy(max_retries=0, backoff=1.0, max_backoff=60.0)`
+
+Frozen session retry configuration. Only transient `ModelError` failures are
+retried. The backoff and bounded provider `Retry-After` behavior match the
+one-shot function arguments.
+
 ### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Extract one input synchronously and return an instance of `schema`.
@@ -57,7 +82,7 @@ yielded in the result position and streaming continues.
 | Argument | Type | Description |
 | --- | --- | --- |
 | `schema` | `type[BaseModel]` | Pydantic model class describing the desired output. |
-| `model` | `str` | `pydantic-ai` model identifier such as `"xai:grok-4.3"`. |
+| `model` | `str \| Model` | `pydantic-ai` model identifier or configured model instance. |
 | `input_file` | `str \| bytes \| BinaryIO` | Local path, HTTP(S) URL, bytes, or binary file-like object. |
 | `instructions` | `str \| None` | Optional model guidance. |
 | `media_type` | `str \| None` | Required for bytes and file-like inputs; overrides inference for paths and URLs. |
@@ -89,3 +114,14 @@ Batch functions also accept:
 The Python library reads provider configuration from the existing process
 environment and does not load `.env` files. The `openextract` CLI and bundled
 examples load `.env` explicitly as an application-level convenience.
+
+Session `model_settings` are passed directly to Pydantic AI using its typed
+`ModelSettings` contract. `timeout` is an explicit shortcut for the model
+request timeout and overrides a `timeout` entry in `model_settings`.
+`url_timeout` separately controls URL input fetching. `instrument=True` enables
+Pydantic AI instrumentation; an `InstrumentationSettings` instance provides
+fine-grained control.
+
+`Extractor` is bound to the thread that enters it and is not thread-safe.
+`AsyncExtractor` is bound to one event loop; concurrent calls within that loop
+are supported. Neither session can be reopened after it is closed.
