@@ -1,4 +1,4 @@
-"""Microbenchmarks for openextract local hotspots.
+"""Offline benchmarks for openextract startup and local hotspots.
 
 We don't (and can't) benchmark the LLM round-trip itself — that's network +
 inference and dwarfs everything else. What we *can* measure is the local CPU
@@ -9,7 +9,10 @@ construction, and extraction dispatch. Anything we shave here compounds across
 
 from __future__ import annotations
 
+import argparse
+import json
 import os
+import platform
 import statistics
 import subprocess
 import sys
@@ -25,6 +28,93 @@ from pydantic import BaseModel
 os.environ.setdefault("OPENAI_API_KEY", "sk-bench-dummy")
 os.environ.setdefault("OLLAMA_BASE_URL", "http://localhost:11434/v1")
 
+_COLD_RUNS = 5
+_PROVIDER_DISTRIBUTIONS = (
+    "openai",
+    "anthropic",
+    "google-genai",
+    "botocore",
+    "cohere",
+    "huggingface-hub",
+    "groq",
+    "mistralai",
+    "grpcio",
+)
+_COLD_IMPORT_CHILD = """
+import json
+import sys
+import time
+
+try:
+    import resource
+except ImportError:
+    resource = None
+
+start = time.perf_counter()
+import openextract
+elapsed = time.perf_counter() - start
+if resource is None:
+    max_rss_bytes = None
+else:
+    max_rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    max_rss_bytes = max_rss if sys.platform == "darwin" else max_rss * 1024
+print(json.dumps({"elapsed": elapsed, "max_rss_bytes": max_rss_bytes}))
+"""
+_MODEL_ERROR_CHILD = """
+import json
+import sys
+import time
+
+try:
+    import resource
+except ImportError:
+    resource = None
+
+from pydantic_ai.exceptions import ModelAPIError
+from openextract._extract import _map_exception
+
+provider_prefixes = (
+    "openai",
+    "anthropic",
+    "google.genai",
+    "botocore",
+    "cohere",
+    "huggingface_hub",
+    "groq",
+    "mistralai",
+    "grpc",
+)
+modules_before = set(sys.modules)
+rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource else None
+start = time.perf_counter()
+mapped = _map_exception(ModelAPIError(model_name="openai:gpt-5", message="benchmark failure"))
+elapsed = time.perf_counter() - start
+rss_after = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss if resource else None
+rss_scale = 1 if sys.platform == "darwin" else 1024
+new_provider_modules = sorted(
+    module_name
+    for module_name in set(sys.modules) - modules_before
+    if any(
+        module_name == prefix or module_name.startswith(f"{prefix}.")
+        for prefix in provider_prefixes
+    )
+)
+print(
+    json.dumps(
+        {
+            "elapsed": elapsed,
+            "rss_delta_bytes": (
+                max(0, rss_after - rss_before) * rss_scale
+                if rss_before is not None and rss_after is not None
+                else None
+            ),
+            "mapped_type": type(mapped).__name__,
+            "new_provider_modules": new_provider_modules,
+        }
+    )
+)
+"""
+
 
 class _Person(BaseModel):
     name: str
@@ -37,6 +127,57 @@ def _fmt(seconds: float) -> str:
     if seconds >= 1e-3:
         return f"{seconds * 1000:8.3f} ms"
     return f"{seconds * 1e6:8.2f} us"
+
+
+def _fmt_bytes(size: float) -> str:
+    return f"{size / (1024 * 1024):.2f} MiB"
+
+
+def _run_child(code: str) -> dict:
+    child_env = os.environ.copy()
+    child_env["PYTHONDONTWRITEBYTECODE"] = "1"
+    completed = subprocess.run(
+        [sys.executable, "-c", code],
+        check=True,
+        capture_output=True,
+        env=child_env,
+        text=True,
+    )
+    return json.loads(completed.stdout)
+
+
+def bench_environment() -> None:
+    from importlib import metadata
+
+    installed_providers = []
+    for distribution in _PROVIDER_DISTRIBUTIONS:
+        try:
+            version = metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            continue
+        installed_providers.append(f"{distribution}=={version}")
+
+    if len(installed_providers) == len(_PROVIDER_DISTRIBUTIONS):
+        profile = "full-provider development environment"
+    elif installed_providers:
+        profile = "partial-provider environment"
+    else:
+        profile = "base environment"
+
+    revision = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    print("[environment]")
+    print(f"  profile={profile}")
+    print(f"  revision={revision or 'unknown'}")
+    print(f"  python={platform.python_implementation()} {platform.python_version()}")
+    print(f"  platform={platform.platform()}")
+    print(
+        "  providers="
+        + (", ".join(installed_providers) if installed_providers else "none installed")
+    )
 
 
 def _bench(label: str, fn, *, iters: int, warmup: int = 1) -> None:
@@ -55,20 +196,48 @@ def _bench(label: str, fn, *, iters: int, warmup: int = 1) -> None:
 
 
 def bench_import_cost() -> None:
-    print("\n[import] cold-start cost of `import openextract` (subprocess)")
-    timings = []
-    for _ in range(5):
-        t0 = time.perf_counter()
-        subprocess.run(
-            [sys.executable, "-c", "import openextract"],
-            check=True,
-            capture_output=True,
-        )
-        timings.append(time.perf_counter() - t0)
+    print("\n[import] cold `import openextract` in fresh subprocesses")
+    samples = [_run_child(_COLD_IMPORT_CHILD) for _ in range(_COLD_RUNS)]
+    timings = [sample["elapsed"] for sample in samples]
+    max_rss = [sample["max_rss_bytes"] for sample in samples if sample["max_rss_bytes"]]
     timings.sort()
     print(
-        f"  median={_fmt(statistics.median(timings))}  "
+        f"  latency: median={_fmt(statistics.median(timings))}  "
         f"best={_fmt(timings[0])}  worst={_fmt(timings[-1])}"
+    )
+    if max_rss:
+        print(
+            f"  max RSS: median={_fmt_bytes(statistics.median(max_rss))}  "
+            f"best={_fmt_bytes(min(max_rss))}  worst={_fmt_bytes(max(max_rss))}"
+        )
+    else:
+        print("  max RSS: unavailable on this platform")
+
+
+def bench_model_error_classification() -> None:
+    print("\n[model error] first provider-neutral error classification")
+    samples = [_run_child(_MODEL_ERROR_CHILD) for _ in range(_COLD_RUNS)]
+    timings = sorted(sample["elapsed"] for sample in samples)
+    rss_deltas = [
+        sample["rss_delta_bytes"] for sample in samples if sample["rss_delta_bytes"] is not None
+    ]
+    mapped_types = {sample["mapped_type"] for sample in samples}
+    new_provider_modules = sorted(
+        {module_name for sample in samples for module_name in sample["new_provider_modules"]}
+    )
+    if mapped_types != {"ModelError"}:
+        raise RuntimeError(f"Unexpected mapped exception types: {sorted(mapped_types)}")
+    print(
+        f"  latency: median={_fmt(statistics.median(timings))}  "
+        f"best={_fmt(timings[0])}  worst={_fmt(timings[-1])}"
+    )
+    if rss_deltas:
+        print(f"  max RSS delta: median={_fmt_bytes(statistics.median(rss_deltas))}")
+    else:
+        print("  max RSS delta: unavailable on this platform")
+    print(
+        "  newly imported provider modules: "
+        + (", ".join(new_provider_modules) if new_provider_modules else "none")
     )
 
 
@@ -155,8 +324,24 @@ def bench_extract_end_to_end(tmp: Path) -> None:
         )
 
 
+def _parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--startup-only",
+        action="store_true",
+        help="run only environment, cold-import, and first-error benchmarks",
+    )
+    return parser.parse_args()
+
+
 def main() -> int:
+    args = _parse_args()
+    bench_environment()
     bench_import_cost()
+    bench_model_error_classification()
+
+    if args.startup_only:
+        return 0
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
