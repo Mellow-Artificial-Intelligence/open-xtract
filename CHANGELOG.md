@@ -9,6 +9,18 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Typed input and result contracts: `ExtractionInput` supports direct
+  `os.PathLike` sources with per-item `media_type` and an optional safe
+  `name`, and `ExtractionResult[T]` carries output, usage, attempts, timing,
+  model/media metadata, and warnings without retaining raw media or secrets.
+- `Path`/`os.PathLike` now works directly in every public API, and batch calls
+  accept heterogeneous inputs with per-item media types in a single run.
+- `extract_many_with_results` / `extract_many_with_results_async` return
+  per-item `ExtractionResult` diagnostics, and `total_usage` aggregates token
+  usage across batch results.
+- `Literal[True/False]` overloads on `extract_many*` and
+  `iter_extract_many_async` so type checkers infer `list[T]` versus
+  `list[T | Exception]` from `return_exceptions`.
 - Reusable `Extractor` and `AsyncExtractor` sessions with deterministic agent
   and HTTP-client cleanup, configured Pydantic AI model or agent injection,
   model settings/timeouts/instrumentation, and typed `RetryPolicy` support.

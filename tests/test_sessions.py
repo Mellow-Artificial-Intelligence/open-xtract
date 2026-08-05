@@ -89,6 +89,28 @@ def test_configured_model_works_in_session_and_function_wrapper():
     assert extract(Person, model, b"one-shot", media_type="text/plain") == first
 
 
+def test_sync_session_accepts_path_input(tmp_path):
+    local = tmp_path / "input.txt"
+    local.write_bytes(b"hello")
+    agent = FakeAgent([{"name": "Ada", "age": 36}])
+
+    with Extractor(Person, agent=agent) as extractor:
+        result = extractor.extract(local)
+
+    assert result == Person(name="Ada", age=36)
+
+
+async def test_async_session_accepts_path_input(tmp_path):
+    local = tmp_path / "input.txt"
+    local.write_bytes(b"hello")
+    agent = FakeAgent([{"name": "Grace", "age": 85}])
+
+    async with AsyncExtractor(Person, agent=agent) as extractor:
+        result = await extractor.extract(local)
+
+    assert result == Person(name="Grace", age=85)
+
+
 def test_sync_session_reuses_agent_and_clients_and_returns_usage(mocker):
     agent = FakeAgent([{"name": "Ada", "age": 36}, {"name": "Grace", "age": 85}])
     agent_factory = mocker.patch("openextract._extract.Agent", return_value=agent)

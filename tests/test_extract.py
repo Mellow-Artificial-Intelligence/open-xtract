@@ -9,7 +9,9 @@ import subprocess
 import sys
 import threading
 import time
+from dataclasses import FrozenInstanceError
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
@@ -20,6 +22,8 @@ from pydantic_ai import BinaryContent
 import openextract._extract as extract_module
 from openextract import (
     ExtractionError,
+    ExtractionInput,
+    ExtractionResult,
     InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
@@ -30,9 +34,12 @@ from openextract import (
     extract_async,
     extract_many,
     extract_many_async,
+    extract_many_with_results,
+    extract_many_with_results_async,
     extract_with_usage,
     extract_with_usage_async,
     iter_extract_many_async,
+    total_usage,
 )
 from openextract._extract import (
     _fetch_url,
@@ -44,15 +51,19 @@ from openextract._extract import (
     _is_public_ip,
     _is_safe_host,
     _is_transient_model_exception,
+    _item_source_label,
     _map_exception,
     _max_redirects,
+    _model_identifier,
     _model_retry_after,
     _model_status_code,
     _parse_retry_after,
     _read_from_path,
+    _resolve_item,
     _resolve_max_input_bytes,
     _retry_delay,
     _run_with_shared_agent,
+    _run_with_shared_agent_result,
     _safe_source_context,
     _url_fetch_timeout,
 )
@@ -118,13 +129,18 @@ def test_star_import_exposes_only_existing_names():
         "Extractor",
         "AsyncExtractor",
         "RetryPolicy",
+        "ExtractionInput",
+        "ExtractionResult",
         "extract",
         "extract_async",
         "extract_many",
         "extract_many_async",
         "iter_extract_many_async",
+        "extract_many_with_results",
+        "extract_many_with_results_async",
         "extract_with_usage",
         "extract_with_usage_async",
+        "total_usage",
         "Usage",
         "ExtractionError",
         "InputTooLargeError",
@@ -2324,6 +2340,18 @@ class TestRunWithSharedAgent:
         with pytest.raises(ExtractionError, match="Extraction failed: kaboom"):
             await _run_with_shared_agent(agent, ["prepared"])
 
+    async def test_result_variant_returns_raw_run_result(self):
+        expected = _Person(name="Ada", age=36)
+        raw = MagicMock()
+        raw.output = expected
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=raw)
+
+        result = await _run_with_shared_agent_result(agent, ["prepared"])
+
+        assert result is raw
+        agent.run.assert_awaited_once_with(["prepared"])
+
 
 # ---------------------------------------------------------------------------
 # extract_many
@@ -2347,6 +2375,39 @@ def _stub_shared_agent(mocker, side_effect):
     mocker.patch("openextract._extract._prepare_run_inputs_async", side_effect=prepare)
     mocker.patch(
         "openextract._extract._run_with_shared_agent",
+        side_effect=run,
+    )
+
+
+class _FakeRunResult:
+    """Minimal raw pydantic-ai result for the rich batch path."""
+
+    def __init__(self, output, usage=None):
+        self.output = output
+        self._usage = usage or SimpleNamespace(input_tokens=1, output_tokens=2, total_tokens=3)
+
+    def usage(self):
+        return self._usage
+
+
+def _stub_shared_agent_result(mocker, side_effect):
+    """Stub the rich batch path; ``side_effect`` returns a raw run result.
+
+    Mirrors :func:`_stub_shared_agent` but patches the raw-result runner so
+    ``extract_many_with_results*`` can build ``ExtractionResult`` diagnostics.
+    """
+
+    mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+
+    async def prepare(input_file, media_type, client, *, max_input_bytes):
+        return [input_file, media_type, client]
+
+    async def run(agent, inputs):
+        return await side_effect(agent, inputs[0], inputs[1], inputs[2])
+
+    mocker.patch("openextract._extract._prepare_run_inputs_async", side_effect=prepare)
+    mocker.patch(
+        "openextract._extract._run_with_shared_agent_result",
         side_effect=run,
     )
 
@@ -2558,6 +2619,29 @@ class TestExtractMany:
 
         assert all(mt == "application/pdf" for mt in received_types)
         assert len(received_types) == 2
+
+    def test_path_inputs_and_per_item_media_types(self, mocker):
+        received: list[str | None] = []
+
+        async def fake_run(agent, source, media_type, client):
+            received.append(media_type)
+            return _Person(name=str(source), age=1)
+
+        _stub_shared_agent(mocker, fake_run)
+
+        results = extract_many(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[
+                Path("/tmp/a.pdf"),
+                ExtractionInput(source=b"png", media_type="image/png", name="logo"),
+                ExtractionInput(source=b"txt"),
+            ],
+            media_type="text/plain",
+        )
+
+        assert received == ["text/plain", "image/png", "text/plain"]
+        assert len(results) == 3
 
 
 # ---------------------------------------------------------------------------
@@ -2902,3 +2986,510 @@ class TestIterExtractManyAsync:
             )
 
         build_mock.assert_not_called()
+
+    async def test_per_item_media_types_across_heterogeneous_inputs(self, mocker):
+        received: list[str | None] = []
+
+        async def fake_run(agent, source, media_type, client):
+            received.append(media_type)
+            return _Person(name=str(source), age=1)
+
+        _stub_shared_agent(mocker, fake_run)
+
+        results = [
+            item
+            async for item in iter_extract_many_async(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=[
+                    "plain.txt",
+                    ExtractionInput(source=b"pdf", media_type="application/pdf", name="invoice"),
+                    ExtractionInput(source=b"png", media_type="image/png"),
+                ],
+                media_type="text/plain",
+                return_exceptions=True,
+            )
+        ]
+
+        assert received == ["text/plain", "application/pdf", "image/png"]
+        assert [output for _, output in results][1].name == "b'pdf'"
+
+
+# ---------------------------------------------------------------------------
+# Path / ExtractionInput input contracts
+# ---------------------------------------------------------------------------
+
+
+class TestPathInputs:
+    def test_get_media_accepts_path(self, tmp_path):
+        local = tmp_path / "hello.txt"
+        local.write_bytes(b"hello")
+
+        assert _get_media(local) == (b"hello", "text/plain")
+
+    async def test_get_media_async_accepts_path(self, tmp_path):
+        local = tmp_path / "hello.txt"
+        local.write_bytes(b"hello")
+
+        assert await _get_media_async(local, MagicMock()) == (b"hello", "text/plain")
+
+    async def test_get_media_async_accepts_pathlike_with_override(self, tmp_path):
+        local = tmp_path / "hello.txt"
+        local.write_bytes(b"hello")
+
+        result = await _get_media_async(local, MagicMock(), media_type="application/custom")
+
+        assert result == (b"hello", "application/custom")
+
+    def test_get_media_accepts_generic_pathlike(self, tmp_path):
+        local = tmp_path / "hello.txt"
+        local.write_bytes(b"hello")
+
+        class _PathLike(os.PathLike):
+            def __init__(self, path):
+                self._path = path
+
+            def __fspath__(self):
+                return os.fspath(self._path)
+
+        assert _get_media(_PathLike(local)) == (b"hello", "text/plain")
+
+    def test_extract_accepts_path(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Ada", age=36)
+        _, agent_instance = _make_agent_mock(mocker, output=expected)
+
+        result = extract(schema=_Person, model="openai:gpt-5", input_file=local)
+
+        assert result is expected
+        binary = _binary_content_arg(agent_instance)
+        assert binary.data == b"hello"
+
+    async def test_extract_async_accepts_path(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Grace", age=85)
+        _make_async_agent_mock(mocker, output=expected)
+
+        result = await extract_async(schema=_Person, model="openai:gpt-5", input_file=local)
+
+        assert result is expected
+
+    def test_extract_with_usage_accepts_path(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Ada", age=36)
+        usage = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)
+        _make_agent_mock(mocker, output=expected, usage=usage)
+
+        output, got_usage = extract_with_usage(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=local,
+        )
+
+        assert output is expected
+        assert got_usage == Usage(1, 2, 3)
+
+    async def test_extract_with_usage_async_accepts_path(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Grace", age=85)
+        usage = SimpleNamespace(input_tokens=1, output_tokens=2, total_tokens=3)
+        _make_async_agent_mock(mocker, output=expected, usage=usage)
+
+        output, got_usage = await extract_with_usage_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=local,
+        )
+
+        assert output is expected
+        assert got_usage == Usage(1, 2, 3)
+
+
+class TestExtractionInputContract:
+    def test_get_media_unwraps_bytes_input(self):
+        assert _get_media(ExtractionInput(b"hello", media_type="text/plain")) == (
+            b"hello",
+            "text/plain",
+        )
+
+    def test_get_media_unwraps_path_input(self, tmp_path):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+
+        assert _get_media(ExtractionInput(local)) == (b"hello", "text/plain")
+
+    def test_explicit_media_type_wins_over_extraction_input(self):
+        input_ = ExtractionInput(b"hello", media_type="text/plain")
+
+        assert _get_media(input_, media_type="application/pdf") == (
+            b"hello",
+            "application/pdf",
+        )
+
+    async def test_get_media_async_unwraps_input(self):
+        result = await _get_media_async(
+            ExtractionInput(b"hello", media_type="text/plain"),
+            MagicMock(),
+        )
+
+        assert result == (b"hello", "text/plain")
+
+    def test_extraction_input_size_limit(self):
+        with pytest.raises(InputTooLargeError, match=r"5 bytes.*at least 6 bytes"):
+            _get_media(
+                ExtractionInput(b"123456", media_type="text/plain"),
+                max_input_bytes=5,
+            )
+
+    def test_single_extract_accepts_extraction_input(self, mocker):
+        expected = _Person(name="Ada", age=36)
+        _, agent_instance = _make_agent_mock(mocker, output=expected)
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=ExtractionInput(b"payload", media_type="application/pdf"),
+        )
+
+        assert result is expected
+        binary = _binary_content_arg(agent_instance)
+        assert binary.data == b"payload"
+        assert binary.media_type == "application/pdf"
+
+    def test_single_extract_explicit_override_wins(self, mocker):
+        expected = _Person(name="Ada", age=36)
+        _, agent_instance = _make_agent_mock(mocker, output=expected)
+
+        extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=ExtractionInput(b"payload", media_type="application/pdf"),
+            media_type="image/png",
+        )
+
+        binary = _binary_content_arg(agent_instance)
+        assert binary.media_type == "image/png"
+
+    def test_extraction_input_is_frozen(self):
+        input_ = ExtractionInput(b"x")
+        with pytest.raises(FrozenInstanceError):
+            input_.media_type = "text/plain"  # type: ignore[misc]
+
+
+class TestBatchItemResolution:
+    def test_raw_item_uses_global_media_type(self):
+        source, media_type, name = _resolve_item("a.pdf", "application/pdf")
+
+        assert (source, media_type, name) == ("a.pdf", "application/pdf", None)
+
+    def test_extraction_input_media_type_wins(self):
+        item = ExtractionInput(b"x", media_type="image/png", name="scan")
+
+        source, media_type, name = _resolve_item(item, "application/pdf")
+
+        assert source == b"x"
+        assert media_type == "image/png"
+        assert name == "scan"
+
+    def test_extraction_input_falls_back_to_global(self):
+        item = ExtractionInput(b"x")
+
+        _, media_type, _ = _resolve_item(item, "application/pdf")
+
+        assert media_type == "application/pdf"
+
+    def test_item_source_label_prefers_name(self):
+        label = _item_source_label("https://user:secret@example.com/f?q=1", "invoice")
+
+        assert label == "invoice"
+
+    def test_item_source_label_sanitizes_url(self):
+        label = _item_source_label("https://user:secret@example.com/f.pdf?token=abc", None)
+
+        assert label == "URL https://example.com/f.pdf"
+        assert "secret" not in label
+        assert "token" not in label
+
+    def test_item_source_label_path(self):
+        assert _item_source_label(Path("/tmp/x.pdf"), None) == "path 'x.pdf'"
+
+    def test_item_source_label_pathlike(self, tmp_path):
+        assert _item_source_label(tmp_path / "x.pdf", None) == "path 'x.pdf'"
+
+    def test_item_source_label_bytes_is_none(self):
+        assert _item_source_label(b"x", None) is None
+
+    def test_item_source_label_stream_is_none(self):
+        assert _item_source_label(io.BytesIO(b"x"), None) is None
+
+    def test_model_identifier_routes_string(self):
+        assert _model_identifier("openai:gpt-5", MagicMock()) == "openai-responses:gpt-5"
+
+    def test_model_identifier_uses_model_name(self):
+        model = MagicMock()
+        model.model_name = "custom-model"
+
+        assert _model_identifier(model, MagicMock()) == "custom-model"
+
+    def test_model_identifier_falls_back_to_agent_model(self):
+        agent = MagicMock()
+        agent.model.model_name = "agent-model"
+
+        assert _model_identifier(MagicMock(), agent) == "agent-model"
+
+    def test_model_identifier_unknown_returns_none(self):
+        assert _model_identifier(MagicMock(), MagicMock()) is None
+
+
+class TestTotalUsage:
+    def test_sums_usage_across_results(self):
+        results = [
+            ExtractionResult(_Person(name="a", age=1), Usage(1, 2, 3), 1, 0.1, "m", None, None),
+            ExtractionResult(_Person(name="b", age=2), Usage(4, 5, 9), 2, 0.2, "m", None, None),
+        ]
+
+        assert total_usage(results) == Usage(5, 7, 12)
+
+    def test_empty_results_sum_to_zero(self):
+        assert total_usage([]) == Usage(0, 0, 0)
+
+
+# ---------------------------------------------------------------------------
+# extract_many_with_results
+# ---------------------------------------------------------------------------
+
+
+class TestExtractManyWithResults:
+    def test_invalid_options_rejected_before_agent_build(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        with pytest.raises(ValueError, match="max_concurrency"):
+            extract_many_with_results(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=["a.txt"],
+                max_concurrency=0,
+            )
+
+        build_mock.assert_not_called()
+
+    def test_rejects_call_from_running_event_loop(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        async def _call_from_loop():
+            with pytest.raises(RuntimeError, match="extract_many_with_results_async"):
+                extract_many_with_results(
+                    schema=_Person,
+                    model="openai:gpt-5",
+                    input_files=["a.txt"],
+                )
+
+        asyncio.run(_call_from_loop())
+        build_mock.assert_not_called()
+
+    def test_returns_diagnostics_per_item(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(2)]
+
+        async def fake_run(agent, source, media_type, client):
+            return _FakeRunResult(_Person(name=source, age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        results = extract_many_with_results(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+        )
+
+        assert len(results) == 2
+        for result in results:
+            assert isinstance(result, ExtractionResult)
+            assert isinstance(result.output, _Person)
+            assert result.usage == Usage(1, 2, 3)
+            assert result.attempts == 1
+            assert result.duration >= 0
+            assert result.model == "openai-responses:gpt-5"
+            assert result.media_type is None
+            assert result.source is not None
+            assert result.warnings == ()
+
+    def test_partial_failure_returns_exceptions_in_place(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(2)]
+
+        async def fake_run(agent, source, media_type, client):
+            if source.endswith("f1.txt"):
+                raise ModelError("boom on f1")
+            return _FakeRunResult(_Person(name=source, age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        results = extract_many_with_results(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+            return_exceptions=True,
+        )
+
+        assert isinstance(results[0], ExtractionResult)
+        assert isinstance(results[1], ModelError)
+
+    def test_fail_fast_propagates_first_error(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
+
+        async def fake_run(agent, source, media_type, client):
+            if source.endswith("f1.txt"):
+                raise ModelError("boom on f1")
+            return _FakeRunResult(_Person(name=source, age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        with pytest.raises(ModelError, match="boom on f1"):
+            extract_many_with_results(
+                schema=_Person,
+                model="openai:gpt-5",
+                input_files=files,
+            )
+
+    def test_retries_record_attempts_and_per_item_metadata(self, mocker):
+        flaky_attempts = 0
+
+        async def fake_run(agent, source, media_type, client):
+            nonlocal flaky_attempts
+            if source == b"flaky":
+                flaky_attempts += 1
+                if flaky_attempts == 1:
+                    raise ModelError("transient", retryable=True)
+            return _FakeRunResult(_Person(name=str(source), age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+        mocker.patch("openextract._extract.asyncio.sleep", new_callable=AsyncMock)
+
+        results = extract_many_with_results(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[
+                ExtractionInput(source=b"flaky", media_type="application/pdf", name="invoice-a"),
+                ExtractionInput(source=b"ok", media_type="text/plain"),
+            ],
+            max_retries=1,
+        )
+
+        assert isinstance(results[0], ExtractionResult)
+        assert results[0].attempts == 2
+        assert results[0].media_type == "application/pdf"
+        assert results[0].source == "invoice-a"
+        assert isinstance(results[1], ExtractionResult)
+        assert results[1].attempts == 1
+        assert results[1].media_type == "text/plain"
+
+    def test_global_media_type_fallback_and_source_sanitization(self, mocker):
+        async def fake_run(agent, source, media_type, client):
+            return _FakeRunResult(_Person(name=str(source), age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        results = extract_many_with_results(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=["https://user:secret@example.com/f.pdf?token=abc"],
+            media_type="application/pdf",
+        )
+
+        assert results[0].media_type == "application/pdf"
+        assert results[0].source == "URL https://example.com/f.pdf"
+        assert "secret" not in (results[0].source or "")
+
+    def test_total_usage_aggregates_across_batch(self, mocker):
+        async def fake_run(agent, source, media_type, client):
+            usage = SimpleNamespace(input_tokens=10, output_tokens=20, total_tokens=30)
+            return _FakeRunResult(_Person(name=str(source), age=1), usage=usage)
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        results = extract_many_with_results(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=["a", "b"],
+        )
+
+        assert total_usage(results) == Usage(20, 40, 60)
+
+
+class TestExtractManyWithResultsAsync:
+    async def test_returns_rich_results_in_input_order(self, tmp_path, mocker):
+        files = [str(tmp_path / f"f{i}.txt") for i in range(3)]
+
+        async def fake_run(agent, source, media_type, client):
+            await asyncio.sleep(0)
+            return _FakeRunResult(_Person(name=source, age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        results = await extract_many_with_results_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=files,
+        )
+
+        assert [result.output.name for result in results] == files
+        assert all(isinstance(result, ExtractionResult) for result in results)
+
+    async def test_empty_input_returns_empty_list_without_building_agent(self, mocker):
+        build_mock = mocker.patch("openextract._extract._build_agent")
+
+        results = await extract_many_with_results_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[],
+        )
+
+        assert results == []
+        build_mock.assert_not_called()
+
+    async def test_heterogeneous_per_item_media_types(self, mocker):
+        received: list[str | None] = []
+
+        async def fake_run(agent, source, media_type, client):
+            received.append(media_type)
+            return _FakeRunResult(_Person(name=str(source), age=1))
+
+        _stub_shared_agent_result(mocker, fake_run)
+
+        results = await extract_many_with_results_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[
+                ExtractionInput(source=b"pdf", media_type="application/pdf"),
+                ExtractionInput(source=b"png", media_type="image/png"),
+                b"raw",
+            ],
+            media_type="text/plain",
+        )
+
+        assert received == ["application/pdf", "image/png", "text/plain"]
+        assert [result.media_type for result in results] == received
+
+    async def test_size_errors_are_returned_in_place(self, mocker):
+        expected = _Person(name="ok", age=1)
+        run_result = _FakeRunResult(expected)
+        agent = MagicMock()
+        agent.run = AsyncMock(return_value=run_result)
+        mocker.patch("openextract._extract._build_agent", return_value=agent)
+
+        results = await extract_many_with_results_async(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_files=[ExtractionInput(b"ok", media_type="text/plain"), b"too-large"],
+            media_type="text/plain",
+            max_input_bytes=5,
+            return_exceptions=True,
+        )
+
+        assert isinstance(results[0], ExtractionResult)
+        assert results[0].output is expected
+        assert isinstance(results[1], InputTooLargeError)
+        assert agent.run.await_count == 1

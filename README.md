@@ -217,6 +217,51 @@ print(f"tokens: {usage.input_tokens} in / {usage.output_tokens} out / {usage.tot
 
 `usage` is a frozen `Usage` dataclass with `input_tokens`, `output_tokens`, and `total_tokens` fields.
 
+### Batch extraction
+
+Every public API accepts a `pathlib.Path` (or any `os.PathLike`) directly, in
+addition to `str` paths/URLs, `bytes`, and binary file-like objects. Batch
+calls accept `ExtractionInput` items so heterogeneous inputs can carry their
+own media type in one batch:
+
+```python
+from pathlib import Path
+from openextract import ExtractionInput, extract_many
+
+results = extract_many(
+    schema=PdfInfo,
+    model="xai:grok-4.3",
+    input_files=[
+        Path("./reports/q3.pdf"),
+        ExtractionInput(source=b"...pdf bytes...", media_type="application/pdf"),
+        ExtractionInput(source=b"...png bytes...", media_type="image/png"),
+    ],
+)
+```
+
+A batch-wide `media_type` still applies to any item that does not specify one.
+`return_exceptions` is typed, so checkers infer `list[PdfInfo]` by default and
+`list[PdfInfo | Exception]` when it is `True`.
+
+For per-item token usage, attempt counts, timing, and sanitized source labels,
+use `extract_many_with_results` and aggregate with `total_usage`:
+
+```python
+from openextract import extract_many_with_results, total_usage
+
+results = extract_many_with_results(
+    schema=PdfInfo,
+    model="xai:grok-4.3",
+    input_files=[Path("./reports/q3.pdf"), Path("./reports/q4.pdf")],
+)
+
+total = total_usage(results)
+print(total.input_tokens, total.output_tokens, total.total_tokens)
+```
+
+Each `ExtractionResult` carries `output`, `usage`, `attempts`, `duration`,
+`model`, `media_type`, and a sanitized `source` (never raw media, credentials,
+or query strings). The async sibling is `extract_many_with_results_async`.
 
 ### Choosing a model
 
@@ -380,13 +425,18 @@ the compatibility notes below even though it is not exported from `__all__`.
 
 | API | Status for 1.0 | Notes |
 | --- | --- | --- |
-| `extract` | Stable | Primary synchronous API. Signature, return type, media input forms, retry behavior, and public exception categories are intended to carry into 1.0 unchanged. |
+| `extract` | Stable | Primary synchronous API. Signature, return type, media input forms (`str`, `os.PathLike`, `bytes`, file-like, `ExtractionInput`), retry behavior, and public exception categories are intended to carry into 1.0 unchanged. |
 | `extract_async` | Stable | Async sibling of `extract`; same input contract and retry behavior, with `Agent.run` instead of `run_sync`. |
 | `extract_with_usage` | Stable | Usage-returning sync API. The `(output, Usage)` tuple shape is stable; exact token values depend on provider reporting. |
 | `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |
-| `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain. Calling it from a running event loop raises `RuntimeError`; use `extract_many_async` in async code. |
+| `extract_many` | Provisional | Batch return ordering, option validation, and `return_exceptions` semantics are intended to remain. Calling it from a running event loop raises `RuntimeError`; use `extract_many_async` in async code. Accepts `os.PathLike` and per-item `ExtractionInput` media types. |
 | `extract_many_async` | Provisional | Async batch API with the same return shape, option constraints, and per-item retry behavior as `extract_many`. |
 | `iter_extract_many_async` | Provisional | Bounded async iterator yielding `(input_index, result)` pairs in completion order. |
+| `extract_many_with_results` | Provisional | Batch API returning per-item `ExtractionResult` objects (output, usage, attempts, duration, model/media metadata, sanitized source). |
+| `extract_many_with_results_async` | Provisional | Async sibling of `extract_many_with_results`. |
+| `total_usage` | Provisional | Sum `Usage` across batch `ExtractionResult` objects. |
+| `ExtractionInput` | Provisional | Frozen input contract wrapping a media source with optional per-item `media_type` and safe `name`. |
+| `ExtractionResult` | Provisional | Frozen generic result contract; never retains raw media, credentials, or provider internals. |
 | `Usage` | Stable | Frozen dataclass with `input_tokens`, `output_tokens`, and `total_tokens`. New fields, if ever needed, should be additive. |
 | `ExtractionError` | Stable | Base class for all public `openextract` exceptions. Catch this for a broad fallback. |
 | `UrlFetchError` | Stable | Raised for URL fetch and URL safety failures. Message wording may improve, but the exception type is stable. |
