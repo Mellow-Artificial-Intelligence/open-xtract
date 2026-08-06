@@ -16,7 +16,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, BinaryIO, TypeVar, cast
+from typing import TYPE_CHECKING, Any, BinaryIO, Literal, TypeVar, cast, overload
 from urllib.parse import urlparse
 
 import httpx
@@ -46,6 +46,75 @@ from .exceptions import (
 )
 
 T = TypeVar("T", bound=BaseModel)
+
+# A raw media source accepted directly by the public APIs: a local path or
+# http(s) URL string, an ``os.PathLike`` (e.g. ``pathlib.Path``), raw bytes, or
+# a binary file-like object with a ``.read()`` method.
+MediaSource = str | os.PathLike[str] | bytes | BinaryIO
+
+# A media source after ``os.fspath`` normalization: no ``os.PathLike`` remains.
+ResolvedSource = str | bytes | BinaryIO
+
+
+@dataclass(frozen=True)
+class ExtractionInput:
+    """A single input for extraction with optional per-item media metadata.
+
+    Wraps a raw :data:`MediaSource` so heterogeneous batch inputs can specify
+    their own ``media_type`` (and an optional safe ``name`` for diagnostics)
+    without falling back to a single batch-wide media type.
+
+    Attributes:
+        source: The media source — a local path, ``http(s)://`` URL,
+            ``os.PathLike``, raw ``bytes``, or a binary file-like object.
+        media_type: Optional MIME type for this item. Required when ``source``
+            is ``bytes`` or a file-like object and no batch-wide ``media_type``
+            override is supplied. Overrides inference for path/URL sources.
+        name: Optional safe source name recorded on :class:`ExtractionResult`
+            diagnostics. Never populated with raw content or credentials.
+    """
+
+    source: MediaSource
+    media_type: str | None = None
+    name: str | None = None
+
+
+# Anything accepted as a single input or batch item: a raw :data:`MediaSource`
+# or a structured :class:`ExtractionInput`.
+ExtractionInputLike = MediaSource | ExtractionInput
+
+
+@dataclass(frozen=True)
+class ExtractionResult[T]:
+    """Diagnostics-rich result of one extraction.
+
+    ``extract_many_with_results`` returns these so callers can account for
+    token usage, observe retries and timing, and record safe provenance without
+    retaining raw media, credentials, query strings, or provider internals.
+
+    Attributes:
+        output: The validated schema instance.
+        usage: Token usage from the successful model call.
+        attempts: Number of model-call attempts, including the initial call and
+            any :class:`ModelError` retries (always ``>= 1`` on success).
+        duration: Wall-clock seconds spent on this item, including retries.
+        model: The model identifier that produced the output, when known.
+        media_type: The media type requested for this item, when provided.
+        source: A sanitized source label (``ExtractionInput.name``, or a
+            credential/query-stripped path/URL context); ``None`` for unnamed
+            bytes/file-like inputs.
+        warnings: Extensible, currently empty diagnostics channel.
+    """
+
+    output: T
+    usage: Usage
+    attempts: int
+    duration: float
+    model: str | None
+    media_type: str | None
+    source: str | None
+    warnings: tuple[str, ...] = ()
+
 
 _DEFAULT_MEDIA_TYPE = "application/octet-stream"
 _URL_PREFIXES = ("http://", "https://")
@@ -573,8 +642,30 @@ async def _read_from_path_async(
     )
 
 
+def _normalize_input(
+    input_file: ExtractionInputLike,
+    media_type: str | None,
+) -> tuple[ResolvedSource, str | None]:
+    """Unwrap an :class:`ExtractionInput` and coerce ``os.PathLike`` sources.
+
+    The effective media type prefers an explicit per-item ``media_type``
+    argument over the value carried on the ``ExtractionInput``. File-like
+    objects (anything exposing ``.read()``) keep precedence over a coincidental
+    ``os.PathLike`` implementation so streams are read, not opened as paths.
+    """
+    if isinstance(input_file, ExtractionInput):
+        if media_type is None:
+            media_type = input_file.media_type
+        input_file = input_file.source
+    if isinstance(input_file, os.PathLike) and not hasattr(input_file, "read"):
+        input_file = os.fspath(input_file)
+    # A PathLike that also exposes ``.read()`` is consumed as a stream, so it is
+    # a valid member of ``ResolvedSource`` at runtime.
+    return cast("ResolvedSource", input_file), media_type
+
+
 def _get_media(
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     media_type: str | None = None,
     *,
     max_input_bytes: int | None = None,
@@ -582,10 +673,11 @@ def _get_media(
 ) -> tuple[bytes, str]:
     """Resolve ``input_file`` to ``(bytes, media_type)``.
 
-    ``str`` is treated as a local path or http(s) URL. ``bytes`` and file-like
-    objects (anything with a ``.read()`` method) are passed through. For the
-    latter two, ``media_type`` is required.
+    ``str`` and ``os.PathLike`` are treated as a local path or http(s) URL.
+    ``bytes`` and file-like objects (anything with a ``.read()`` method) are
+    passed through. For the latter two, ``media_type`` is required.
     """
+    input_file, media_type = _normalize_input(input_file, media_type)
     limit = _resolve_max_input_bytes(max_input_bytes)
     if isinstance(input_file, str):
         file_bytes, resolved_type = _read_from_path(
@@ -612,18 +704,20 @@ def _get_media(
         )
 
     raise TypeError(
-        "input_file must be a str path/URL, bytes, or a file-like object with a .read() method."
+        "input_file must be a str path/URL, os.PathLike, bytes, or a file-like "
+        "object with a .read() method."
     )
 
 
 async def _get_media_async(
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     client: httpx.AsyncClient | None = None,
     media_type: str | None = None,
     *,
     max_input_bytes: int | None = None,
 ) -> tuple[bytes, str]:
     """Resolve media without blocking the event loop on disk, DNS, or stream I/O."""
+    input_file, media_type = _normalize_input(input_file, media_type)
     limit = _resolve_max_input_bytes(max_input_bytes)
     if isinstance(input_file, str):
         file_bytes, resolved_type = await _read_from_path_async(
@@ -918,10 +1012,69 @@ def _usage_from_result(result) -> Usage:
     )
 
 
+def total_usage(results: Iterable[ExtractionResult[T]]) -> Usage:
+    """Sum token usage across batch extraction results.
+
+    ``results`` typically comes from :func:`extract_many_with_results` or
+    :func:`extract_many_with_results_async`. Only successful items carry a
+    :class:`Usage`, so totals reflect the successful calls in the batch.
+    """
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    for result in results:
+        input_tokens += result.usage.input_tokens
+        output_tokens += result.usage.output_tokens
+        total_tokens += result.usage.total_tokens
+    return Usage(input_tokens, output_tokens, total_tokens)
+
+
+def _resolve_item(
+    item: ExtractionInputLike,
+    global_media_type: str | None,
+) -> tuple[MediaSource, str | None, str | None]:
+    """Split a batch item into ``(source, effective media type, safe name)``.
+
+    A per-item :class:`ExtractionInput` media type wins over the batch-wide
+    ``media_type`` fallback so heterogeneous inputs can use different types.
+    """
+    if isinstance(item, ExtractionInput):
+        media_type = item.media_type if item.media_type is not None else global_media_type
+        return item.source, media_type, item.name
+    return item, global_media_type, None
+
+
+def _item_source_label(source: MediaSource, name: str | None) -> str | None:
+    """Return a sanitized source label for diagnostics, preferring ``name``.
+
+    URLs and paths are stripped of credentials, query strings, and fragments;
+    raw bytes and file-like inputs have no safe label unless named.
+    """
+    if name is not None:
+        return name
+    if isinstance(source, os.PathLike):
+        source = os.fspath(source)
+    if isinstance(source, str):
+        return _safe_source_context(source)
+    return None
+
+
+def _model_identifier(model: str | Model, agent: object) -> str | None:
+    """Return a stable model identifier for result diagnostics, when known."""
+    if isinstance(model, str):
+        return _route_model(model)
+    name = getattr(model, "model_name", None)
+    if isinstance(name, str):
+        return name
+    agent_model = getattr(agent, "model", None)
+    name = getattr(agent_model, "model_name", None)
+    return name if isinstance(name, str) else None
+
+
 def _prepare_run(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
@@ -939,7 +1092,7 @@ def _prepare_run(
 async def _prepare_run_async(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
@@ -959,7 +1112,7 @@ async def _prepare_run_async(
 def _prepare_extraction(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
@@ -979,7 +1132,7 @@ def _prepare_extraction(
 async def _prepare_extraction_async(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None,
     media_type: str | None,
     max_input_bytes: int,
@@ -999,7 +1152,7 @@ async def _prepare_extraction_async(
 
 
 async def _prepare_run_inputs_async(
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     media_type: str | None,
     client: httpx.AsyncClient | None = None,
     *,
@@ -1017,7 +1170,7 @@ async def _prepare_run_inputs_async(
 
 
 def _prepare_run_inputs_sync(
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     media_type: str | None,
     client: httpx.Client | None = None,
     *,
@@ -1347,7 +1500,7 @@ class Extractor(_ExtractorSession[T]):
 
     def extract(
         self,
-        input_file: str | bytes | BinaryIO,
+        input_file: ExtractionInputLike,
         *,
         media_type: str | None = None,
     ) -> T:
@@ -1372,7 +1525,7 @@ class Extractor(_ExtractorSession[T]):
 
     def extract_with_usage(
         self,
-        input_file: str | bytes | BinaryIO,
+        input_file: ExtractionInputLike,
         *,
         media_type: str | None = None,
     ) -> tuple[T, Usage]:
@@ -1480,7 +1633,7 @@ class AsyncExtractor(_ExtractorSession[T]):
 
     async def extract(
         self,
-        input_file: str | bytes | BinaryIO,
+        input_file: ExtractionInputLike,
         *,
         media_type: str | None = None,
     ) -> T:
@@ -1506,7 +1659,7 @@ class AsyncExtractor(_ExtractorSession[T]):
 
     async def extract_with_usage(
         self,
-        input_file: str | bytes | BinaryIO,
+        input_file: ExtractionInputLike,
         *,
         media_type: str | None = None,
     ) -> tuple[T, Usage]:
@@ -1534,7 +1687,7 @@ class AsyncExtractor(_ExtractorSession[T]):
 def extract(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -1598,7 +1751,7 @@ def extract(
 def extract_with_usage(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -1638,7 +1791,7 @@ def extract_with_usage(
 async def extract_with_usage_async(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -1674,7 +1827,7 @@ async def extract_with_usage_async(
 async def extract_async(
     schema: type[T],
     model: str | Model,
-    input_file: str | bytes | BinaryIO,
+    input_file: ExtractionInputLike,
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -1714,10 +1867,23 @@ async def _run_with_shared_agent(
     """Run prepared inputs through a pre-built shared ``Agent``.
 
     Mirrors ``extract_async``'s error mapping so callers get the same
-    ``ExtractionError`` subclasses as the per-item path.
+    ``ExtractionError`` subclasses as the per-item path. Returns the validated
+    schema instance.
     """
     result = await _run_extraction_async(agent, inputs)
     return result.output
+
+
+async def _run_with_shared_agent_result(
+    agent: PydanticAgent,
+    inputs: list,
+) -> object:
+    """Run prepared inputs through a shared ``Agent`` and return the raw result.
+
+    The raw pydantic-ai result exposes ``.output`` and ``.usage()`` so the rich
+    batch path can build :class:`ExtractionResult` diagnostics.
+    """
+    return await _run_extraction_async(agent, inputs)
 
 
 async def _cancel_tasks(tasks: Iterable[asyncio.Task[object]]) -> None:
@@ -1732,7 +1898,7 @@ async def _cancel_tasks(tasks: Iterable[asyncio.Task[object]]) -> None:
 async def _iter_extractions(
     schema: type[T],
     model: str | Model,
-    input_files: Iterable[str | bytes | BinaryIO],
+    input_files: Iterable[ExtractionInputLike],
     instructions: str | None,
     max_concurrency: int,
     return_exceptions: bool,
@@ -1741,8 +1907,13 @@ async def _iter_extractions(
     max_retries: int,
     retry_backoff: float,
     retry_max_backoff: float,
-) -> AsyncIterator[tuple[int, T | Exception]]:
-    """Yield indexed batch results in completion order with bounded work."""
+    rich: bool = False,
+) -> AsyncIterator[tuple[int, T | ExtractionResult[T] | Exception]]:
+    """Yield indexed batch results in completion order with bounded work.
+
+    When ``rich`` is true each successful item is yielded as an
+    :class:`ExtractionResult[T]`; otherwise the bare schema instance is yielded.
+    """
     file_iterator = iter(input_files)
     try:
         first_item = next(file_iterator)
@@ -1763,34 +1934,54 @@ async def _iter_extractions(
         timeout=_url_fetch_timeout(),
     ) as client:
 
-        async def _run_item(item: str | bytes | BinaryIO) -> object:
+        async def _run_item(item: ExtractionInputLike) -> object:
+            source, item_media_type, name = _resolve_item(item, media_type)
+            started = time.perf_counter()
+            attempts = 0
             try:
                 inputs = await _prepare_run_inputs_async(
-                    item,
-                    media_type,
+                    source,
+                    item_media_type,
                     client,
                     max_input_bytes=max_input_bytes,
                 )
 
-                async def _once():
+                async def _once() -> object:
+                    nonlocal attempts
+                    attempts += 1
                     # A sibling may have failed while this item was being prepared
                     # or waiting to retry. Do not begin another model call afterward.
                     if stop.is_set():
                         raise asyncio.CancelledError
+                    if rich:
+                        return await _run_with_shared_agent_result(agent, inputs)
                     return await _run_with_shared_agent(agent, inputs)
 
-                return await _run_with_retries_async(
+                value = await _run_with_retries_async(
                     _once,
                     max_retries=max_retries,
                     retry_backoff=retry_backoff,
                     retry_max_backoff=retry_max_backoff,
                 )
+                if rich:
+                    raw_result = cast(Any, value)
+                    return ExtractionResult(
+                        output=cast(T, raw_result.output),
+                        usage=_usage_from_result(raw_result),
+                        attempts=attempts,
+                        duration=time.perf_counter() - started,
+                        model=_model_identifier(model, agent),
+                        media_type=item_media_type,
+                        source=_item_source_label(source, name),
+                        warnings=(),
+                    )
+                return value
             except Exception:
                 if not return_exceptions:
                     stop.set()
                 raise
 
-        def _schedule(item: str | bytes | BinaryIO) -> None:
+        def _schedule(item: ExtractionInputLike) -> None:
             nonlocal next_index
             task = asyncio.create_task(_run_item(item))
             pending[task] = next_index
@@ -1813,7 +2004,7 @@ async def _iter_extractions(
             _fill_slots()
             while pending:
                 done, _ = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-                completed: list[tuple[int, T | Exception]] = []
+                completed: list[tuple[int, T | ExtractionResult[T] | Exception]] = []
                 failures: list[Exception] = []
                 child_cancelled = False
 
@@ -1831,7 +2022,7 @@ async def _iter_extractions(
                         else:
                             failures.append(exc)
                     else:
-                        completed.append((index, cast(T, result)))
+                        completed.append((index, cast("T | ExtractionResult[T]", result)))
 
                 if failures:
                     await _cancel_tasks(pending)
@@ -1853,7 +2044,7 @@ async def _iter_extractions(
 async def _gather_extractions(
     schema: type[T],
     model: str | Model,
-    input_files: Iterable[str | bytes | BinaryIO],
+    input_files: Iterable[ExtractionInputLike],
     instructions: str | None,
     max_concurrency: int,
     return_exceptions: bool,
@@ -1862,6 +2053,7 @@ async def _gather_extractions(
     max_retries: int,
     retry_backoff: float,
     retry_max_backoff: float,
+    rich: bool = False,
 ) -> list:
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     _validate_max_concurrency(max_concurrency)
@@ -1880,16 +2072,68 @@ async def _gather_extractions(
             max_retries,
             retry_backoff,
             retry_max_backoff,
+            rich,
         )
     ]
     indexed_results.sort(key=lambda item: item[0])
     return [result for _, result in indexed_results]
 
 
+@overload
 def extract_many(
     schema: type[T],
     model: str | Model,
-    input_files: Iterable[str | bytes | BinaryIO],
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[False] = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[T]: ...
+
+
+@overload
+def extract_many(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[True],
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[T | Exception]: ...
+
+
+@overload
+def extract_many(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[T | Exception]: ...
+
+
+def extract_many(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -1900,28 +2144,34 @@ def extract_many(
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> list:
-    """Run :func:`extract_async` over many inputs concurrently from sync code.
+    """Run :func:`extract` over many inputs concurrently from sync code.
+
+    Each item may be a raw path/URL/``bytes``/file-like ``os.PathLike`` or an
+    :class:`ExtractionInput` carrying a per-item ``media_type``.
 
     Args:
         schema: A Pydantic model class defining the expected output structure.
         model: The model identifier.
-        input_files: Iterable of paths, URLs, or already-resolved bytes.
+        input_files: Iterable of paths, URLs, ``os.PathLike``, bytes,
+            file-like objects, or :class:`ExtractionInput` items.
         instructions: Optional natural-language guidance.
-        media_type: Optional MIME type applied uniformly to every item.  Required
-            when ``input_files`` contains ``bytes`` or file-like objects; optional
+        media_type: Optional MIME type applied to every item that does not carry
+            its own. Required when ``input_files`` contains ``bytes`` or
+            file-like objects without a per-item ``media_type``; optional
             override for path/URL items.
         max_input_bytes: Per-item byte limit. ``None`` uses
             ``OPENEXTRACT_MAX_INPUT_BYTES`` or the 50 MiB default.
         max_concurrency: Maximum number of in-flight extractions.
-        return_exceptions: If True, exceptions are returned in-place instead of raised
-            (mirrors :func:`asyncio.gather`).
+        return_exceptions: If True, exceptions are returned in-place instead of
+            raised (mirrors :func:`asyncio.gather`).
         max_retries: Per-item retries after ``ModelError`` (same semantics as
             :func:`extract`).
         retry_backoff: Base backoff seconds between per-item retries.
         retry_max_backoff: Maximum per-item retry delay in seconds.
 
     Returns:
-        A list of results (or exceptions, when ``return_exceptions=True``) in input order.
+        A list of results (or exceptions, when ``return_exceptions=True``) in
+        input order.
 
     Raises:
         ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
@@ -1957,10 +2207,61 @@ def extract_many(
     )
 
 
+@overload
 async def extract_many_async(
     schema: type[T],
     model: str | Model,
-    input_files: Iterable[str | bytes | BinaryIO],
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[False] = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[T]: ...
+
+
+@overload
+async def extract_many_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[True],
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[T | Exception]: ...
+
+
+@overload
+async def extract_many_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[T | Exception]: ...
+
+
+async def extract_many_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -1987,10 +2288,61 @@ async def extract_many_async(
     )
 
 
+@overload
 def iter_extract_many_async(
     schema: type[T],
     model: str | Model,
-    input_files: Iterable[str | bytes | BinaryIO],
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[False] = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> AsyncIterator[tuple[int, T]]: ...
+
+
+@overload
+def iter_extract_many_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[True],
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> AsyncIterator[tuple[int, T | Exception]]: ...
+
+
+@overload
+def iter_extract_many_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> AsyncIterator[tuple[int, T | Exception]]: ...
+
+
+def iter_extract_many_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
     instructions: str | None = None,
     *,
     media_type: str | None = None,
@@ -2018,7 +2370,221 @@ def iter_extract_many_async(
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
     _validate_max_concurrency(max_concurrency)
     limit = _resolve_max_input_bytes(max_input_bytes)
-    return _iter_extractions(
+    # The shared generator is typed for the richest yield (ExtractionResult);
+    # without ``rich`` it only ever yields ``T`` or an exception, so narrow it.
+    return cast(
+        AsyncIterator[tuple[int, T | Exception]],
+        _iter_extractions(
+            schema,
+            model,
+            input_files,
+            instructions,
+            max_concurrency,
+            return_exceptions,
+            media_type,
+            limit,
+            max_retries,
+            retry_backoff,
+            retry_max_backoff,
+        ),
+    )
+
+
+@overload
+def extract_many_with_results(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[False] = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[ExtractionResult[T]]: ...
+
+
+@overload
+def extract_many_with_results(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[True],
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[ExtractionResult[T] | Exception]: ...
+
+
+@overload
+def extract_many_with_results(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[ExtractionResult[T] | Exception]: ...
+
+
+def extract_many_with_results(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list:
+    """Run a batch and return per-item :class:`ExtractionResult` diagnostics.
+
+    Mirrors :func:`extract_many` (same arguments, ordering, concurrency, and
+    retry semantics) but returns richer results carrying token usage, attempt
+    counts, timing, model/media metadata, and a sanitized source label. Use
+    :func:`total_usage` to aggregate token usage across the returned results.
+
+    Args:
+        schema: A Pydantic model class defining the expected output structure.
+        model: The model identifier.
+        input_files: Iterable of paths, URLs, ``os.PathLike``, bytes,
+            file-like objects, or :class:`ExtractionInput` items.
+        instructions: Optional natural-language guidance.
+        media_type: Optional MIME type applied to every item that does not carry
+            its own.
+        max_input_bytes: Per-item byte limit. ``None`` uses
+            ``OPENEXTRACT_MAX_INPUT_BYTES`` or the 50 MiB default.
+        max_concurrency: Maximum number of in-flight extractions.
+        return_exceptions: If True, per-item exceptions are returned in-place
+            instead of raised.
+        max_retries: Per-item retries after ``ModelError``.
+        retry_backoff: Base backoff seconds between per-item retries.
+        retry_max_backoff: Maximum per-item retry delay in seconds.
+
+    Returns:
+        A list of ``ExtractionResult`` (or ``Exception`` when
+        ``return_exceptions=True``) in input order.
+
+    Raises:
+        ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
+            negative, or a backoff value is negative or non-finite.
+        RuntimeError: If called from a running event loop. Use
+            :func:`extract_many_with_results_async` in async code instead.
+    """
+    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
+    _validate_max_concurrency(max_concurrency)
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        pass
+    else:
+        raise RuntimeError(
+            "extract_many_with_results() cannot be called from a running event loop; "
+            "use await extract_many_with_results_async(...) instead."
+        )
+    return asyncio.run(
+        _gather_extractions(
+            schema,
+            model,
+            input_files,
+            instructions,
+            max_concurrency,
+            return_exceptions,
+            media_type,
+            max_input_bytes,
+            max_retries,
+            retry_backoff,
+            retry_max_backoff,
+            rich=True,
+        )
+    )
+
+
+@overload
+async def extract_many_with_results_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[False] = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[ExtractionResult[T]]: ...
+
+
+@overload
+async def extract_many_with_results_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: Literal[True],
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[ExtractionResult[T] | Exception]: ...
+
+
+@overload
+async def extract_many_with_results_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list[ExtractionResult[T] | Exception]: ...
+
+
+async def extract_many_with_results_async(
+    schema: type[T],
+    model: str | Model,
+    input_files: Iterable[ExtractionInputLike],
+    instructions: str | None = None,
+    *,
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_concurrency: int = 5,
+    return_exceptions: bool = False,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> list:
+    """Async sibling of :func:`extract_many_with_results`."""
+    return await _gather_extractions(
         schema,
         model,
         input_files,
@@ -2026,8 +2592,9 @@ def iter_extract_many_async(
         max_concurrency,
         return_exceptions,
         media_type,
-        limit,
+        max_input_bytes,
         max_retries,
         retry_backoff,
         retry_max_backoff,
+        rich=True,
     )

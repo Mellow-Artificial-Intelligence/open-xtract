@@ -77,15 +77,71 @@ With `return_exceptions=False`, the first failure cancels and awaits outstanding
 work before being raised. With `return_exceptions=True`, item exceptions are
 yielded in the result position and streaming continues.
 
+### `extract_many_with_results(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Run a batch and return per-item [`ExtractionResult`](#extractionresult) objects
+instead of bare schema instances. It has the same arguments, input ordering,
+concurrency, and retry semantics as `extract_many`, and each result carries
+token usage, attempt count, duration, model/media metadata, and a sanitized
+source label. With `return_exceptions=True`, failed items appear as
+`Exception` values in place. Use [`total_usage`](#total_usageresults) to
+aggregate token usage across the returned results.
+
+### `extract_many_with_results_async(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Async counterpart to `extract_many_with_results`; it has the same arguments,
+result ordering, and per-item retry behavior.
+
+### `total_usage(results)`
+
+Sum token usage across batch extraction results, for example the list returned
+by `extract_many_with_results` or `extract_many_with_results_async`. Returns a
+single [`Usage`](#usage) whose fields are the totals of the successful items.
+
+## Input and result contracts
+
+### `ExtractionInput`
+
+A frozen dataclass wrapping a single media source with optional per-item media
+metadata. Passing one to any extraction API (or mixing them into a batch) is
+equivalent to passing the raw source directly.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `source` | `str \| os.PathLike[str] \| bytes \| BinaryIO` | Local path, HTTP(S) URL, `Path`, raw `bytes`, or binary file-like object. |
+| `media_type` | `str \| None` | Per-item MIME type. Required for `bytes` and file-like sources when no batch-wide override is supplied. |
+| `name` | `str \| None` | Optional safe source label recorded on `ExtractionResult.source`. |
+
+Batch item media types resolve per item: an `ExtractionInput.media_type` wins
+over the batch-wide `media_type` argument, which remains the fallback for raw
+items.
+
+### `ExtractionResult`
+
+A frozen, generic dataclass returned by `extract_many_with_results*`. It never
+retains raw media, credentials, query strings, fragments, or provider
+internals; `source` is sanitized.
+
+| Field | Type | Description |
+| --- | --- | --- |
+| `output` | `T` | The validated schema instance. |
+| `usage` | [`Usage`](#usage) | Token usage from the successful model call. |
+| `attempts` | `int` | Model-call attempts including retries; always `>= 1` on success. |
+| `duration` | `float` | Wall-clock seconds for the item, including retries. |
+| `model` | `str \| None` | Model identifier that produced the output, when known. |
+| `media_type` | `str \| None` | Media type requested for the item, when provided. |
+| `source` | `str \| None` | Sanitized source label; `None` for unnamed bytes/file-like inputs. |
+| `warnings` | `tuple[str, ...]` | Extensible diagnostics channel; currently always empty. |
+
 ## Common arguments
 
 | Argument | Type | Description |
 | --- | --- | --- |
 | `schema` | `type[BaseModel]` | Pydantic model class describing the desired output. |
 | `model` | `str \| Model` | `pydantic-ai` model identifier or configured model instance. |
-| `input_file` | `str \| bytes \| BinaryIO` | Local path, HTTP(S) URL, bytes, or binary file-like object. |
+| `input_file` | `str \| os.PathLike[str] \| bytes \| BinaryIO \| ExtractionInput` | Local path, HTTP(S) URL, `Path`, bytes, binary file-like object, or `ExtractionInput`. |
 | `instructions` | `str \| None` | Optional model guidance. |
-| `media_type` | `str \| None` | Required for bytes and file-like inputs; overrides inference for paths and URLs. |
+| `media_type` | `str \| None` | Required for bytes and file-like inputs without a per-item type; overrides inference for paths and URLs. Item-level `ExtractionInput.media_type` wins in batch calls. |
 | `max_input_bytes` | `int \| None` | Per-input byte cap; `None` uses `OPENEXTRACT_MAX_INPUT_BYTES` or the 50 MiB default. |
 | `max_retries` | `int` | Extra attempts after transient `ModelError`; defaults to `0`. |
 | `retry_backoff` | `float` | Base seconds for exponential backoff with up to 25% jitter. |
@@ -95,7 +151,7 @@ Batch functions also accept:
 
 | Argument | Type | Description |
 | --- | --- | --- |
-| `input_files` | `Iterable[str \| bytes \| BinaryIO]` | One input per extraction. |
+| `input_files` | `Iterable[str \| os.PathLike[str] \| bytes \| BinaryIO \| ExtractionInput]` | One input per extraction; items may carry their own media type. |
 | `max_concurrency` | `int` | Positive maximum number of in-flight extractions; defaults to `5`. |
 | `return_exceptions` | `bool` | Return per-item exceptions in place instead of failing fast. |
 
