@@ -298,7 +298,7 @@ def bench_extract_end_to_end(tmp: Path) -> None:
     agent_instance.run_sync.return_value = run_result
 
     print("\n[extract] sync extract() with Agent mocked (all-local cost per call)")
-    with patch("openextract._extract.Agent", return_value=agent_instance):
+    with patch("openextract._agent.Agent", return_value=agent_instance):
         _bench(
             "extract(path, openai:gpt-5)",
             lambda: extract(_Person, "openai:gpt-5", str(src)),
@@ -316,7 +316,7 @@ def bench_extract_end_to_end(tmp: Path) -> None:
     from unittest.mock import AsyncMock
 
     async_agent_instance.run = AsyncMock(return_value=run_result)
-    with patch("openextract._extract.Agent", return_value=async_agent_instance):
+    with patch("openextract._agent.Agent", return_value=async_agent_instance):
         _bench(
             "extract_many(20 files, conc=5)",
             lambda: extract_many(_Person, "xai:grok-4.3", files, max_concurrency=5),

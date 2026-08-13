@@ -12,7 +12,8 @@ from typing import Any, BinaryIO, cast
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-from ._extract import extract, extract_many, extract_with_usage
+from ._batch import extract_many
+from ._extract import extract, extract_with_usage
 from ._styles import ExtractionStyle
 from .exceptions import (
     ExtractionError,
