@@ -91,6 +91,18 @@ uv run python scripts/bench.py
 
 It deliberately does **not** measure model or network latency. See [docs/benchmarking.md](docs/benchmarking.md) for what it measures, when to run it, and how to read the output without overfitting to local noise.
 
+## ExtractBench quality eval (any model)
+
+To score openextract on LlamaIndex ExtractBench with any provider model:
+
+```bash
+uv run python scripts/extractbench.py --model openai:gpt-5 --test
+```
+
+The first run bootstraps ExtractBench into `.extractbench/`. This is opt-in,
+makes live model calls, and is not part of default CI. See
+[docs/extractbench.md](docs/extractbench.md).
+
 ## Live provider smoke tests (maintainers)
 
 Default `pytest` does not call live models. To run the opt-in harness:

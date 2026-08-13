@@ -565,6 +565,15 @@ uv run ty check                            # types (Astral ty)
 
 CI runs the test suite on every PR and fails if total coverage drops below 100%.
 
+To score extraction quality on [ExtractBench](https://github.com/run-llama/ExtractBench)
+with any model:
+
+```bash
+uv run python scripts/extractbench.py --model openai:gpt-5 --test
+```
+
+See [docs/extractbench.md](docs/extractbench.md).
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
 ## Roadmap

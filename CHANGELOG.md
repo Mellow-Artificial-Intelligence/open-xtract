@@ -9,6 +9,8 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- `scripts/extractbench.py` runs [ExtractBench](https://github.com/run-llama/ExtractBench)
+  through openextract with any `pydantic-ai` model identifier (`--model openai:gpt-5 --test`).
 - Extraction styles: `style='direct'` (default) still sends media to the model
   in one shot; `style='search'` uses Pydantic AI Harness `FileSystem` tools
   (read, regex search, glob) on text documents; `style='code'` uses Harness
