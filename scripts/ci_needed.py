@@ -20,8 +20,9 @@ ALWAYS_ALL = frozenset(
 JOB_PREFIXES: dict[str, tuple[str, ...]] = {
     "lint": ("src/", "tests/", "examples/", "scripts/", "docs/api-reference.md"),
     "test": ("src/", "tests/", "examples/"),
-    "package": ("src/",),
+    "package": ("src/", "README.md", "LICENSE"),
 }
+PATH_FILTERED_EVENTS = frozenset({"pull_request", "merge_group"})
 
 
 def jobs_for_paths(changed: Sequence[str]) -> dict[str, bool]:
@@ -46,12 +47,18 @@ def _write_outputs(path: Path, jobs: Mapping[str, bool]) -> None:
 def _changed_files(base: str, head: str) -> list[str] | None:
     try:
         return subprocess.check_output(
-            ["git", "diff", "--name-only", "--diff-filter=ACDMRT", base, head],
+            ["git", "diff", "--name-only", "--no-renames", "--diff-filter=ACDMRT", base, head],
             text=True,
         ).splitlines()
     except subprocess.CalledProcessError as exc:
-        print(f"git diff failed ({exc}); running all jobs")
+        print(f"git diff failed: {exc}")
         return None
+
+
+def _run_all_jobs(output: Path, reason: str) -> int:
+    print(f"Running all jobs ({reason})")
+    _write_outputs(output, dict.fromkeys(JOB_PREFIXES, True))
+    return 0
 
 
 def main() -> int:
@@ -60,15 +67,14 @@ def main() -> int:
     base = os.environ.get("BASE_SHA", "")
     head = os.environ.get("HEAD_SHA", "")
 
-    if event == "workflow_dispatch" or not base or set(base) == {"0"}:
-        print("Running all jobs (manual dispatch or no comparison base)")
-        _write_outputs(output, dict.fromkeys(JOB_PREFIXES, True))
-        return 0
+    if event not in PATH_FILTERED_EVENTS:
+        return _run_all_jobs(output, f"event {event!r} is not path-filtered")
+    if not base or set(base) == {"0"}:
+        return _run_all_jobs(output, "no comparison base")
 
     changed = _changed_files(base, head)
     if changed is None:
-        _write_outputs(output, dict.fromkeys(JOB_PREFIXES, True))
-        return 0
+        return _run_all_jobs(output, "git diff failed")
 
     print("Changed files:")
     for path in changed:

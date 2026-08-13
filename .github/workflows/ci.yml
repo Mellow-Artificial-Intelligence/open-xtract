@@ -33,7 +33,7 @@ jobs:
         id: filter
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
           HEAD_SHA: ${{ github.sha }}
         run: python3 scripts/ci_needed.py
 
@@ -123,7 +123,7 @@ jobs:
   ci:
     name: CI
     needs: [changes, lint, test, package]
-    if: always() && !cancelled()
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
