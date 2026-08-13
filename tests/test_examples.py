@@ -30,6 +30,7 @@ ALL_MODULES = [
     "examples.advanced.extract_with_usage",
     "examples.advanced.retry_extract",
     "examples.advanced.reusable_sessions",
+    "examples.advanced.extraction_styles",
     "examples.advanced.error_handling",
     "examples.audio.meeting_notes",
 ]
@@ -84,6 +85,12 @@ def test_reusable_sessions_example() -> None:
     result = _run("examples.advanced.reusable_sessions")
     assert result.returncode == 0, result.stderr
     assert result.stdout.count("ada@example.com") == 2
+
+
+def test_extraction_styles_example() -> None:
+    result = _run("examples.advanced.extraction_styles")
+    assert result.returncode == 0, result.stderr
+    assert "Q4 notes" in result.stdout
 
 
 @pytest.mark.integration

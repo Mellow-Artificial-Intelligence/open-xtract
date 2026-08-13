@@ -36,11 +36,12 @@ class ModelError(ExtractionError):
 
 
 class ProviderNotInstalledError(ExtractionError):
-    """The SDK for the requested model's provider is not installed.
+    """A required optional extra is not installed.
 
     Raised when a model is requested whose provider extra was not installed,
     e.g. calling ``extract(..., model="openai:gpt-4o")`` without first running
-    ``pip install 'openextract[openai]'``.
+    ``pip install 'openextract[openai]'``, or when ``style='search'`` /
+    ``style='code'`` is used without ``pydantic-ai-harness``.
     """
 
 

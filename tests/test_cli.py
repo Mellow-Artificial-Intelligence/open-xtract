@@ -204,6 +204,7 @@ class TestMainSuccess:
             model="xai:grok-4.3",
             input_file="input.txt",
             instructions="find the person",
+            style="direct",
             media_type=None,
             max_input_bytes=None,
             max_retries=0,
