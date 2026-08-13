@@ -8,7 +8,9 @@ import math
 import mimetypes
 import os
 import random
+import shutil
 import socket
+import tempfile
 import threading
 import time
 from collections.abc import (
@@ -44,7 +46,14 @@ else:
         return PydanticAgent(*args, **kwargs)
 
 
-from ._styles import ExtractionStyle, normalize_style, prepared_style_run
+from ._styles import (
+    ExtractionStyle,
+    materialize_text_document,
+    normalize_style,
+    prepared_style_run,
+    style_capabilities,
+    style_run_inputs,
+)
 from .exceptions import (
     ExtractionError,
     InputTooLargeError,
@@ -1355,6 +1364,8 @@ class _ExtractorSession[T: BaseModel]:
         )
         self._entered = False
         self._closed = False
+        self._style_workspace: tempfile.TemporaryDirectory[str] | None = None
+        self._style_run_index = 0
 
     def _validate_output(self, output: object) -> T:
         with _extraction_errors():
@@ -1370,19 +1381,65 @@ class _ExtractorSession[T: BaseModel]:
         if not self._entered:
             raise RuntimeError(f"{class_name} must be used as a context manager before extraction.")
 
-    def _agent_for_run(self, extra_capabilities: Sequence[object]) -> PydanticAgent:
-        if not extra_capabilities:
-            assert self._agent is not None
-            return self._agent
+    def _enter_style_workspace(self) -> None:
+        """Create the session workspace and its agent for search/code styles.
+
+        The agent (and its provider HTTP client) is built once per session and
+        lives until the session closes, matching the direct-style lifecycle.
+        """
+        if self._style is ExtractionStyle.DIRECT:
+            return
         assert self._model is not None
-        return _build_agent(
-            self._schema,
-            self._model,
-            self._instructions,
-            model_settings=self._model_settings,
-            instrument=self._instrument,
-            extra_capabilities=extra_capabilities,
-        )
+        self._style_workspace = tempfile.TemporaryDirectory(prefix="openextract-")
+        with _extraction_errors():
+            self._agent = _build_agent(
+                self._schema,
+                self._model,
+                self._instructions,
+                model_settings=self._model_settings,
+                instrument=self._instrument,
+                extra_capabilities=style_capabilities(
+                    self._style, Path(self._style_workspace.name)
+                ),
+            )
+
+    def _discard_style_state(self) -> None:
+        """Drop the style agent and remove the workspace owned by the session."""
+        if self._style_workspace is not None:
+            self._style_workspace.cleanup()
+            self._style_workspace = None
+            self._agent = None
+
+    @contextmanager
+    def _style_document(self, file_bytes: bytes, file_type: str) -> Iterator[list]:
+        """Materialize one document in the session workspace for a single call.
+
+        Each call gets its own subdirectory so concurrent async extractions
+        never collide. The subdirectory is removed when the call finishes; the
+        workspace itself lives until the session closes, so documents persist
+        across retries within a call.
+        """
+        assert self._style_workspace is not None
+        self._style_run_index += 1
+        run_dir = Path(self._style_workspace.name) / f"run{self._style_run_index}"
+        run_dir.mkdir()
+        try:
+            filename = materialize_text_document(run_dir, file_bytes, file_type, style=self._style)
+            yield style_run_inputs(self._style, f"{run_dir.name}/{filename}")
+        finally:
+            shutil.rmtree(run_dir, ignore_errors=True)
+
+    @contextmanager
+    def _session_agent_inputs(
+        self, file_bytes: bytes, file_type: str
+    ) -> Iterator[tuple[PydanticAgent, list]]:
+        """Pair the session agent with per-call run inputs for one extraction."""
+        assert self._agent is not None
+        if self._style is ExtractionStyle.DIRECT:
+            yield self._agent, _build_run_inputs(file_bytes, file_type)
+            return
+        with self._style_document(file_bytes, file_type) as inputs:
+            yield self._agent, inputs
 
 
 class Extractor(_ExtractorSession[T]):
@@ -1390,7 +1447,8 @@ class Extractor(_ExtractorSession[T]):
 
     An ``Extractor`` is bound to the thread that enters it and is not
     thread-safe. Use one session per thread and close it deterministically with
-    a ``with`` block.
+    a ``with`` block. ``search``/``code`` sessions build one harness agent and
+    temporary workspace on enter and remove both on close.
     """
 
     def __init__(
@@ -1442,9 +1500,11 @@ class Extractor(_ExtractorSession[T]):
         runner = asyncio.Runner(loop_factory=asyncio.new_event_loop)
         runner.__enter__()
         try:
-            if self._agent is not None:
-                runner.run(self._agent.__aenter__())
+            self._enter_style_workspace()
+            assert self._agent is not None
+            runner.run(self._agent.__aenter__())
         except BaseException:
+            self._discard_style_state()
             client.close()
             runner.close()
             raise
@@ -1466,13 +1526,14 @@ class Extractor(_ExtractorSession[T]):
             raise RuntimeError("Extractor can only be closed from the thread that entered it.")
         assert self._runner is not None
         assert self._client is not None
+        assert self._agent is not None
         suppressed = False
         try:
-            if self._agent is not None:
-                suppressed = bool(self._runner.run(self._agent.__aexit__(*exc_info)))
+            suppressed = bool(self._runner.run(self._agent.__aexit__(*exc_info)))
         finally:
             self._client.close()
             self._runner.close()
+            self._discard_style_state()
             self._entered = False
             self._closed = True
             self._client = None
@@ -1494,13 +1555,13 @@ class Extractor(_ExtractorSession[T]):
         assert self._runner is not None
         return self._runner.run(_run_extraction_async(agent, inputs))
 
-    def extract(
+    @contextmanager
+    def _prepare_session_extraction(
         self,
         input_file: ExtractionInputLike,
-        *,
-        media_type: str | None = None,
-    ) -> T:
-        """Extract one input using the session's reusable agent and clients."""
+        media_type: str | None,
+    ) -> Iterator[tuple[PydanticAgent, list]]:
+        """Resolve media and yield ``(agent, inputs)`` for one session call."""
         client = self._ensure_sync_open()
         with _extraction_errors():
             file_bytes, file_type = _get_media(
@@ -1509,21 +1570,27 @@ class Extractor(_ExtractorSession[T]):
                 max_input_bytes=self._max_input_bytes,
                 client=client,
             )
-        with prepared_style_run(self._style, file_bytes, file_type) as (
-            capabilities,
-            style_inputs,
-        ):
-            inputs = _resolve_run_inputs(file_bytes, file_type, style_inputs)
-            agent = self._agent_for_run(capabilities)
+        with self._session_agent_inputs(file_bytes, file_type) as prepared:
+            yield prepared
 
-            def _once() -> T:
-                return self._validate_output(self._run_agent(agent, inputs).output)
+    def _run_session_retries[R](self, fn: Callable[[], R]) -> R:
+        return _run_with_retries_sync(
+            fn,
+            max_retries=self._retry_policy.max_retries,
+            retry_backoff=self._retry_policy.backoff,
+            retry_max_backoff=self._retry_policy.max_backoff,
+        )
 
-            return _run_with_retries_sync(
-                _once,
-                max_retries=self._retry_policy.max_retries,
-                retry_backoff=self._retry_policy.backoff,
-                retry_max_backoff=self._retry_policy.max_backoff,
+    def extract(
+        self,
+        input_file: ExtractionInputLike,
+        *,
+        media_type: str | None = None,
+    ) -> T:
+        """Extract one input using the session's reusable agent and clients."""
+        with self._prepare_session_extraction(input_file, media_type) as (agent, inputs):
+            return self._run_session_retries(
+                lambda: self._validate_output(self._run_agent(agent, inputs).output)
             )
 
     def extract_with_usage(
@@ -1533,35 +1600,22 @@ class Extractor(_ExtractorSession[T]):
         media_type: str | None = None,
     ) -> tuple[T, Usage]:
         """Extract one input and return its successful-call token usage."""
-        client = self._ensure_sync_open()
-        with _extraction_errors():
-            file_bytes, file_type = _get_media(
-                input_file,
-                media_type=media_type,
-                max_input_bytes=self._max_input_bytes,
-                client=client,
-            )
-        with prepared_style_run(self._style, file_bytes, file_type) as (
-            capabilities,
-            style_inputs,
-        ):
-            inputs = _resolve_run_inputs(file_bytes, file_type, style_inputs)
-            agent = self._agent_for_run(capabilities)
+        with self._prepare_session_extraction(input_file, media_type) as (agent, inputs):
 
             def _once() -> tuple[T, Usage]:
                 result = self._run_agent(agent, inputs)
                 return self._validate_output(result.output), _usage_from_result(result)
 
-            return _run_with_retries_sync(
-                _once,
-                max_retries=self._retry_policy.max_retries,
-                retry_backoff=self._retry_policy.backoff,
-                retry_max_backoff=self._retry_policy.max_backoff,
-            )
+            return self._run_session_retries(_once)
 
 
 class AsyncExtractor(_ExtractorSession[T]):
-    """Reusable async extraction session bound to one event loop."""
+    """Reusable async extraction session bound to one event loop.
+
+    ``search``/``code`` sessions build one harness agent and temporary
+    workspace on enter and remove both on close; concurrent calls each write
+    their document into a private workspace subdirectory.
+    """
 
     def __init__(
         self,
@@ -1598,9 +1652,11 @@ class AsyncExtractor(_ExtractorSession[T]):
         self._ensure_enterable(type(self).__name__)
         client = httpx.AsyncClient(follow_redirects=False, timeout=self._url_timeout)
         try:
-            if self._agent is not None:
-                await self._agent.__aenter__()
+            self._enter_style_workspace()
+            assert self._agent is not None
+            await self._agent.__aenter__()
         except BaseException:
+            self._discard_style_state()
             await client.aclose()
             raise
         self._client = client
@@ -1620,12 +1676,13 @@ class AsyncExtractor(_ExtractorSession[T]):
                 "AsyncExtractor can only be closed from the event loop that entered it."
             )
         assert self._client is not None
+        assert self._agent is not None
         suppressed = False
         try:
-            if self._agent is not None:
-                suppressed = bool(await self._agent.__aexit__(*exc_info))
+            suppressed = bool(await self._agent.__aexit__(*exc_info))
         finally:
             await self._client.aclose()
+            self._discard_style_state()
             self._entered = False
             self._closed = True
             self._client = None
@@ -1645,13 +1702,13 @@ class AsyncExtractor(_ExtractorSession[T]):
         assert self._client is not None
         return self._client
 
-    async def extract(
+    @asynccontextmanager
+    async def _prepare_session_extraction(
         self,
         input_file: ExtractionInputLike,
-        *,
-        media_type: str | None = None,
-    ) -> T:
-        """Extract one input using the session's reusable agent and clients."""
+        media_type: str | None,
+    ) -> AsyncIterator[tuple[PydanticAgent, list]]:
+        """Resolve media and yield ``(agent, inputs)`` for one session call."""
         client = self._ensure_async_open()
         with _extraction_errors():
             file_bytes, file_type = await _get_media_async(
@@ -1660,23 +1717,31 @@ class AsyncExtractor(_ExtractorSession[T]):
                 media_type=media_type,
                 max_input_bytes=self._max_input_bytes,
             )
-        with prepared_style_run(self._style, file_bytes, file_type) as (
-            capabilities,
-            style_inputs,
-        ):
-            inputs = _resolve_run_inputs(file_bytes, file_type, style_inputs)
-            agent = self._agent_for_run(capabilities)
+        with self._session_agent_inputs(file_bytes, file_type) as prepared:
+            yield prepared
+
+    async def _run_session_retries[R](self, fn: Callable[[], Awaitable[R]]) -> R:
+        return await _run_with_retries_async(
+            fn,
+            max_retries=self._retry_policy.max_retries,
+            retry_backoff=self._retry_policy.backoff,
+            retry_max_backoff=self._retry_policy.max_backoff,
+        )
+
+    async def extract(
+        self,
+        input_file: ExtractionInputLike,
+        *,
+        media_type: str | None = None,
+    ) -> T:
+        """Extract one input using the session's reusable agent and clients."""
+        async with self._prepare_session_extraction(input_file, media_type) as (agent, inputs):
 
             async def _once() -> T:
                 result = await _run_extraction_async(agent, inputs)
                 return self._validate_output(result.output)
 
-            return await _run_with_retries_async(
-                _once,
-                max_retries=self._retry_policy.max_retries,
-                retry_backoff=self._retry_policy.backoff,
-                retry_max_backoff=self._retry_policy.max_backoff,
-            )
+            return await self._run_session_retries(_once)
 
     async def extract_with_usage(
         self,
@@ -1685,31 +1750,13 @@ class AsyncExtractor(_ExtractorSession[T]):
         media_type: str | None = None,
     ) -> tuple[T, Usage]:
         """Extract one input and return its successful-call token usage."""
-        client = self._ensure_async_open()
-        with _extraction_errors():
-            file_bytes, file_type = await _get_media_async(
-                input_file,
-                client,
-                media_type=media_type,
-                max_input_bytes=self._max_input_bytes,
-            )
-        with prepared_style_run(self._style, file_bytes, file_type) as (
-            capabilities,
-            style_inputs,
-        ):
-            inputs = _resolve_run_inputs(file_bytes, file_type, style_inputs)
-            agent = self._agent_for_run(capabilities)
+        async with self._prepare_session_extraction(input_file, media_type) as (agent, inputs):
 
             async def _once() -> tuple[T, Usage]:
                 result = await _run_extraction_async(agent, inputs)
                 return self._validate_output(result.output), _usage_from_result(result)
 
-            return await _run_with_retries_async(
-                _once,
-                max_retries=self._retry_policy.max_retries,
-                retry_backoff=self._retry_policy.backoff,
-                retry_max_backoff=self._retry_policy.max_backoff,
-            )
+            return await self._run_session_retries(_once)
 
 
 def extract(

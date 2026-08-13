@@ -102,9 +102,10 @@ extract(
 ```
 
 `search` and `code` require UTF-8 text (`text/*`, JSON, XML, YAML, and similar).
-PDFs, images, audio, and video stay on `direct`. Missing packages raise
-`ProviderNotInstalledError` with a `pip install pydantic-ai-harness` or
-`pip install 'pydantic-ai-harness[codemode]'` hint. The CLI flag is `--style`.
+PDFs, Office documents, images, audio, and video stay on `direct`. Missing
+packages raise `ProviderNotInstalledError` with a `pip install pydantic-ai-harness`
+or `pip install 'pydantic-ai-harness[codemode]'` hint. The integration was
+written against `pydantic-ai-harness` 0.18.x. The CLI flag is `--style`.
 
 ## Reusable sessions
 

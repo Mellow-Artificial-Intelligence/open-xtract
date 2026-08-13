@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import sys
+import tempfile
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from pydantic_ai import BinaryContent
@@ -13,7 +15,9 @@ from openextract import (
     AsyncExtractor,
     ExtractionStyle,
     Extractor,
+    ModelError,
     ProviderNotInstalledError,
+    RetryPolicy,
     extract,
     extract_async,
     extract_many,
@@ -74,6 +78,23 @@ class TestStyleHelpers:
         assert is_binary_media_type("image/png")
         assert is_binary_media_type("application/pdf")
         assert not is_binary_media_type("text/plain")
+
+    def test_office_documents_are_binary(self):
+        assert is_binary_media_type(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
+        assert is_binary_media_type(
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+        assert is_binary_media_type("application/vnd.oasis.opendocument.text")
+        assert is_binary_media_type("application/msword")
+        assert is_binary_media_type("application/vnd.ms-excel")
+        assert is_binary_media_type("application/vnd.ms-powerpoint")
+
+    def test_decode_rejects_docx_with_direct_guidance(self):
+        docx = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        with pytest.raises(ValueError, match="Use style='direct'"):
+            decode_text_document(b"PK\x03\x04", docx, style=ExtractionStyle.SEARCH)
 
     def test_decode_rejects_pdf_and_nul_and_invalid_utf8(self):
         with pytest.raises(ValueError, match="style 'search' requires a text document"):
@@ -262,6 +283,36 @@ class TestExtractStyles:
             is expected
         )
 
+    def test_search_workspace_survives_retries(self, mocker):
+        harness, _ = _install_harness(mocker)
+        expected = _Person(name="Ada", age=36)
+        attempts: list[str] = []
+
+        def run_sync(inputs):
+            root = harness.FileSystem.call_args.kwargs["root_dir"]
+            attempts.append((root / "document.txt").read_text(encoding="utf-8"))
+            if len(attempts) == 1:
+                raise ModelError("transient", status_code=503)
+            return SimpleNamespace(output=expected)
+
+        _make_agent_mock(mocker, run_sync_side_effect=run_sync)
+
+        result = extract(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=b"Ada is 36",
+            media_type="text/plain",
+            style="search",
+            max_retries=1,
+            retry_backoff=0,
+        )
+
+        assert result is expected
+        # The same materialized document was readable on both attempts.
+        assert attempts == ["Ada is 36", "Ada is 36"]
+        root = harness.FileSystem.call_args.kwargs["root_dir"]
+        assert not root.exists()
+
     def test_batch_search_builds_one_agent_per_item(self, mocker):
         _install_harness(mocker)
         people = [_Person(name="Ada", age=36), _Person(name="Grace", age=85)]
@@ -292,24 +343,84 @@ class TestSessionStyles:
         with pytest.raises(ValueError, match="injected agent"):
             Extractor(_Person, agent=MagicMock(), style="search")
 
-    def test_search_session_does_not_build_agent_until_extract(self, mocker):
-        _install_harness(mocker)
-        build = mocker.patch("openextract._extract.Agent", return_value=MagicMock())
-        Extractor(_Person, "openai:gpt-5", style="search")
+    def test_search_session_builds_agent_once_on_enter(self, mocker):
+        from tests.test_sessions import FakeAgent
+
+        harness, _ = _install_harness(mocker)
+        agent = FakeAgent([{"name": "Ada", "age": 36}])
+        build = mocker.patch("openextract._extract._build_agent", return_value=agent)
+        extractor = Extractor(_Person, "openai:gpt-5", style="search")
         build.assert_not_called()
+        with extractor:
+            extractor.extract(b"Ada", media_type="text/plain")
+        build.assert_called_once()
+        assert build.call_args.kwargs["extra_capabilities"] == [harness.FileSystem.return_value]
+        assert agent.enter_count == 1
+        assert agent.exit_count == 1
 
     def test_sync_search_session_extracts(self, mocker):
         from tests.test_sessions import FakeAgent
 
-        _install_harness(mocker)
+        harness, _ = _install_harness(mocker)
         agent = FakeAgent([{"name": "Ada", "age": 36}, {"name": "Grace", "age": 85}])
         mocker.patch("openextract._extract._build_agent", return_value=agent)
         with Extractor(_Person, "openai:gpt-5", style="search") as extractor:
             first = extractor.extract(b"Ada", media_type="text/plain")
             second, usage = extractor.extract_with_usage(b"Grace", media_type="text/plain")
+            workspace = harness.FileSystem.call_args.kwargs["root_dir"]
+            # Per-call documents are removed; the workspace lives until close.
+            assert workspace.exists()
+            assert list(workspace.iterdir()) == []
         assert first == _Person(name="Ada", age=36)
         assert second == _Person(name="Grace", age=85)
         assert usage.total_tokens == 3
+        assert not workspace.exists()
+
+    def test_sync_search_session_workspace_survives_retries(self, mocker):
+        from tests.test_sessions import FakeAgent
+
+        harness, _ = _install_harness(mocker)
+        documents: list[str] = []
+
+        class WorkspaceProbeAgent(FakeAgent):
+            async def run(self, inputs):
+                root = harness.FileSystem.call_args.kwargs["root_dir"]
+                filename = inputs[0].split("'")[1]
+                documents.append((root / filename).read_text(encoding="utf-8"))
+                return await super().run(inputs)
+
+        agent = WorkspaceProbeAgent(
+            [ModelError("transient", status_code=503), {"name": "Ada", "age": 36}]
+        )
+        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        policy = RetryPolicy(max_retries=1, backoff=0)
+        with Extractor(_Person, "openai:gpt-5", style="search", retry_policy=policy) as session:
+            result = session.extract(b"Ada is 36", media_type="text/plain")
+        assert result == _Person(name="Ada", age=36)
+        assert agent.run_count == 2
+        # The same materialized document was readable on both attempts.
+        assert documents == ["Ada is 36", "Ada is 36"]
+
+    def test_sync_search_session_enter_failure_cleans_up(self, mocker):
+        mocker.patch.dict(sys.modules, {"pydantic_ai_harness": None})
+        client = MagicMock()
+        mocker.patch("openextract._extract.httpx.Client", return_value=client)
+        workspace_spy = mocker.spy(tempfile, "TemporaryDirectory")
+        extractor = Extractor(_Person, "openai:gpt-5", style="search")
+        with pytest.raises(ProviderNotInstalledError, match="pydantic-ai-harness"):
+            extractor.__enter__()
+        client.close.assert_called_once_with()
+        assert not Path(workspace_spy.spy_return.name).exists()
+
+    async def test_async_code_session_enter_failure_closes_client(self, mocker):
+        mocker.patch.dict(sys.modules, {"pydantic_ai_harness": None, "pydantic_monty": None})
+        client = MagicMock()
+        client.aclose = AsyncMock()
+        mocker.patch("openextract._extract.httpx.AsyncClient", return_value=client)
+        extractor = AsyncExtractor(_Person, "openai:gpt-5", style="code")
+        with pytest.raises(ProviderNotInstalledError, match="codemode"):
+            await extractor.__aenter__()
+        client.aclose.assert_awaited_once_with()
 
     async def test_async_code_session_extracts(self, mocker):
         from tests.test_sessions import FakeAgent

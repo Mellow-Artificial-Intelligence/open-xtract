@@ -11,7 +11,19 @@ from pathlib import Path
 from .exceptions import ProviderNotInstalledError
 
 _CODE_VIRTUAL_ROOT = "/work"
-_BINARY_MEDIA_PREFIXES = ("image/", "audio/", "video/")
+# The pydantic-ai-harness version line the FileSystem/CodeMode integration was
+# written against. The repo's locked dev environment cannot install it (it
+# requires pydantic-ai-slim 2.x), so CI does not exercise the live harness.
+_HARNESS_TARGET_VERSION = "0.18.x"
+_BINARY_MEDIA_PREFIXES = (
+    "image/",
+    "audio/",
+    "video/",
+    # Office container families as reported by ``mimetypes.guess_type``, which
+    # backs the repo's media-type detection for path and URL inputs.
+    "application/vnd.openxmlformats-officedocument.",
+    "application/vnd.oasis.opendocument.",
+)
 _BINARY_MEDIA_TYPES = frozenset(
     {
         "application/pdf",
@@ -19,6 +31,9 @@ _BINARY_MEDIA_TYPES = frozenset(
         "application/gzip",
         "application/x-gzip",
         "application/x-tar",
+        "application/msword",
+        "application/vnd.ms-excel",
+        "application/vnd.ms-powerpoint",
     }
 )
 _TEXT_APPLICATION_TYPES = frozenset(
@@ -153,7 +168,9 @@ def _search_capabilities(workspace: Path) -> list[object]:
         raise ProviderNotInstalledError(
             "style='search' requires pydantic-ai-harness. "
             "Install it with: pip install pydantic-ai-harness "
-            f"(or 'pip install pydantic-ai-harness[codemode]'). Original error: {exc}"
+            "(or 'pip install pydantic-ai-harness[codemode]'). "
+            f"The integration targets pydantic-ai-harness {_HARNESS_TARGET_VERSION}. "
+            f"Original error: {exc}"
         ) from exc
     return [filesystem(root_dir=workspace)]
 
@@ -164,9 +181,10 @@ def _code_capabilities(workspace: Path) -> list[object]:
         monty = __import__("pydantic_monty", fromlist=["MountDir"])
     except ImportError as exc:
         raise ProviderNotInstalledError(
-            "style='code' requires pydantic-ai-harness with the code-mode extra. "
-            "Install it with: pip install 'pydantic-ai-harness[codemode]' "
-            f"(or 'pip install pydantic-ai-harness[code-mode]'). Original error: {exc}"
+            "style='code' requires pydantic-ai-harness with the codemode extra. "
+            "Install it with: pip install 'pydantic-ai-harness[codemode]'. "
+            f"The integration targets pydantic-ai-harness {_HARNESS_TARGET_VERSION}. "
+            f"Original error: {exc}"
         ) from exc
     return [
         harness.CodeMode(

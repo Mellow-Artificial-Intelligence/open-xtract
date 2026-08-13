@@ -14,13 +14,15 @@ in the same change as any public signature.
 ### `Extractor(schema, model=None, instructions=None, *, style='direct', agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
 
 Reusable synchronous extraction session. Enter it with `with`; then call
-`extract(input_file, *, style='direct', media_type=None)` or
-`extract_with_usage(input_file, *, style='direct', media_type=None)`. The agent, model provider
+`extract(input_file, *, media_type=None)` or
+`extract_with_usage(input_file, *, media_type=None)`. The agent, model provider
 client, and URL-fetch client are constructed once and closed on context exit.
 
 `model` accepts either a known model string or a configured
 `pydantic_ai.models.Model`. `style` selects how the model inspects the input
-(`direct`, `search`, or `code`; see [Common arguments](#common-arguments)).
+(`direct`, `search`, or `code`; see [Common arguments](#common-arguments)) and
+applies to every call in the session; `search` and `code` sessions build their
+harness agent and temporary workspace once on enter and remove both on exit.
 As an advanced alternative, `agent` accepts a fully
 configured Pydantic AI `Agent`; it is mutually exclusive with `model`, and its
 output is revalidated against `schema`. Non-`direct` styles cannot be combined
