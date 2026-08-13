@@ -57,6 +57,15 @@ uv run ruff format .
 uv run ty check
 ```
 
+## CI
+
+GitHub Actions (`.github/workflows/ci.yml`) runs lint, tests, and package smoke
+tests. Jobs that a change set cannot affect are skipped (for example a
+docs-only PR does not install Python dependencies). Outdated pull-request runs
+are cancelled when a new commit is pushed. After CI succeeds on `main`,
+[`.github/workflows/release.yml`](.github/workflows/release.yml) publishes to
+PyPI only when the version in `pyproject.toml` is new.
+
 ## Dependency embargo (24h)
 
 We do **not** install any package version that has been published less than 24 hours ago. This protects against supply-chain attacks where a compromised release sits on PyPI for a few hours before being yanked.
@@ -94,8 +103,8 @@ See [docs/live-smoke.md](docs/live-smoke.md).
 
 ## Release checklist (maintainers)
 
-Use this before cutting a release (version bump on `main` triggers
-[`.github/workflows/release.yml`](.github/workflows/release.yml)):
+Use this before cutting a release (a version bump on `main` publishes only after
+CI is green — [`.github/workflows/release.yml`](.github/workflows/release.yml)):
 
 1. **Version bump** — set `version` in `pyproject.toml` to the release version.
 2. **Changelog** — move `[Unreleased]` notes into a dated `## [X.Y.Z]` section in
@@ -115,9 +124,10 @@ Use this before cutting a release (version bump on `main` triggers
    rolling 24h window (merge recent `embargo-bump` PRs from
    `.github/workflows/embargo-bump.yml` rather than hand-editing past the window).
 6. **Merge to `main`** — CI (`.github/workflows/ci.yml`) must be green.
-7. **GitHub Actions release job** — on push to `main`, `release.yml` builds,
-   publishes to PyPI (Trusted Publishing), and creates the `vX.Y.Z` GitHub
-   Release when that version is new.
+7. **GitHub Actions release job** — after CI succeeds on `main`, `release.yml`
+   builds, publishes to PyPI (Trusted Publishing), and creates the `vX.Y.Z`
+   GitHub Release when that version is new. Docs-only commits skip the release
+   toolchain once the existing version is detected.
 8. **PyPI verification** — `pip index versions openextract` / the PyPI project
    page shows the new version; a clean venv install imports.
 9. **GitHub Release verification** — tag `vX.Y.Z` exists with release notes.

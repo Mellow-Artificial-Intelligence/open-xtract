@@ -12,12 +12,19 @@ permissions:
   contents: write
   pull-requests: write
 
+concurrency:
+  group: embargo-bump
+  cancel-in-progress: true
+
 jobs:
   bump:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        with:
+          enable-cache: true
 
       - name: Compute new cutoff (24h ago, UTC midnight)
         id: cutoff
