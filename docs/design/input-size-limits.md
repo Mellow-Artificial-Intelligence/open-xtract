@@ -103,7 +103,7 @@ in a minor pre-1.0 release and be called out as breaking in `CHANGELOG.md`.
 
 ## Implementation
 
-1. `_resolve_max_input_bytes` applies explicit-call, environment, and default
+1. `_resolve_max_input_bytes` (`src/openextract/_config.py`) applies explicit-call, environment, and default
    precedence with positive-integer validation.
 2. Local paths use `stat()` before opening and a capped chunk reader afterward.
 3. URLs use streaming HTTP responses, `Content-Length` fast-fail, and an actual

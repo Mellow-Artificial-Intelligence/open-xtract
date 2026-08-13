@@ -45,7 +45,7 @@ pip install 'openextract[all]'
 
 Missing extras raise `ProviderNotInstalledError` with a provider-specific install
 hint when the model prefix is known (`_PROVIDER_EXTRAS` in
-`src/openextract/_extract.py`).
+`src/openextract/_agent.py`).
 
 ## Known gaps / follow-ups
 

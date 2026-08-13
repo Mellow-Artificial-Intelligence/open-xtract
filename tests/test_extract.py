@@ -104,7 +104,7 @@ def _build_response(
 
 
 def _mock_sync_http_client(mocker, *, response=None, side_effect=None):
-    client_cls = mocker.patch("openextract._extract.httpx.Client")
+    client_cls = mocker.patch("openextract._media.httpx.Client")
     client = client_cls.return_value.__enter__.return_value
     client.build_request.return_value = MagicMock()
     if side_effect is not None:
@@ -625,7 +625,7 @@ class TestGetMediaAsync:
         client.send = AsyncMock(return_value=response)
         client.__aenter__ = AsyncMock(return_value=client)
         client.__aexit__ = AsyncMock(return_value=False)
-        client_cls = mocker.patch("openextract._extract.httpx.AsyncClient", return_value=client)
+        client_cls = mocker.patch("openextract._media.httpx.AsyncClient", return_value=client)
 
         result = await _get_media_async("https://1.1.1.1/download")
 
@@ -811,7 +811,7 @@ class TestUrlFetchConfiguration:
 class TestSsrfIntegration:
     def test_extract_with_private_url_raises_url_fetch_error(self, mocker):
         # Agent should never be constructed when the URL is rejected.
-        agent_cls = mocker.patch("openextract._extract.Agent")
+        agent_cls = mocker.patch("openextract._agent.Agent")
         with pytest.raises(UrlFetchError):
             extract(
                 schema=_Person,
@@ -905,7 +905,7 @@ def _make_grpc_error(message: str) -> Exception:
 
 
 def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None):
-    """Patch openextract._extract.Agent and return (AgentClass, instance, run_sync)."""
+    """Patch openextract._agent.Agent and return (AgentClass, instance, run_sync)."""
     agent_instance = MagicMock()
     if run_sync_side_effect is not None:
         agent_instance.run_sync.side_effect = run_sync_side_effect
@@ -915,7 +915,7 @@ def _make_agent_mock(mocker, output=None, run_sync_side_effect=None, usage=None)
         if usage is not None:
             run_result.usage.return_value = usage
         agent_instance.run_sync.return_value = run_result
-    agent_cls = mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+    agent_cls = mocker.patch("openextract._agent.Agent", return_value=agent_instance)
     return agent_cls, agent_instance
 
 
@@ -974,8 +974,8 @@ def test_lazy_agent_proxy_constructs_pydantic_agent(mocker):
 
 class TestExtract:
     def test_oversized_input_fails_before_agent_build(self, mocker):
-        agent = mocker.patch("openextract._extract.Agent")
-        sleep = mocker.patch("openextract._extract.time.sleep")
+        agent = mocker.patch("openextract._agent.Agent")
+        sleep = mocker.patch("openextract._retry.time.sleep")
 
         with pytest.raises(InputTooLargeError):
             extract(
@@ -991,7 +991,7 @@ class TestExtract:
         sleep.assert_not_called()
 
     def test_usage_helper_enforces_input_limit(self, mocker):
-        agent = mocker.patch("openextract._extract.Agent")
+        agent = mocker.patch("openextract._agent.Agent")
 
         with pytest.raises(InputTooLargeError):
             extract_with_usage(
@@ -1452,7 +1452,7 @@ class TestProviderNotInstalled:
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
         mocker.patch(
-            "openextract._extract.Agent",
+            "openextract._agent.Agent",
             side_effect=ImportError("No module named 'openai'"),
         )
 
@@ -1654,7 +1654,7 @@ class TestRetryAfterParsing:
         assert _parse_retry_after(value) == float(value)
 
     def test_parses_http_date(self, mocker):
-        mocker.patch("openextract._extract.time.time", return_value=1445412450.0)
+        mocker.patch("openextract._errors.time.time", return_value=1445412450.0)
 
         assert _parse_retry_after("Wed, 21 Oct 2015 07:28:00 GMT") == 30.0
 
@@ -1729,7 +1729,7 @@ class TestExtractRetry:
             "openextract._extract._extract_once",
             side_effect=[ModelError("flaky"), expected],
         )
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
 
         result = extract(
             schema=_Person,
@@ -1745,7 +1745,7 @@ class TestExtractRetry:
         sleep_mock.assert_called_once_with(0)
 
     def test_no_retry_by_default_raises_immediately(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1763,7 +1763,7 @@ class TestExtractRetry:
         sleep_mock.assert_not_called()
 
     def test_retry_succeeds_after_transient_model_errors(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1788,7 +1788,7 @@ class TestExtractRetry:
 
     @pytest.mark.parametrize("status_code", [400, 401, 403, 422])
     def test_permanent_model_errors_are_not_retried(self, mocker, status_code):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1814,7 +1814,7 @@ class TestExtractRetry:
         sleep_mock.assert_not_called()
 
     def test_retry_exhausted_raises_last_model_error(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1837,7 +1837,7 @@ class TestExtractRetry:
         assert sleep_mock.call_count == 2
 
     def test_backoff_schedule_uses_exponential_jitter(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1864,7 +1864,7 @@ class TestExtractRetry:
         assert 4.0 <= delays[2] <= 5.0
 
     def test_exponential_backoff_is_bounded(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1896,7 +1896,7 @@ class TestExtractRetry:
             "openextract._extract._extract_once",
             side_effect=[ModelError("rate limited", retry_after=120), expected],
         )
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
 
         result = extract(
             schema=_Person,
@@ -1911,7 +1911,7 @@ class TestExtractRetry:
         sleep_mock.assert_called_once_with(15)
 
     def test_schema_validation_error_is_not_retried(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -1940,7 +1940,7 @@ class TestExtractRetry:
         run_result = MagicMock(output=expected)
         agent_cls, agent = _make_agent_mock(mocker, output=expected)
         agent.run_sync.side_effect = [ModelError("flaky"), run_result]
-        mocker.patch("openextract._extract.time.sleep")
+        mocker.patch("openextract._retry.time.sleep")
 
         result = extract(
             schema=_Person,
@@ -1971,7 +1971,7 @@ class TestExtractWithUsageRetry:
         run_extraction.assert_not_called()
 
     def test_retries_on_model_error(self, mocker):
-        sleep_mock = mocker.patch("openextract._extract.time.sleep")
+        sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
             return_value=nullcontext((MagicMock(), ["prepared"])),
@@ -2001,7 +2001,7 @@ class TestExtractWithUsageRetry:
 
 class TestExtractAsyncRetry:
     async def test_invalid_retry_options_are_rejected_before_agent_build(self, mocker):
-        agent_cls = mocker.patch("openextract._extract.Agent")
+        agent_cls = mocker.patch("openextract._agent.Agent")
 
         with pytest.raises(ValueError, match="retry_backoff"):
             await extract_async(
@@ -2017,7 +2017,7 @@ class TestExtractAsyncRetry:
         local = tmp_path / "input.txt"
         local.write_bytes(b"hi")
         sleep_mock = mocker.patch(
-            "openextract._extract.asyncio.sleep",
+            "openextract._retry.asyncio.sleep",
             new_callable=AsyncMock,
         )
         expected = _Person(name="Ada", age=36)
@@ -2045,7 +2045,7 @@ class TestExtractAsyncRetry:
         run_result = MagicMock(output=expected)
         agent_cls, agent = _make_async_agent_mock(mocker)
         agent.run = AsyncMock(side_effect=[ModelError("flaky"), run_result])
-        mocker.patch("openextract._extract.asyncio.sleep", new_callable=AsyncMock)
+        mocker.patch("openextract._retry.asyncio.sleep", new_callable=AsyncMock)
 
         result = await extract_async(
             schema=_Person,
@@ -2067,7 +2067,7 @@ class TestExtractAsyncRetry:
 
 
 def _make_async_agent_mock(mocker, output=None, run_side_effect=None, usage=None):
-    """Patch openextract._extract.Agent and stub the async ``run`` method."""
+    """Patch openextract._agent.Agent and stub the async ``run`` method."""
     agent_instance = MagicMock()
     if run_side_effect is not None:
         agent_instance.run = AsyncMock(side_effect=run_side_effect)
@@ -2077,7 +2077,7 @@ def _make_async_agent_mock(mocker, output=None, run_side_effect=None, usage=None
         if usage is not None:
             run_result.usage.return_value = usage
         agent_instance.run = AsyncMock(return_value=run_result)
-    agent_cls = mocker.patch("openextract._extract.Agent", return_value=agent_instance)
+    agent_cls = mocker.patch("openextract._agent.Agent", return_value=agent_instance)
     return agent_cls, agent_instance
 
 
@@ -2088,7 +2088,7 @@ def _make_async_agent_mock(mocker, output=None, run_side_effect=None, usage=None
 
 class TestExtractAsync:
     async def test_oversized_input_fails_before_agent_build(self, mocker):
-        agent = mocker.patch("openextract._extract.Agent")
+        agent = mocker.patch("openextract._agent.Agent")
 
         with pytest.raises(InputTooLargeError):
             await extract_async(
@@ -2102,7 +2102,7 @@ class TestExtractAsync:
         agent.assert_not_called()
 
     async def test_async_usage_helper_enforces_input_limit(self, mocker):
-        agent = mocker.patch("openextract._extract.Agent")
+        agent = mocker.patch("openextract._agent.Agent")
 
         with pytest.raises(InputTooLargeError):
             await extract_with_usage_async(
@@ -2123,7 +2123,7 @@ class TestExtractAsync:
             time.sleep(0.05)
             return _read_from_path(file_path, max_input_bytes=max_input_bytes)
 
-        mocker.patch("openextract._extract._read_from_path", side_effect=slow_read)
+        mocker.patch("openextract._media._read_from_path", side_effect=slow_read)
         _make_async_agent_mock(mocker, output=_Person(name="Grace", age=85))
         heartbeat = asyncio.create_task(asyncio.sleep(0.01))
 
@@ -2236,7 +2236,7 @@ class TestExtractAsync:
 
 class TestExtractWithUsageAsync:
     async def test_invalid_retry_options_are_rejected_before_agent_build(self, mocker):
-        agent_cls = mocker.patch("openextract._extract.Agent")
+        agent_cls = mocker.patch("openextract._agent.Agent")
 
         with pytest.raises(ValueError, match="max_retries"):
             await extract_with_usage_async(
@@ -2366,7 +2366,7 @@ def _stub_shared_agent(mocker, side_effect):
     The prepared list deliberately carries the source arguments so focused batch
     tests can inspect them without reading actual files.
     """
-    mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+    mocker.patch("openextract._batch._build_agent", return_value=MagicMock())
 
     async def get_media(input_file, client=None, media_type=None, *, max_input_bytes=None):
         return (input_file, media_type, client), "text/plain"
@@ -2377,10 +2377,10 @@ def _stub_shared_agent(mocker, side_effect):
     async def run(agent, inputs):
         return await side_effect(agent, inputs[0], inputs[1], inputs[2])
 
-    mocker.patch("openextract._extract._get_media_async", side_effect=get_media)
-    mocker.patch("openextract._extract._resolve_run_inputs", side_effect=resolve_inputs)
+    mocker.patch("openextract._batch._get_media_async", side_effect=get_media)
+    mocker.patch("openextract._batch._resolve_run_inputs", side_effect=resolve_inputs)
     mocker.patch(
-        "openextract._extract._run_with_shared_agent",
+        "openextract._batch._run_with_shared_agent",
         side_effect=run,
     )
 
@@ -2403,7 +2403,7 @@ def _stub_shared_agent_result(mocker, side_effect):
     ``extract_many_with_results*`` can build ``ExtractionResult`` diagnostics.
     """
 
-    mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+    mocker.patch("openextract._batch._build_agent", return_value=MagicMock())
 
     async def get_media(input_file, client=None, media_type=None, *, max_input_bytes=None):
         return (input_file, media_type, client), "text/plain"
@@ -2414,17 +2414,17 @@ def _stub_shared_agent_result(mocker, side_effect):
     async def run(agent, inputs):
         return await side_effect(agent, inputs[0], inputs[1], inputs[2])
 
-    mocker.patch("openextract._extract._get_media_async", side_effect=get_media)
-    mocker.patch("openextract._extract._resolve_run_inputs", side_effect=resolve_inputs)
+    mocker.patch("openextract._batch._get_media_async", side_effect=get_media)
+    mocker.patch("openextract._batch._resolve_run_inputs", side_effect=resolve_inputs)
     mocker.patch(
-        "openextract._extract._run_with_shared_agent_result",
+        "openextract._batch._run_with_shared_agent_result",
         side_effect=run,
     )
 
 
 class TestExtractMany:
     def test_invalid_max_concurrency_is_rejected_before_agent_build(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         with pytest.raises(ValueError, match="max_concurrency"):
             extract_many(
@@ -2437,7 +2437,7 @@ class TestExtractMany:
         build_mock.assert_not_called()
 
     def test_invalid_retry_options_are_rejected_before_agent_build(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         with pytest.raises(ValueError, match="max_retries"):
             extract_many(
@@ -2450,7 +2450,7 @@ class TestExtractMany:
         build_mock.assert_not_called()
 
     def test_invalid_max_input_bytes_is_rejected_before_agent_build(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         with pytest.raises(ValueError, match="max_input_bytes"):
             extract_many(
@@ -2468,7 +2468,7 @@ class TestExtractMany:
         run_result = MagicMock(output=expected)
         agent = MagicMock()
         agent.run = AsyncMock(return_value=run_result)
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._batch._build_agent", return_value=agent)
 
         results = extract_many(
             schema=_Person,
@@ -2579,19 +2579,19 @@ class TestExtractMany:
             return _Person(name=input_file, age=1)
 
         _stub_shared_agent(mocker, fake_run)
-        build_mock = mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+        build_mock = mocker.patch("openextract._batch._build_agent", return_value=MagicMock())
 
         extract_many(schema=_Person, model="openai:gpt-5", input_files=files)
 
         assert build_mock.call_count == 1
 
     def test_empty_input_returns_empty_list_without_building_agent(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
         assert extract_many(schema=_Person, model="openai:gpt-5", input_files=[]) == []
         build_mock.assert_not_called()
 
     def test_rejects_call_from_running_event_loop(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         async def _call_from_loop():
             with pytest.raises(RuntimeError, match="extract_many_async"):
@@ -2673,11 +2673,11 @@ class TestExtractManyAsync:
             barrier.wait(timeout=1)
             return _read_from_path(file_path, max_input_bytes=max_input_bytes)
 
-        mocker.patch("openextract._extract._read_from_path", side_effect=concurrent_read)
+        mocker.patch("openextract._media._read_from_path", side_effect=concurrent_read)
         run_result = MagicMock(output=_Person(name="ok", age=1))
         agent = MagicMock()
         agent.run = AsyncMock(return_value=run_result)
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._batch._build_agent", return_value=agent)
 
         results = await extract_many_async(
             schema=_Person,
@@ -2689,7 +2689,7 @@ class TestExtractManyAsync:
         assert results == [_Person(name="ok", age=1)] * 3
 
     async def test_invalid_options_are_rejected_before_agent_build(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         with pytest.raises(ValueError, match="max_concurrency"):
             await extract_many_async(
@@ -2705,13 +2705,13 @@ class TestExtractManyAsync:
         expected = _Person(name="Ada", age=36)
         stream = MagicMock()
         stream.read.side_effect = [b"hello", b""]
-        mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
+        mocker.patch("openextract._batch._build_agent", return_value=MagicMock())
         run = mocker.patch(
-            "openextract._extract._run_with_shared_agent",
+            "openextract._batch._run_with_shared_agent",
             new_callable=AsyncMock,
             side_effect=[ModelError("flaky"), expected],
         )
-        mocker.patch("openextract._extract.asyncio.sleep", new_callable=AsyncMock)
+        mocker.patch("openextract._retry.asyncio.sleep", new_callable=AsyncMock)
 
         results = await extract_many_async(
             schema=_Person,
@@ -2917,7 +2917,7 @@ class TestIterExtractManyAsync:
         run_result = MagicMock(output=expected)
         agent = MagicMock()
         agent.run = AsyncMock(return_value=run_result)
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._batch._build_agent", return_value=agent)
 
         results = [
             item
@@ -2962,7 +2962,7 @@ class TestIterExtractManyAsync:
         assert sibling_cancelled.is_set()
 
     async def test_empty_input_does_not_build_agent(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         results = [
             item
@@ -2977,7 +2977,7 @@ class TestIterExtractManyAsync:
         build_mock.assert_not_called()
 
     def test_invalid_options_fail_when_iterator_is_created(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         with pytest.raises(ValueError, match="max_concurrency"):
             iter_extract_many_async(
@@ -3275,7 +3275,7 @@ class TestTotalUsage:
 
 class TestExtractManyWithResults:
     def test_invalid_options_rejected_before_agent_build(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         with pytest.raises(ValueError, match="max_concurrency"):
             extract_many_with_results(
@@ -3288,7 +3288,7 @@ class TestExtractManyWithResults:
         build_mock.assert_not_called()
 
     def test_rejects_call_from_running_event_loop(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         async def _call_from_loop():
             with pytest.raises(RuntimeError, match="extract_many_with_results_async"):
@@ -3376,7 +3376,7 @@ class TestExtractManyWithResults:
             return _FakeRunResult(_Person(name=str(source), age=1))
 
         _stub_shared_agent_result(mocker, fake_run)
-        mocker.patch("openextract._extract.asyncio.sleep", new_callable=AsyncMock)
+        mocker.patch("openextract._retry.asyncio.sleep", new_callable=AsyncMock)
 
         results = extract_many_with_results(
             schema=_Person,
@@ -3449,7 +3449,7 @@ class TestExtractManyWithResultsAsync:
         assert all(isinstance(result, ExtractionResult) for result in results)
 
     async def test_empty_input_returns_empty_list_without_building_agent(self, mocker):
-        build_mock = mocker.patch("openextract._extract._build_agent")
+        build_mock = mocker.patch("openextract._batch._build_agent")
 
         results = await extract_many_with_results_async(
             schema=_Person,
@@ -3488,7 +3488,7 @@ class TestExtractManyWithResultsAsync:
         run_result = _FakeRunResult(expected)
         agent = MagicMock()
         agent.run = AsyncMock(return_value=run_result)
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._batch._build_agent", return_value=agent)
 
         results = await extract_many_with_results_async(
             schema=_Person,

@@ -42,6 +42,10 @@ timing when that is known.
   completion order without waiting for the full batch.
 
 ### Changed
+- Split the internal extraction implementation into focused modules (`_types`,
+  `_config`, `_media`, `_errors`, `_retry`, `_agent`, `_session`, `_batch`) so
+  input loading, retries, sessions, and batch execution are no longer one file.
+  Public APIs are unchanged.
 - CI skips jobs that the change set cannot affect, cancels outdated pull-request
   runs, caches uv downloads, and collects coverage on Python 3.12 only. Releases
   publish only after CI succeeds on `main`, and docs deploy only when `docs/`

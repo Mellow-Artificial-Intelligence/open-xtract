@@ -151,7 +151,7 @@ class TestPreparedStyleRun:
 
 class TestExtractStyles:
     def test_invalid_style_is_rejected_before_agent_build(self, mocker):
-        agent = mocker.patch("openextract._extract.Agent")
+        agent = mocker.patch("openextract._agent.Agent")
         with pytest.raises(ValueError, match="style must be one of"):
             extract(
                 schema=_Person,
@@ -164,7 +164,7 @@ class TestExtractStyles:
 
     def test_search_requires_harness_extra(self, mocker):
         mocker.patch.dict(sys.modules, {"pydantic_ai_harness": None})
-        mocker.patch("openextract._extract.Agent")
+        mocker.patch("openextract._agent.Agent")
         with pytest.raises(ProviderNotInstalledError, match="pydantic-ai-harness"):
             extract(
                 schema=_Person,
@@ -176,7 +176,7 @@ class TestExtractStyles:
 
     def test_code_requires_code_extra(self, mocker):
         mocker.patch.dict(sys.modules, {"pydantic_ai_harness": None, "pydantic_monty": None})
-        mocker.patch("openextract._extract.Agent")
+        mocker.patch("openextract._agent.Agent")
         with pytest.raises(ProviderNotInstalledError, match="codemode"):
             extract(
                 schema=_Person,
@@ -227,7 +227,7 @@ class TestExtractStyles:
         assert "/work/document.txt" in agent.run_sync.call_args.args[0][0]
 
     def test_search_rejects_images(self, mocker):
-        mocker.patch("openextract._extract.Agent")
+        mocker.patch("openextract._agent.Agent")
         with pytest.raises(ValueError, match="style 'search' requires a text document"):
             extract(
                 schema=_Person,
@@ -323,7 +323,7 @@ class TestExtractStyles:
             return SimpleNamespace(output=people.pop(0))
 
         agent.run.side_effect = run
-        build = mocker.patch("openextract._extract._build_agent", return_value=agent)
+        build = mocker.patch("openextract._batch._build_agent", return_value=agent)
 
         results = extract_many(
             schema=_Person,
@@ -348,7 +348,7 @@ class TestSessionStyles:
 
         harness, _ = _install_harness(mocker)
         agent = FakeAgent([{"name": "Ada", "age": 36}])
-        build = mocker.patch("openextract._extract._build_agent", return_value=agent)
+        build = mocker.patch("openextract._session._build_agent", return_value=agent)
         extractor = Extractor(_Person, "openai:gpt-5", style="search")
         build.assert_not_called()
         with extractor:
@@ -363,7 +363,7 @@ class TestSessionStyles:
 
         harness, _ = _install_harness(mocker)
         agent = FakeAgent([{"name": "Ada", "age": 36}, {"name": "Grace", "age": 85}])
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._session._build_agent", return_value=agent)
         with Extractor(_Person, "openai:gpt-5", style="search") as extractor:
             first = extractor.extract(b"Ada", media_type="text/plain")
             second, usage = extractor.extract_with_usage(b"Grace", media_type="text/plain")
@@ -392,7 +392,7 @@ class TestSessionStyles:
         agent = WorkspaceProbeAgent(
             [ModelError("transient", status_code=503), {"name": "Ada", "age": 36}]
         )
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._session._build_agent", return_value=agent)
         policy = RetryPolicy(max_retries=1, backoff=0)
         with Extractor(_Person, "openai:gpt-5", style="search", retry_policy=policy) as session:
             result = session.extract(b"Ada is 36", media_type="text/plain")
@@ -404,7 +404,7 @@ class TestSessionStyles:
     def test_sync_search_session_enter_failure_cleans_up(self, mocker):
         mocker.patch.dict(sys.modules, {"pydantic_ai_harness": None})
         client = MagicMock()
-        mocker.patch("openextract._extract.httpx.Client", return_value=client)
+        mocker.patch("openextract._session.httpx.Client", return_value=client)
         workspace_spy = mocker.spy(tempfile, "TemporaryDirectory")
         extractor = Extractor(_Person, "openai:gpt-5", style="search")
         with pytest.raises(ProviderNotInstalledError, match="pydantic-ai-harness"):
@@ -416,7 +416,7 @@ class TestSessionStyles:
         mocker.patch.dict(sys.modules, {"pydantic_ai_harness": None, "pydantic_monty": None})
         client = MagicMock()
         client.aclose = AsyncMock()
-        mocker.patch("openextract._extract.httpx.AsyncClient", return_value=client)
+        mocker.patch("openextract._session.httpx.AsyncClient", return_value=client)
         extractor = AsyncExtractor(_Person, "openai:gpt-5", style="code")
         with pytest.raises(ProviderNotInstalledError, match="codemode"):
             await extractor.__aenter__()
@@ -427,7 +427,7 @@ class TestSessionStyles:
 
         _install_harness(mocker)
         agent = FakeAgent([{"name": "Ada", "age": 36}, {"name": "Grace", "age": 85}])
-        mocker.patch("openextract._extract._build_agent", return_value=agent)
+        mocker.patch("openextract._session._build_agent", return_value=agent)
         async with AsyncExtractor(_Person, "openai:gpt-5", style="code") as extractor:
             first = await extractor.extract(b"Ada", media_type="text/plain")
             second, usage = await extractor.extract_with_usage(b"Grace", media_type="text/plain")

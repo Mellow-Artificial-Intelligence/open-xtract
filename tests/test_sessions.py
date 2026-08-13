@@ -113,9 +113,9 @@ async def test_async_session_accepts_path_input(tmp_path):
 
 def test_sync_session_reuses_agent_and_clients_and_returns_usage(mocker):
     agent = FakeAgent([{"name": "Ada", "age": 36}, {"name": "Grace", "age": 85}])
-    agent_factory = mocker.patch("openextract._extract.Agent", return_value=agent)
+    agent_factory = mocker.patch("openextract._agent.Agent", return_value=agent)
     client = MagicMock()
-    client_factory = mocker.patch("openextract._extract.httpx.Client", return_value=client)
+    client_factory = mocker.patch("openextract._session.httpx.Client", return_value=client)
 
     with Extractor(
         Person,
@@ -145,9 +145,9 @@ def test_sync_session_reuses_agent_and_clients_and_returns_usage(mocker):
 def test_sync_session_reuses_client_for_url_input(mocker):
     agent = FakeAgent([{"name": "Ada", "age": 36}])
     client = MagicMock()
-    mocker.patch("openextract._extract.httpx.Client", return_value=client)
+    mocker.patch("openextract._session.httpx.Client", return_value=client)
     read = mocker.patch(
-        "openextract._extract._read_url_with_client",
+        "openextract._media._read_url_with_client",
         return_value=(b"document", {"content-type": "text/plain"}),
     )
 
@@ -164,7 +164,7 @@ def test_sync_session_reuses_client_for_url_input(mocker):
 
 def test_instrumentation_settings_and_validation(mocker):
     settings = InstrumentationSettings(include_content=False)
-    agent_factory = mocker.patch("openextract._extract.Agent", return_value=FakeAgent([]))
+    agent_factory = mocker.patch("openextract._agent.Agent", return_value=FakeAgent([]))
 
     Extractor(Person, "test", instrument=settings)
 
@@ -176,7 +176,7 @@ def test_instrumentation_settings_and_validation(mocker):
 
 def test_configured_model_missing_provider_is_actionable(mocker):
     model = TestModel(custom_output_args={"name": "Ada", "age": 36})
-    mocker.patch("openextract._extract.Agent", side_effect=ImportError("missing sdk"))
+    mocker.patch("openextract._agent.Agent", side_effect=ImportError("missing sdk"))
 
     with pytest.raises(ProviderNotInstalledError, match="configured model.*missing sdk"):
         Extractor(Person, model)
@@ -185,7 +185,7 @@ def test_configured_model_missing_provider_is_actionable(mocker):
 def test_sync_injected_agent_retries_and_validates_output(mocker):
     retryable = ModelError("temporary", retryable=True)
     agent = FakeAgent([retryable, {"name": "Ada", "age": 36}])
-    sleep = mocker.patch("openextract._extract.time.sleep")
+    sleep = mocker.patch("openextract._retry.time.sleep")
 
     with Extractor(
         Person,
@@ -258,7 +258,7 @@ def test_sync_enter_and_exit_failures_still_close_owned_resources(mocker):
     enter_client = MagicMock()
     exit_client = MagicMock()
     mocker.patch(
-        "openextract._extract.httpx.Client",
+        "openextract._session.httpx.Client",
         side_effect=[enter_client, exit_client],
     )
     entering = Extractor(Person, agent=FakeAgent([], enter_error=RuntimeError("enter")))
@@ -329,10 +329,10 @@ async def test_async_configured_model_and_usage():
 async def test_async_session_reuses_agent_and_retries(mocker):
     retryable = ModelError("temporary", retryable=True)
     agent = FakeAgent([retryable, {"name": "Ada", "age": 36}, {"name": "Grace", "age": 85}])
-    sleep = mocker.patch("openextract._extract.asyncio.sleep")
+    sleep = mocker.patch("openextract._retry.asyncio.sleep")
     client = MagicMock()
     client.aclose = AsyncMock()
-    client_factory = mocker.patch("openextract._extract.httpx.AsyncClient", return_value=client)
+    client_factory = mocker.patch("openextract._session.httpx.AsyncClient", return_value=client)
 
     async with AsyncExtractor(
         Person,
@@ -385,7 +385,7 @@ async def test_async_enter_and_exit_failures_close_client(mocker):
     exit_client = MagicMock()
     exit_client.aclose = AsyncMock()
     mocker.patch(
-        "openextract._extract.httpx.AsyncClient",
+        "openextract._session.httpx.AsyncClient",
         side_effect=[enter_client, exit_client],
     )
 

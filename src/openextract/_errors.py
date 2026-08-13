@@ -1,0 +1,247 @@
+"""Map provider and I/O failures onto the public ``ExtractionError`` hierarchy."""
+
+from __future__ import annotations
+
+import math
+import time
+from collections.abc import Iterator, Mapping
+from contextlib import contextmanager
+from email.utils import parsedate_to_datetime
+
+import httpx
+from pydantic import ValidationError
+
+from .exceptions import ExtractionError, ModelError, SchemaValidationError, UrlFetchError
+
+_TRANSIENT_HTTP_STATUSES = frozenset((408, 409, 425, 429))
+_PROVIDER_MODULE_NAMES: tuple[tuple[str, str], ...] = (
+    ("openai", "openai"),
+    ("anthropic", "anthropic"),
+    ("google", "google"),
+    ("botocore", "bedrock"),
+    ("cohere", "cohere"),
+    ("huggingface_hub", "huggingface"),
+    ("groq", "groq"),
+    ("mistralai", "mistral"),
+    ("grpc", "xai"),
+)
+_TRANSIENT_ERROR_NAMES = (
+    "timeout",
+    "connection",
+    "ratelimit",
+    "throttl",
+    "resourceexhausted",
+    "servererror",
+    "internalserver",
+    "serviceunavailable",
+)
+_PERMANENT_ERROR_NAMES = (
+    "authentication",
+    "permission",
+    "forbidden",
+    "badrequest",
+    "invalidrequest",
+    "validation",
+    "unprocessable",
+    "notfound",
+    "accessdenied",
+)
+
+# Exact (module, class) signatures for provider/model error bases we classify
+# as ``ModelError``. The classifier checks the exception's existing MRO instead
+# of importing provider SDKs. ``openai.APIError`` also covers OpenRouter and
+# Cerebras since both go through the openai SDK.
+_MODEL_ERROR_SIGNATURES = frozenset(
+    {
+        ("pydantic_ai.exceptions", "ModelAPIError"),
+        ("openai", "APIError"),
+        ("anthropic", "APIError"),
+        ("google.genai.errors", "APIError"),
+        ("botocore.exceptions", "ClientError"),
+        ("botocore.exceptions", "BotoCoreError"),
+        ("cohere.core.api_error", "ApiError"),
+        ("huggingface_hub.errors", "HfHubHTTPError"),
+        ("groq", "APIError"),
+        ("mistralai.client.errors.mistralerror", "MistralError"),
+        ("grpc", "RpcError"),  # xAI SDK uses gRPC; pydantic-ai may surface this directly
+    }
+)
+
+
+def _is_model_exception(exc: BaseException) -> bool:
+    """Return whether an exception inherits from a supported model error base.
+
+    Provider SDKs have already created the exception by the time this runs, so
+    their classes are present in its MRO. Comparing exact module/class
+    signatures preserves subclass handling without importing unrelated SDKs.
+    """
+    return any(
+        (error_type.__module__, error_type.__name__) in _MODEL_ERROR_SIGNATURES
+        for error_type in type(exc).__mro__
+    )
+
+
+def _model_provider(exc: BaseException) -> str | None:
+    """Return a stable provider identifier when the exception exposes one."""
+    model_name = getattr(exc, "model_name", None)
+    if isinstance(model_name, str) and ":" in model_name:
+        return model_name.split(":", 1)[0]
+
+    for error_type in type(exc).__mro__:
+        module = error_type.__module__
+        for prefix, provider in _PROVIDER_MODULE_NAMES:
+            if module == prefix or module.startswith(f"{prefix}."):
+                return provider
+    return None
+
+
+def _model_status_code(exc: BaseException) -> int | None:
+    """Extract an HTTP status code from common provider exception shapes."""
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and not isinstance(status_code, bool):
+        return status_code
+
+    response = getattr(exc, "response", None)
+    if response is None:
+        response = getattr(exc, "raw_response", None)
+    response_status = getattr(response, "status_code", None)
+    if isinstance(response_status, int) and not isinstance(response_status, bool):
+        return response_status
+
+    if isinstance(response, Mapping):
+        metadata = response.get("ResponseMetadata", {})
+        if isinstance(metadata, Mapping):
+            metadata_status = metadata.get("HTTPStatusCode")
+            if isinstance(metadata_status, int) and not isinstance(metadata_status, bool):
+                return metadata_status
+
+    code = getattr(exc, "code", None)
+    if isinstance(code, int) and not isinstance(code, bool):
+        return code
+    return None
+
+
+def _parse_retry_after(value: object) -> float | None:
+    """Parse Retry-After seconds or an HTTP date into a non-negative duration."""
+    if not isinstance(value, str | int | float) or isinstance(value, bool):
+        return None
+    try:
+        seconds = float(value)
+    except ValueError:
+        try:
+            retry_at = parsedate_to_datetime(str(value))
+        except (TypeError, ValueError, OverflowError):
+            return None
+        seconds = retry_at.timestamp() - time.time()
+    if not math.isfinite(seconds) or seconds < 0:
+        return None
+    return seconds
+
+
+def _header_mappings(exc: BaseException) -> list[Mapping]:
+    """Collect header-like mappings from common provider exception shapes."""
+    header_sets: list[Mapping] = []
+    headers = getattr(exc, "headers", None)
+    if isinstance(headers, Mapping):
+        header_sets.append(headers)
+
+    response = getattr(exc, "response", None)
+    if response is None:
+        response = getattr(exc, "raw_response", None)
+    response_headers = getattr(response, "headers", None)
+    if isinstance(response_headers, Mapping):
+        header_sets.append(response_headers)
+    if isinstance(response, Mapping):
+        metadata = response.get("ResponseMetadata", {})
+        if isinstance(metadata, Mapping):
+            metadata_headers = metadata.get("HTTPHeaders", {})
+            if isinstance(metadata_headers, Mapping):
+                header_sets.append(metadata_headers)
+    return header_sets
+
+
+def _model_retry_after(exc: BaseException) -> float | None:
+    """Extract and parse Retry-After from common provider header containers."""
+    direct_value = getattr(exc, "retry_after", None)
+    if direct_value is not None:
+        parsed_value = _parse_retry_after(direct_value)
+        if parsed_value is not None:
+            return parsed_value
+
+    for header_set in _header_mappings(exc):
+        for key, value in header_set.items():
+            if str(key).lower() == "retry-after":
+                return _parse_retry_after(value)
+    return None
+
+
+def _model_error_name(exc: BaseException) -> str:
+    """Normalize provider class names and structured error codes for policy checks."""
+    names = "".join(error_type.__name__ for error_type in type(exc).__mro__).lower()
+    response = getattr(exc, "response", None)
+    if isinstance(response, Mapping):
+        error = response.get("Error", {})
+        if isinstance(error, Mapping):
+            names += str(error.get("Code", "")).lower()
+    return names.replace("_", "")
+
+
+def _is_transient_model_exception(exc: BaseException, status_code: int | None) -> bool:
+    """Classify only known transient provider failures as retryable."""
+    if status_code is not None:
+        return status_code in _TRANSIENT_HTTP_STATUSES or 500 <= status_code <= 599
+
+    code = getattr(exc, "code", None)
+    if callable(code):
+        grpc_name = getattr(code(), "name", "").lower().replace("_", "")
+        if grpc_name in {
+            "deadlineexceeded",
+            "resourceexhausted",
+            "aborted",
+            "unavailable",
+            "internal",
+        }:
+            return True
+        if grpc_name:
+            return False
+
+    error_name = _model_error_name(exc)
+    if any(name in error_name for name in _PERMANENT_ERROR_NAMES):
+        return False
+    return any(name in error_name for name in _TRANSIENT_ERROR_NAMES)
+
+
+def _map_exception(exc: BaseException) -> ExtractionError:
+    """Translate a low-level exception into the appropriate ExtractionError subclass."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        return UrlFetchError(f"Failed to fetch URL: {exc.response.status_code}")
+    if isinstance(exc, httpx.RequestError):
+        return UrlFetchError(f"Failed to fetch URL: {exc}")
+    if isinstance(exc, ValidationError):
+        return SchemaValidationError(f"Model output did not match schema: {exc}")
+    if _is_model_exception(exc):
+        status_code = _model_status_code(exc)
+        return ModelError(
+            f"Model API error: {exc}",
+            provider=_model_provider(exc),
+            status_code=status_code,
+            retryable=_is_transient_model_exception(exc, status_code),
+            retry_after=_model_retry_after(exc),
+        )
+    return ExtractionError(f"Extraction failed: {exc}")
+
+
+@contextmanager
+def _extraction_errors() -> Iterator[None]:
+    """Map low-level extraction failures to the ``ExtractionError`` hierarchy.
+
+    ``TypeError`` (bad call) and already-mapped ``ExtractionError`` subclasses
+    pass through unchanged; everything else is routed through
+    :func:`_map_exception`.
+    """
+    try:
+        yield
+    except (TypeError, ExtractionError):
+        raise
+    except Exception as e:
+        raise _map_exception(e) from e
