@@ -9,6 +9,8 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- `scripts/extractbench.py` runs [ExtractBench](https://github.com/run-llama/ExtractBench)
+  through openextract with any `pydantic-ai` model identifier (`--model openai:gpt-5 --test`).
 - Typed input and result contracts: `ExtractionInput` supports direct
   `os.PathLike` sources with per-item `media_type` and an optional safe
   `name`, and `ExtractionResult[T]` carries output, usage, attempts, timing,

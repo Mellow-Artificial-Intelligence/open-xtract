@@ -128,3 +128,10 @@ regression.
 > These measurements are a local diagnostic aid. They are **not** universal
 > performance guarantees and should not be quoted as openextract's performance
 > characteristics.
+
+## Extraction quality (ExtractBench)
+
+For schema-guided extraction accuracy against LlamaIndex ExtractBench, use
+[`scripts/extractbench.py`](extractbench.md) with any `pydantic-ai` model
+identifier. That tool calls live models and is not a substitute for this
+local overhead benchmark.
