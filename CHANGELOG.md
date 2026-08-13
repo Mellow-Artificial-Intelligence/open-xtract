@@ -33,6 +33,10 @@ timing when that is known.
   completion order without waiting for the full batch.
 
 ### Changed
+- CI skips jobs that the change set cannot affect, cancels outdated pull-request
+  runs, caches uv downloads, and collects coverage on Python 3.12 only. Releases
+  publish only after CI succeeds on `main`, and docs deploy only when `docs/`
+  changes.
 - `openai:` model identifiers now use the OpenAI Responses API by default;
   `openai-chat:` remains available as an explicit Chat Completions opt-in.
 - Batch execution now schedules at most `max_concurrency` inputs, consumes
