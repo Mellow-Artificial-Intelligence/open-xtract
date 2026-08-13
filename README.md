@@ -24,6 +24,7 @@
 
 - **Type-safe output.** Define your shape with Pydantic; get back a validated instance.
 - **One function, many modalities.** Documents (PDF, DOCX), images, audio, and video.
+- **Extraction styles.** Pass the document directly, search it with file tools, or write Python against the text via [Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/).
 - **Local files or URLs.** Pass a path or an `https://` URL &mdash; `openextract` handles fetching.
 - **Bring your own model.** OpenAI, Anthropic, Google, AWS Bedrock, xAI, Cohere, Hugging Face, Groq, Cerebras, Mistral, and Ollama supported out of the box via [`pydantic-ai`](https://github.com/pydantic/pydantic-ai).
 - **Explicit error handling.** Distinct exceptions for URL fetch, schema validation, and model errors.
@@ -41,7 +42,7 @@ Or with pip:
 pip install openextract
 ```
 
-Model calls require a provider SDK. Install the extra for the provider you use, for example `openextract[openai]`, `openextract[anthropic]`, or `openextract[all]` for every supported provider. The base package ships `pydantic-ai-slim` without provider SDKs pre-installed. If the requested provider SDK is missing, `openextract` raises `ProviderNotInstalledError` with a provider-specific `pip install 'openextract[...]'` command when the model prefix is known.
+Model calls require a provider SDK. Install the extra for the provider you use, for example `openextract[openai]`, `openextract[anthropic]`, or `openextract[all]` for every supported provider. Agentic `search` and `code` styles need [`pydantic-ai-harness`](https://pydantic.dev/docs/ai/harness/) (`pip install pydantic-ai-harness` / `pip install 'pydantic-ai-harness[codemode]'`). The base package ships `pydantic-ai-slim` without provider SDKs pre-installed. If the requested provider SDK is missing, `openextract` raises `ProviderNotInstalledError` with a provider-specific `pip install 'openextract[...]'` command when the model prefix is known.
 
 Requires Python 3.12+.
 
@@ -69,6 +70,41 @@ print(result.language)
 ```
 
 `result` is a fully-validated `PdfInfo` instance &mdash; not a dict, not a string.
+
+## Extraction styles
+
+`style` selects how the model inspects the input. The default, `direct`, is the
+current behavior: the resolved media is passed to the LLM in one shot. For
+**text** documents you can instead use agentic search or code execution, both
+powered by [Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/).
+
+```python
+from openextract import extract, ExtractionStyle
+
+# Default: send the document bytes to the model.
+extract(schema=PdfInfo, model="openai:gpt-5", input_file="notes.txt")
+
+# Grep/read the text with sandboxed file tools (needs pydantic-ai-harness).
+extract(
+    schema=PdfInfo,
+    model="openai:gpt-5",
+    input_file="notes.txt",
+    style="search",  # or ExtractionStyle.SEARCH
+)
+
+# Write Python against a workspace copy of the document (needs pydantic-ai-harness[codemode]).
+extract(
+    schema=PdfInfo,
+    model="openai:gpt-5",
+    input_file="notes.txt",
+    style="code",
+)
+```
+
+`search` and `code` require UTF-8 text (`text/*`, JSON, XML, YAML, and similar).
+PDFs, images, audio, and video stay on `direct`. Missing packages raise
+`ProviderNotInstalledError` with a `pip install pydantic-ai-harness` or
+`pip install 'pydantic-ai-harness[codemode]'` hint. The CLI flag is `--style`.
 
 ## Reusable sessions
 
@@ -339,6 +375,9 @@ cat ./reports/q4.pdf | openextract - \
 - `--schema` is a Python import path of the form `module:ClassName` resolving to a Pydantic model.
 - `--model` is a `pydantic-ai` model identifier.
 - `--instructions` is optional natural-language guidance.
+- `--style` is `direct` (default), `search` (file tools on text), or `code`
+  (write Python against text). `search` needs `pydantic-ai-harness`; `code`
+  needs `pydantic-ai-harness[codemode]`.
 - `--media-type` sets MIME type for stdin or overrides guessing for paths/URLs.
 - `--usage` prints a JSON object with `result` and `usage` (single input only).
 - `--output` is `json` (default) or `repr`.
@@ -425,7 +464,8 @@ the compatibility notes below even though it is not exported from `__all__`.
 
 | API | Status for 1.0 | Notes |
 | --- | --- | --- |
-| `extract` | Stable | Primary synchronous API. Signature, return type, media input forms (`str`, `os.PathLike`, `bytes`, file-like, `ExtractionInput`), retry behavior, and public exception categories are intended to carry into 1.0 unchanged. |
+| `ExtractionStyle` | Provisional | `direct`, `search`, or `code` extraction strategy. `search`/`code` are text-only and require `pydantic-ai-harness`. |
+| `extract` | Stable | Primary synchronous API. Signature, return type, media input forms (`str`, `os.PathLike`, `bytes`, file-like, `ExtractionInput`), retry behavior, and public exception categories are intended to carry into 1.0 unchanged. `style` is additive. |
 | `extract_async` | Stable | Async sibling of `extract`; same input contract and retry behavior, with `Agent.run` instead of `run_sync`. |
 | `extract_with_usage` | Stable | Usage-returning sync API. The `(output, Usage)` tuple shape is stable; exact token values depend on provider reporting. |
 | `extract_with_usage_async` | Stable | Async sibling of `extract_with_usage`; same tuple shape and retry behavior. |

@@ -31,6 +31,7 @@ API_EXAMPLES: list[tuple[str, list[str]]] = [
 NO_API_EXAMPLES: list[str] = [
     "examples.advanced.error_handling",
     "examples.advanced.reusable_sessions",
+    "examples.advanced.extraction_styles",
 ]
 
 

@@ -32,6 +32,9 @@ pip install 'openextract[xai]'
 pip install 'openextract[all]'
 ```
 
+`style='search'` needs `pydantic-ai-harness`; `style='code'` needs
+`pydantic-ai-harness[codemode]`.
+
 ## Missing provider credentials
 
 **Symptoms**

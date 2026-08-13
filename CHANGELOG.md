@@ -9,6 +9,13 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Extraction styles: `style='direct'` (default) still sends media to the model
+  in one shot; `style='search'` uses Pydantic AI Harness `FileSystem` tools
+  (read, regex search, glob) on text documents; `style='code'` uses Harness
+  `CodeMode` so the model can write Python against a workspace copy of the
+  text. Available on every extract API, reusable sessions, and as `--style`
+  on the CLI. Install `pydantic-ai-harness` for search and
+  `pydantic-ai-harness[codemode]` for code execution.
 - Typed input and result contracts: `ExtractionInput` supports direct
   `os.PathLike` sources with per-item `media_type` and an optional safe
   `name`, and `ExtractionResult[T]` carries output, usage, attempts, timing,

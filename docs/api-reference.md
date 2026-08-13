@@ -11,19 +11,22 @@ in the same change as any public signature.
 
 ## Extraction
 
-### `Extractor(schema, model=None, instructions=None, *, agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
+### `Extractor(schema, model=None, instructions=None, *, style='direct', agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
 
 Reusable synchronous extraction session. Enter it with `with`; then call
-`extract(input_file, *, media_type=None)` or
-`extract_with_usage(input_file, *, media_type=None)`. The agent, model provider
+`extract(input_file, *, style='direct', media_type=None)` or
+`extract_with_usage(input_file, *, style='direct', media_type=None)`. The agent, model provider
 client, and URL-fetch client are constructed once and closed on context exit.
 
 `model` accepts either a known model string or a configured
-`pydantic_ai.models.Model`. As an advanced alternative, `agent` accepts a fully
+`pydantic_ai.models.Model`. `style` selects how the model inspects the input
+(`direct`, `search`, or `code`; see [Common arguments](#common-arguments)).
+As an advanced alternative, `agent` accepts a fully
 configured Pydantic AI `Agent`; it is mutually exclusive with `model`, and its
-output is revalidated against `schema`.
+output is revalidated against `schema`. Non-`direct` styles cannot be combined
+with an injected `agent`.
 
-### `AsyncExtractor(schema, model=None, instructions=None, *, agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
+### `AsyncExtractor(schema, model=None, instructions=None, *, style='direct', agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
 
 Async session counterpart. Enter it with `async with`; then await `extract` or
 `extract_with_usage`. It shares one async HTTP client and one agent across
@@ -36,37 +39,37 @@ Frozen session retry configuration. Only transient `ModelError` failures are
 retried. The backoff and bounded provider `Retry-After` behavior match the
 one-shot function arguments.
 
-### `extract(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Extract one input synchronously and return an instance of `schema`.
 
-### `extract_async(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_async(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract`. It uses `Agent.run` and returns an instance of
 `schema`.
 
-### `extract_with_usage(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_with_usage(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Extract one input synchronously and return `(output, Usage)`. It has the same
 retry behavior as `extract`; `Usage` describes the successful model call.
 
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_with_usage_async(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract_with_usage`; returns `(output, Usage)`.
 
-### `extract_many(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_many(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Run concurrent extractions from synchronous code. Results preserve input order.
 When `return_exceptions=True`, per-item exceptions appear in the result list.
 Do not call this function from a running event loop; use
 `extract_many_async` instead.
 
-### `extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_many_async(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract_many`; it has the same arguments, result ordering,
 and per-item retry behavior.
 
-### `iter_extract_many_async(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `iter_extract_many_async(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Return an async iterator of `(input_index, result)` pairs in completion order.
 Inputs are consumed lazily, at most `max_concurrency` items are scheduled, and
@@ -77,7 +80,7 @@ With `return_exceptions=False`, the first failure cancels and awaits outstanding
 work before being raised. With `return_exceptions=True`, item exceptions are
 yielded in the result position and streaming continues.
 
-### `extract_many_with_results(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_many_with_results(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Run a batch and return per-item [`ExtractionResult`](#extractionresult) objects
 instead of bare schema instances. It has the same arguments, input ordering,
@@ -87,7 +90,7 @@ source label. With `return_exceptions=True`, failed items appear as
 `Exception` values in place. Use [`total_usage`](#total_usageresults) to
 aggregate token usage across the returned results.
 
-### `extract_many_with_results_async(schema, model, input_files, instructions=None, *, media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_many_with_results_async(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract_many_with_results`; it has the same arguments,
 result ordering, and per-item retry behavior.
@@ -141,6 +144,7 @@ internals; `source` is sanitized.
 | `model` | `str \| Model` | `pydantic-ai` model identifier or configured model instance. |
 | `input_file` | `str \| os.PathLike[str] \| bytes \| BinaryIO \| ExtractionInput` | Local path, HTTP(S) URL, `Path`, bytes, binary file-like object, or `ExtractionInput`. |
 | `instructions` | `str \| None` | Optional model guidance. |
+| `style` | `ExtractionStyle \| str` | How the model inspects the input. `direct` (default) sends media in one shot. `search` gives the model sandboxed file tools (read/grep) against a text document. `code` lets the model write Python against a text document via [Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/). `search` needs `pydantic-ai-harness`; `code` needs `pydantic-ai-harness[codemode]`. |
 | `media_type` | `str \| None` | Required for bytes and file-like inputs without a per-item type; overrides inference for paths and URLs. Item-level `ExtractionInput.media_type` wins in batch calls. |
 | `max_input_bytes` | `int \| None` | Per-input byte cap; `None` uses `OPENEXTRACT_MAX_INPUT_BYTES` or the 50 MiB default. |
 | `max_retries` | `int` | Extra attempts after transient `ModelError`; defaults to `0`. |
