@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
 from pydantic_ai.models.test import TestModel
+
+from openextract import SchemaValidationError
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -104,6 +107,88 @@ def test_extract_document_with_test_model():
     assert data["vendor"] == "Acme"
     assert data["total"] == 12.5
     assert usage.input_tokens >= 0
+
+
+def test_output_type_for_schema_raises_instead_of_degrading(capsys):
+    schema = {"title": "InvoiceList", "type": "array", "items": {"type": "object"}}
+    with pytest.raises(SchemaValidationError, match="InvoiceList"):
+        extractbench._output_type_for_schema(schema, "openai:gpt-5")
+    assert "InvoiceList" in capsys.readouterr().err
+
+
+def test_extract_document_rejects_unconvertible_schema(capsys):
+    model = TestModel(custom_output_args={"vendor": "Acme"})
+    with pytest.raises(SchemaValidationError):
+        extractbench.extract_document(
+            b"%PDF-fixture",
+            {"type": "array", "items": {"type": "string"}},
+            model,
+            media_type="application/pdf",
+            max_retries=0,
+        )
+    assert "warning:" in capsys.readouterr().err
+
+
+def _fake_venv(tmp_path: Path) -> tuple[Path, Path]:
+    venv_dir = tmp_path / "venv"
+    python = venv_dir / ("Scripts/python.exe" if os.name == "nt" else "bin/python")
+    python.parent.mkdir(parents=True)
+    python.touch()
+    return venv_dir, python
+
+
+def _patch_bootstrap(monkeypatch, tmp_path: Path, venv_dir: Path) -> list[list[str]]:
+    monkeypatch.setattr(extractbench, "CACHE_DIR", tmp_path)
+    monkeypatch.setattr(extractbench, "VENV_DIR", venv_dir)
+    monkeypatch.setattr(extractbench, "extract_bench_available", lambda: False)
+    commands: list[list[str]] = []
+    monkeypatch.setattr(extractbench, "_run", commands.append)
+    return commands
+
+
+def test_inside_benchmark_venv_compares_sys_prefix(monkeypatch, tmp_path):
+    """Membership uses sys.prefix, not resolved executables (uv symlinks alias)."""
+    venv_dir = tmp_path / "venv"
+    monkeypatch.setattr(extractbench, "VENV_DIR", venv_dir)
+    monkeypatch.setattr(sys, "prefix", str(venv_dir))
+    assert extractbench._inside_benchmark_venv() is True
+    monkeypatch.setattr(sys, "prefix", str(tmp_path / "other-venv"))
+    assert extractbench._inside_benchmark_venv() is False
+
+
+def test_ensure_extract_bench_raises_inside_broken_benchmark_venv(monkeypatch, tmp_path):
+    venv_dir, _python = _fake_venv(tmp_path)
+    commands = _patch_bootstrap(monkeypatch, tmp_path, venv_dir)
+    monkeypatch.setattr(sys, "prefix", str(venv_dir))
+    with pytest.raises(RuntimeError, match="not importable"):
+        extractbench.ensure_extract_bench()
+    assert commands == []
+
+
+def test_ensure_extract_bench_skips_install_when_already_present(monkeypatch, tmp_path):
+    venv_dir, python = _fake_venv(tmp_path)
+    commands = _patch_bootstrap(monkeypatch, tmp_path, venv_dir)
+    monkeypatch.setattr(extractbench, "_venv_has_extract_bench", lambda _python: True)
+    monkeypatch.setattr(sys, "argv", ["extractbench.py"])
+    execs: list[tuple] = []
+    monkeypatch.setattr(os, "execv", lambda *call: execs.append(call))
+    extractbench.ensure_extract_bench()
+    assert commands == []
+    assert execs == [(str(python), [str(python), str(SCRIPTS / "extractbench.py")])]
+
+
+def test_ensure_extract_bench_installs_when_probe_fails(monkeypatch, tmp_path):
+    venv_dir, python = _fake_venv(tmp_path)
+    commands = _patch_bootstrap(monkeypatch, tmp_path, venv_dir)
+    monkeypatch.setattr(extractbench, "_venv_has_extract_bench", lambda _python: False)
+    extractbench.ensure_extract_bench(reexec=False)
+    assert len(commands) == 1
+    assert extractbench.EXTRACTBENCH_GIT in commands[0]
+    assert str(python) in commands[0]
+
+
+def test_venv_has_extract_bench_false_when_python_missing(tmp_path):
+    assert extractbench._venv_has_extract_bench(tmp_path / "missing") is False
 
 
 def test_parse_args_test_split_and_model():

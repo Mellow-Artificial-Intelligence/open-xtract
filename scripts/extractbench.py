@@ -41,9 +41,12 @@ from openextract._extract import _install_hint, _route_model
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = REPO_ROOT / ".extractbench"
 VENV_DIR = CACHE_DIR / "venv"
+# Pinned to a commit so scores stay comparable across bootstraps and upstream
+# changes cannot break the runner (it reaches into private ExtractBench
+# internals). Bump the SHA deliberately when adopting a newer ExtractBench.
 EXTRACTBENCH_GIT = os.environ.get(
     "OPENEXTRACT_EXTRACTBENCH_GIT",
-    "git+https://github.com/run-llama/ExtractBench.git",
+    "git+https://github.com/run-llama/ExtractBench.git@28dadf58fcd1ab366808ac8e2dfc8716fa9ad5aa",
 )
 DEFAULT_INSTRUCTIONS = (
     "You are extracting structured data from a document according to the "
@@ -157,15 +160,32 @@ def as_extracted_dict(output: object) -> dict[str, Any]:
 
 
 def _output_type_for_schema(schema: dict[str, Any], model: str | object) -> object:
+    """Build the structured output type for a schema, refusing to degrade.
+
+    Running schema-less while the prompt references "the provided JSON schema"
+    would produce a near-zero score misattributed to the model, so any failure
+    here is a permanent, loudly-reported error rather than a silent fallback.
+    """
+    schema_name = schema.get("title") or "extraction"
     try:
         from pydantic_ai.output import NativeOutput, StructuredDict
-    except ImportError:
-        return ExtractedDocument
+    except ImportError as exc:
+        message = (
+            f"Cannot build structured output for schema {schema_name!r}: this "
+            f"pydantic-ai version lacks StructuredDict ({exc}). Upgrade pydantic-ai."
+        )
+        print(f"warning: {message}", file=sys.stderr)
+        raise SchemaValidationError(message) from exc
 
     try:
         output_type: object = StructuredDict(schema, name="extraction")
-    except Exception:
-        return ExtractedDocument
+    except Exception as exc:
+        message = (
+            f"JSON schema {schema_name!r} could not be converted into a "
+            f"structured output type: {exc}"
+        )
+        print(f"warning: {message}", file=sys.stderr)
+        raise SchemaValidationError(message) from exc
     if isinstance(model, str) and model.startswith("ollama"):
         return NativeOutput(output_type)
     return output_type
@@ -229,16 +249,45 @@ def _run(command: list[str]) -> None:
     subprocess.run(command, check=True)
 
 
+def _inside_benchmark_venv() -> bool:
+    """True when this interpreter runs from ``.extractbench/venv``.
+
+    Compares ``sys.prefix`` to the venv directory instead of resolving
+    executables: under uv both the project and benchmark interpreters are
+    symlinks to the same base Python, so resolved executable paths are equal
+    even when the venvs differ.
+    """
+    return Path(sys.prefix).resolve() == VENV_DIR.resolve()
+
+
+def _venv_has_extract_bench(python: Path) -> bool:
+    """Probe the benchmark venv for an importable ``extract_bench``."""
+    if not python.exists():
+        return False
+    probe = subprocess.run(
+        [str(python), "-c", "import extract_bench"],
+        capture_output=True,
+        check=False,
+    )
+    return probe.returncode == 0
+
+
 def ensure_extract_bench(*, reexec: bool = True) -> None:
     """Install ExtractBench into ``.extractbench/venv`` when it is not importable."""
     if extract_bench_available():
         return
+    if _inside_benchmark_venv():
+        raise RuntimeError(
+            "extract_bench is not importable from the benchmark environment. "
+            f"Delete {VENV_DIR} and re-run with network access so the script "
+            f"can reinstall {EXTRACTBENCH_GIT}."
+        )
     python = _venv_python()
-    if Path(sys.executable).resolve() != python.resolve():
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        if not python.exists():
-            print(f"Creating ExtractBench environment at {VENV_DIR}", file=sys.stderr)
-            _run(["uv", "venv", str(VENV_DIR)])
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    if not python.exists():
+        print(f"Creating ExtractBench environment at {VENV_DIR}", file=sys.stderr)
+        _run(["uv", "venv", str(VENV_DIR)])
+    if not _venv_has_extract_bench(python):
         print("Installing ExtractBench and openextract (first run only)...", file=sys.stderr)
         _run(
             [
@@ -253,13 +302,9 @@ def ensure_extract_bench(*, reexec: bool = True) -> None:
                 f"{REPO_ROOT}[all]",
             ]
         )
-        if not reexec:
-            return
-        os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
-    raise RuntimeError(
-        "extract_bench is not importable. Re-run with network access so the "
-        f"script can install {EXTRACTBENCH_GIT} into {VENV_DIR}."
-    )
+    if not reexec:
+        return
+    os.execv(str(python), [str(python), str(Path(__file__).resolve()), *sys.argv[1:]])
 
 
 def register_openextract_pipeline(

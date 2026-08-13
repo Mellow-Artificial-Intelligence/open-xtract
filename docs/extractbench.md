@@ -46,7 +46,9 @@ A full run is 370 documents. Start with `--test`. ExtractBench's own guidance
 is that hosted VLMs typically cost on the order of tens of dollars for a full
 run; specialized APIs and coding agents cost more. This wrapper records token
 usage; pass `--input-price-per-1m` and `--output-price-per-1m` if you want
-ExtractBench to compute `cost_usd`.
+ExtractBench to compute `cost_usd`. Reported usage and `cost_usd` cover the
+successful attempt only; tokens spent on failed attempts that were retried
+(`--max-retries`) are not included.
 
 ## Output
 
