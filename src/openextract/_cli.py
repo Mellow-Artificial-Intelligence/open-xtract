@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ._extract import extract, extract_many, extract_with_usage
+from ._styles import ExtractionStyle
 from .exceptions import (
     ExtractionError,
     ModelError,
@@ -132,6 +133,15 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Optional natural-language instructions for the model.",
     )
     parser.add_argument(
+        "--style",
+        choices=tuple(item.value for item in ExtractionStyle),
+        default=ExtractionStyle.DIRECT.value,
+        help=(
+            "Extraction style: 'direct' (default) sends media to the model; "
+            "'search' uses file tools on text; 'code' writes Python against text."
+        ),
+    )
+    parser.add_argument(
         "--media-type",
         default=None,
         metavar="MIME",
@@ -223,6 +233,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     model=args.model,
                     input_file=input_file,
                     instructions=args.instructions,
+                    style=args.style,
                     media_type=media_type,
                     max_input_bytes=args.max_input_bytes,
                     max_retries=args.max_retries,
@@ -236,6 +247,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     model=args.model,
                     input_file=input_file,
                     instructions=args.instructions,
+                    style=args.style,
                     media_type=media_type,
                     max_input_bytes=args.max_input_bytes,
                     max_retries=args.max_retries,
@@ -248,6 +260,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 model=args.model,
                 input_files=input_files,
                 instructions=args.instructions,
+                style=args.style,
                 media_type=media_type,
                 max_input_bytes=args.max_input_bytes,
                 max_retries=args.max_retries,

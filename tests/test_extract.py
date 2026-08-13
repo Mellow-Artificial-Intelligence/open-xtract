@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+from contextlib import nullcontext
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 from types import SimpleNamespace
@@ -131,6 +132,7 @@ def test_star_import_exposes_only_existing_names():
         "RetryPolicy",
         "ExtractionInput",
         "ExtractionResult",
+        "ExtractionStyle",
         "extract",
         "extract_async",
         "extract_many",
@@ -1721,7 +1723,7 @@ class TestExtractRetry:
         expected = _Person(name="Grace", age=85)
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1746,7 +1748,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1764,7 +1766,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         expected = _Person(name="Grace", age=85)
         once = mocker.patch(
@@ -1789,7 +1791,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1815,7 +1817,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1838,7 +1840,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         mocker.patch(
             "openextract._extract._extract_once",
@@ -1865,7 +1867,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         mocker.patch(
             "openextract._extract._extract_once",
@@ -1888,7 +1890,7 @@ class TestExtractRetry:
         expected = _Person(name="Grace", age=85)
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         mocker.patch(
             "openextract._extract._extract_once",
@@ -1912,7 +1914,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1972,7 +1974,7 @@ class TestExtractWithUsageRetry:
         sleep_mock = mocker.patch("openextract._extract.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=(MagicMock(), ["prepared"]),
+            return_value=nullcontext((MagicMock(), ["prepared"])),
         )
         expected = _Person(name="Ada", age=36)
         usage = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)
@@ -2366,13 +2368,17 @@ def _stub_shared_agent(mocker, side_effect):
     """
     mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
 
-    async def prepare(input_file, media_type, client, *, max_input_bytes):
-        return [input_file, media_type, client]
+    async def get_media(input_file, client=None, media_type=None, *, max_input_bytes=None):
+        return (input_file, media_type, client), "text/plain"
+
+    def resolve_inputs(file_bytes, file_type, style_inputs):
+        return list(file_bytes)
 
     async def run(agent, inputs):
         return await side_effect(agent, inputs[0], inputs[1], inputs[2])
 
-    mocker.patch("openextract._extract._prepare_run_inputs_async", side_effect=prepare)
+    mocker.patch("openextract._extract._get_media_async", side_effect=get_media)
+    mocker.patch("openextract._extract._resolve_run_inputs", side_effect=resolve_inputs)
     mocker.patch(
         "openextract._extract._run_with_shared_agent",
         side_effect=run,
@@ -2399,13 +2405,17 @@ def _stub_shared_agent_result(mocker, side_effect):
 
     mocker.patch("openextract._extract._build_agent", return_value=MagicMock())
 
-    async def prepare(input_file, media_type, client, *, max_input_bytes):
-        return [input_file, media_type, client]
+    async def get_media(input_file, client=None, media_type=None, *, max_input_bytes=None):
+        return (input_file, media_type, client), "text/plain"
+
+    def resolve_inputs(file_bytes, file_type, style_inputs):
+        return list(file_bytes)
 
     async def run(agent, inputs):
         return await side_effect(agent, inputs[0], inputs[1], inputs[2])
 
-    mocker.patch("openextract._extract._prepare_run_inputs_async", side_effect=prepare)
+    mocker.patch("openextract._extract._get_media_async", side_effect=get_media)
+    mocker.patch("openextract._extract._resolve_run_inputs", side_effect=resolve_inputs)
     mocker.patch(
         "openextract._extract._run_with_shared_agent_result",
         side_effect=run,

@@ -11,6 +11,13 @@ timing when that is known.
 ### Added
 - `scripts/extractbench.py` runs [ExtractBench](https://github.com/run-llama/ExtractBench)
   through openextract with any `pydantic-ai` model identifier (`--model openai:gpt-5 --test`).
+- Extraction styles: `style='direct'` (default) still sends media to the model
+  in one shot; `style='search'` uses Pydantic AI Harness `FileSystem` tools
+  (read, regex search, glob) on text documents; `style='code'` uses Harness
+  `CodeMode` so the model can write Python against a workspace copy of the
+  text. Available on every extract API, reusable sessions, and as `--style`
+  on the CLI. Install `pydantic-ai-harness` for search and
+  `pydantic-ai-harness[codemode]` for code execution.
 - Typed input and result contracts: `ExtractionInput` supports direct
   `os.PathLike` sources with per-item `media_type` and an optional safe
   `name`, and `ExtractionResult[T]` carries output, usage, attempts, timing,
@@ -35,6 +42,10 @@ timing when that is known.
   completion order without waiting for the full batch.
 
 ### Changed
+- CI skips jobs that the change set cannot affect, cancels outdated pull-request
+  runs, caches uv downloads, and collects coverage on Python 3.12 only. Releases
+  publish only after CI succeeds on `main`, and docs deploy only when `docs/`
+  changes.
 - `openai:` model identifiers now use the OpenAI Responses API by default;
   `openai-chat:` remains available as an explicit Chat Completions opt-in.
 - Batch execution now schedules at most `max_concurrency` inputs, consumes

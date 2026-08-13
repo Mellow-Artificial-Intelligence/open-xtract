@@ -145,6 +145,15 @@ flag, the CLI uses `OPENEXTRACT_MAX_INPUT_BYTES` or the 50 MiB default. Values
 must be positive integers. Oversized inputs fail before a model call and exit
 `5`; URL bodies and stdin remain bounded even without a reliable length header.
 
+## Extraction styles
+
+`--style direct` (default) sends the resolved media to the model in one shot.
+`--style search` and `--style code` are text-only: search gives the model
+sandboxed file tools (read, regex search, glob), and code lets it write Python
+against a workspace copy of the document via Pydantic AI Harness. Missing extras
+exit `6` (`ProviderNotInstalledError`). Non-text inputs raise `ValueError`
+(exit `1`).
+
 ## Related docs
 
 - [Troubleshooting](troubleshooting.md)

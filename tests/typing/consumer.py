@@ -15,6 +15,7 @@ from pydantic import BaseModel
 from openextract import (
     ExtractionInput,
     ExtractionResult,
+    ExtractionStyle,
     Usage,
     extract,
     extract_many,
@@ -61,6 +62,9 @@ with_exceptions: list[Invoice | Exception] = extract_many(
 
 # extract() -> T and the tuple usage helper stay compatible.
 single: Invoice = extract(Invoice, "openai:gpt-5", Path("/tmp/x.pdf"))
+search: Invoice = extract(
+    Invoice, "openai:gpt-5", Path("/tmp/notes.txt"), style=ExtractionStyle.SEARCH
+)
 output, usage = extract_with_usage(Invoice, "openai:gpt-5", Path("/tmp/x.pdf"))
 _assert_invoice: Invoice = output
 _assert_usage: Usage = usage

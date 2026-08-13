@@ -20,6 +20,7 @@ from ._extract import (
     iter_extract_many_async,
     total_usage,
 )
+from ._styles import ExtractionStyle
 from .exceptions import (
     ExtractionError,
     InputTooLargeError,
@@ -35,6 +36,7 @@ __all__ = [
     "RetryPolicy",
     "ExtractionInput",
     "ExtractionResult",
+    "ExtractionStyle",
     "extract",
     "extract_async",
     "extract_many",
