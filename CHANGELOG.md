@@ -42,6 +42,9 @@ timing when that is known.
   completion order without waiting for the full batch.
 - Streaming-batch example and docs comparing `iter_extract_many_async`
   (completion order) with `extract_many` (input order).
+- GitHub Pages now builds a documentation site: user [guide](docs/guide.md),
+  [agent contract](docs/agents.md), rendered API/CLI/provider pages, and
+  [`llms.txt`](docs/llms.txt).
 
 ### Changed
 - Split the internal extraction implementation into focused modules (`_types`,

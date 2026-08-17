@@ -200,6 +200,8 @@ results = await extract_many_async(schema=..., model=..., input_files=...)
 
 ## Related
 
+- [Guide](guide.md)
+- [For agents](agents.md)
 - [CLI contracts](cli.md)
 - [Provider matrix](providers.md)
 - [README error handling](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/README.md#error-handling)

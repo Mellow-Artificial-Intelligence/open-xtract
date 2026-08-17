@@ -1,3 +1,7 @@
+---
+layout: null
+title: openextract
+---
 <!DOCTYPE html>
 <html lang="en" class="scroll-smooth">
 <head>
@@ -70,7 +74,7 @@
     <!-- Navigation -->
     <header class="fixed top-0 w-full z-50 bg-[#fafafa]/80 backdrop-blur-lg border-b border-black/5">
       <div class="max-w-5xl mx-auto px-4 sm:px-6 h-14 flex items-center justify-between">
-        <a href="#" class="flex items-center gap-2">
+        <a href="{{ '/' | relative_url }}" class="flex items-center gap-2">
           <div class="w-8 h-8 bg-black flex items-center justify-center">
             <span class="text-white font-mono font-bold text-xs">OE</span>
           </div>
@@ -78,7 +82,9 @@
         </a>
 
         <nav class="flex items-center gap-4 sm:gap-6">
-          <a href="#docs" class="font-mono text-xs text-black/40 hover:text-black transition-colors">Docs</a>
+          <a href="{{ '/guide.html' | relative_url }}" class="font-mono text-xs text-black/40 hover:text-black transition-colors">Guide</a>
+          <a href="{{ '/agents.html' | relative_url }}" class="font-mono text-xs text-black/40 hover:text-black transition-colors">Agents</a>
+          <a href="{{ '/api-reference.html' | relative_url }}" class="font-mono text-xs text-black/40 hover:text-black transition-colors">API</a>
           <a href="https://github.com/Mellow-Artificial-Intelligence/openextract" class="font-mono text-xs text-black/40 hover:text-black transition-colors">GitHub</a>
           <a href="https://pypi.org/project/openextract/" class="font-mono text-xs text-black/40 hover:text-black transition-colors">PyPI</a>
         </nav>
@@ -114,6 +120,10 @@
 
           <!-- CTAs -->
           <div class="flex flex-col sm:flex-row gap-3 justify-center mb-10 sm:mb-14">
+            <a href="{{ '/guide.html' | relative_url }}"
+               class="h-10 px-5 bg-black text-white font-medium text-sm flex items-center justify-center hover:bg-black/80 transition-colors">
+               Read the guide
+            </a>
             <a href="https://github.com/Mellow-Artificial-Intelligence/openextract"
                class="h-10 px-5 bg-white border border-black/10 text-black font-medium text-sm flex items-center justify-center hover:bg-black/5 hover:border-black/20 transition-colors">
                View Source
@@ -345,31 +355,32 @@
       <section id="docs" class="py-16 sm:py-24 border-t border-black/5 scroll-mt-14">
         <div class="max-w-5xl mx-auto px-4 sm:px-6">
           <p class="font-mono text-[11px] text-black/40 uppercase tracking-wider mb-2">Documentation</p>
-          <h2 class="text-2xl sm:text-3xl font-bold text-black/90 mb-8 sm:mb-10">Guides and contracts</h2>
+          <h2 class="text-2xl sm:text-3xl font-bold text-black/90 mb-3">Guides and contracts</h2>
+          <p class="text-sm text-black/50 mb-8 sm:mb-10 max-w-2xl">Start with the guide. Coding agents should use the agent contract or <a href="{{ '/llms.txt' | relative_url }}" class="underline">llms.txt</a>.</p>
           <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/docs/api-reference.md" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
+            <a href="{{ '/guide.html' | relative_url }}" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
+              <h3 class="font-mono text-sm font-medium text-black/90 mb-2">Guide</h3>
+              <p class="text-sm text-black/60 leading-relaxed">Install, inputs, styles, sessions, batch, errors, and CLI — the how-to.</p>
+            </a>
+            <a href="{{ '/agents.html' | relative_url }}" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
+              <h3 class="font-mono text-sm font-medium text-black/90 mb-2">For agents</h3>
+              <p class="text-sm text-black/60 leading-relaxed">Which API to generate, input pitfalls, exceptions, and TestModel fixtures.</p>
+            </a>
+            <a href="{{ '/api-reference.html' | relative_url }}" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
               <h3 class="font-mono text-sm font-medium text-black/90 mb-2">API reference</h3>
               <p class="text-sm text-black/60 leading-relaxed">Public functions, sessions, input/result contracts, and common arguments.</p>
             </a>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/docs/cli.md" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
+            <a href="{{ '/cli.html' | relative_url }}" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
               <h3 class="font-mono text-sm font-medium text-black/90 mb-2">CLI contracts</h3>
               <p class="text-sm text-black/60 leading-relaxed">Stdout, stderr, exit codes, retries, styles, and batch partial failures.</p>
             </a>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/docs/providers.md" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
+            <a href="{{ '/providers.html' | relative_url }}" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
               <h3 class="font-mono text-sm font-medium text-black/90 mb-2">Providers</h3>
               <p class="text-sm text-black/60 leading-relaxed">Capability matrix, extras, credentials, and verified vs expected media support.</p>
             </a>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/docs/troubleshooting.md" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
+            <a href="{{ '/troubleshooting.html' | relative_url }}" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
               <h3 class="font-mono text-sm font-medium text-black/90 mb-2">Troubleshooting</h3>
               <p class="text-sm text-black/60 leading-relaxed">Missing extras, URL fetch, schema failures, retries, and batch API choice.</p>
-            </a>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/README.md" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
-              <h3 class="font-mono text-sm font-medium text-black/90 mb-2">Quick start</h3>
-              <p class="text-sm text-black/60 leading-relaxed">Install, extract, sessions, styles, batch, CLI, and the public API stability table.</p>
-            </a>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md" class="p-5 border border-black/10 bg-white hover:border-black/30 transition-colors">
-              <h3 class="font-mono text-sm font-medium text-black/90 mb-2">Changelog</h3>
-              <p class="text-sm text-black/60 leading-relaxed">Unreleased work on main and the v0.10.0 release notes.</p>
             </a>
           </div>
         </div>
@@ -404,7 +415,7 @@
       <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row justify-between items-center gap-4">
         <span class="font-mono text-xs text-black/40">&copy; 2026 openextract. MIT License.</span>
         <div class="flex gap-6">
-          <a href="#docs" class="font-mono text-xs text-black/40 hover:text-black/60 transition-colors">Docs</a>
+          <a href="{{ '/guide.html' | relative_url }}" class="font-mono text-xs text-black/40 hover:text-black/60 transition-colors">Guide</a>
           <a href="https://github.com/Mellow-Artificial-Intelligence/openextract" class="font-mono text-xs text-black/40 hover:text-black/60 transition-colors">GitHub</a>
           <a href="https://pypi.org/project/openextract/" class="font-mono text-xs text-black/40 hover:text-black/60 transition-colors">PyPI</a>
         </div>

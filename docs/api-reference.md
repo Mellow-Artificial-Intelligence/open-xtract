@@ -9,6 +9,8 @@ This is the canonical reference for the public Python API. CI compares every
 function heading below with the installed callable signature; update this page
 in the same change as any public signature.
 
+How-to: [Guide](guide.md). Integration contract for generated code: [For agents](agents.md).
+
 ## Extraction
 
 ### `Extractor(schema, model=None, instructions=None, *, style='direct', agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`

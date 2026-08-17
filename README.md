@@ -12,13 +12,15 @@
 [![Ruff](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json)](https://github.com/astral-sh/ruff)
 [![Downloads](https://img.shields.io/pypi/dm/openextract.svg?color=blue)](https://pypi.org/project/openextract/)
 
-[Documentation](https://mellow-artificial-intelligence.github.io/openextract/) &middot; [PyPI](https://pypi.org/project/openextract/) &middot; [Changelog](CHANGELOG.md) &middot; [Issues](https://github.com/Mellow-Artificial-Intelligence/openextract/issues)
+[Documentation](https://mellow-artificial-intelligence.github.io/openextract/guide.html) &middot; [For agents](https://mellow-artificial-intelligence.github.io/openextract/agents.html) &middot; [PyPI](https://pypi.org/project/openextract/) &middot; [Changelog](CHANGELOG.md) &middot; [Issues](https://github.com/Mellow-Artificial-Intelligence/openextract/issues)
 
 </div>
 
 ---
 
 `openextract` turns any document, image, audio, or video file into a typed Pydantic model in a single function call. Point it at a local path or a URL, pass a schema, and get back a validated object you can use directly in your code.
+
+The [guide](https://mellow-artificial-intelligence.github.io/openextract/guide.html) is the how-to. Coding agents should start at [For agents](https://mellow-artificial-intelligence.github.io/openextract/agents.html) or [llms.txt](https://mellow-artificial-intelligence.github.io/openextract/llms.txt).
 
 ## Features
 
@@ -481,9 +483,10 @@ All `openextract` exceptions inherit from `ExtractionError`, so you can catch it
 ## API reference
 
 The canonical public API reference lives in
-[docs/api-reference.md](docs/api-reference.md). CI verifies every documented
-function signature against the installed package so signature drift fails the
-build.
+[docs/api-reference.md](docs/api-reference.md) (also on the
+[docs site](https://mellow-artificial-intelligence.github.io/openextract/api-reference.html)).
+CI verifies every documented function signature against the installed package so
+signature drift fails the build.
 
 ## Public API stability
 
