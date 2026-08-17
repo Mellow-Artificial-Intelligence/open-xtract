@@ -9,6 +9,7 @@ from pydantic_ai.models.test import TestModel
 
 from openextract import ExtractionInput, extract_many, iter_extract_many_async
 
+
 class Contact(BaseModel):
     name: str
     email: str
