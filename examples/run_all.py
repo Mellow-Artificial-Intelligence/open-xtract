@@ -32,6 +32,7 @@ NO_API_EXAMPLES: list[str] = [
     "examples.advanced.error_handling",
     "examples.advanced.reusable_sessions",
     "examples.advanced.extraction_styles",
+    "examples.batch.stream_batch_extract",
 ]
 
 

@@ -300,6 +300,35 @@ Each `ExtractionResult` carries `output`, `usage`, `attempts`, `duration`,
 `model`, `media_type`, and a sanitized `source` (never raw media, credentials,
 or query strings). The async sibling is `extract_many_with_results_async`.
 
+### Streaming batch
+
+`extract_many` waits for every item and returns a list in **input order**.
+`iter_extract_many_async` yields `(input_index, result)` in **completion
+order**, so you can start processing before the last item finishes. Inputs are
+consumed lazily and at most `max_concurrency` items are in flight.
+
+```python
+import asyncio
+from openextract import iter_extract_many_async
+
+async def main() -> None:
+    async for index, result in iter_extract_many_async(
+        schema=PdfInfo,
+        model="xai:grok-4.3",
+        input_files=[Path("./reports/q3.pdf"), Path("./reports/q4.pdf")],
+        return_exceptions=True,
+    ):
+        if isinstance(result, Exception):
+            print(f"{index} failed: {result}")
+        else:
+            print(index, result.summary)
+
+asyncio.run(main())
+```
+
+Runnable comparison of input order vs completion order:
+[`examples/batch/stream_batch_extract.py`](examples/batch/stream_batch_extract.py).
+
 ### Choosing a model
 
 `model` follows the `pydantic-ai` provider prefix convention:
@@ -405,7 +434,7 @@ Troubleshooting: [docs/troubleshooting.md](docs/troubleshooting.md).
 
 ## Examples
 
-Runnable scripts live in [`examples/`](examples/), grouped by use case (local files, bytes, URLs, images, batch, async, retries, CLI, and more). See [examples/README.md](examples/README.md) for the full table.
+Runnable scripts live in [`examples/`](examples/), grouped by use case (local files, bytes, URLs, images, batch, streaming batch, async, retries, CLI, and more). See [examples/README.md](examples/README.md) for the full table.
 
 ```bash
 # Run all fixture-based examples (uses OpenAI, Anthropic, and xAI — see examples/README.md)
@@ -459,9 +488,10 @@ build.
 ## Public API stability
 
 `openextract.__all__` is the public Python API surface. Modules and helpers whose
-names start with `_`, including `openextract._extract` and `openextract._cli`, are
-internal implementation details. The CLI command is also user-facing and follows
-the compatibility notes below even though it is not exported from `__all__`.
+names start with `_`, including `openextract._extract`, `openextract._batch`,
+`openextract._session`, and `openextract._cli`, are internal implementation
+details. The CLI command is also user-facing and follows the compatibility notes
+below even though it is not exported from `__all__`.
 
 | API | Status for 1.0 | Notes |
 | --- | --- | --- |

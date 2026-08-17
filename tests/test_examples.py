@@ -26,6 +26,7 @@ ALL_MODULES = [
     "examples.images.receipt_extraction",
     "examples.documents.invoice_extraction",
     "examples.batch.batch_extract",
+    "examples.batch.stream_batch_extract",
     "examples.async.async_extract",
     "examples.advanced.extract_with_usage",
     "examples.advanced.retry_extract",
@@ -91,6 +92,16 @@ def test_extraction_styles_example() -> None:
     result = _run("examples.advanced.extraction_styles")
     assert result.returncode == 0, result.stderr
     assert "Q4 notes" in result.stdout
+
+
+def test_stream_batch_extract_example() -> None:
+    result = _run("examples.batch.stream_batch_extract")
+    assert result.returncode == 0, result.stderr
+    assert "extract_many" in result.stdout
+    assert "iter_extract_many_async" in result.stdout
+    assert "ada@example.com" in result.stdout
+    assert "TypeError" in result.stdout
+    assert "broken.bin" in result.stdout
 
 
 @pytest.mark.integration

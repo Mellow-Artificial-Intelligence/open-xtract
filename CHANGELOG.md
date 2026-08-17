@@ -40,6 +40,8 @@ timing when that is known.
   and source-distribution install smoke tests.
 - `iter_extract_many_async()` streams `(input_index, result)` pairs in
   completion order without waiting for the full batch.
+- Streaming-batch example and docs comparing `iter_extract_many_async`
+  (completion order) with `extract_many` (input order).
 
 ### Changed
 - Split the internal extraction implementation into focused modules (`_types`,
