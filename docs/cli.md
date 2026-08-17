@@ -156,5 +156,8 @@ exit `6` (`ProviderNotInstalledError`). Non-text inputs raise `ValueError`
 
 ## Related docs
 
+- [Guide](guide.md)
+- [For agents](agents.md)
 - [Troubleshooting](troubleshooting.md)
+- [API reference](api-reference.md)
 - [URL security model](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/SECURITY.md#url-input-security-model)

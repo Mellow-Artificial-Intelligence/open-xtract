@@ -9,6 +9,8 @@ This is the canonical reference for the public Python API. CI compares every
 function heading below with the installed callable signature; update this page
 in the same change as any public signature.
 
+How-to: [Guide](guide.md). Integration contract for generated code: [For agents](agents.md).
+
 ## Extraction
 
 ### `Extractor(schema, model=None, instructions=None, *, style='direct', agent=None, model_settings=None, timeout=None, instrument=False, retry_policy=None, max_input_bytes=None, url_timeout=None)`
@@ -40,6 +42,14 @@ manually with `aclose()` only when a context manager is impractical.
 Frozen session retry configuration. Only transient `ModelError` failures are
 retried. The backoff and bounded provider `Retry-After` behavior match the
 one-shot function arguments.
+
+### ExtractionStyle
+
+`direct` (default) sends resolved media to the model in one shot. `search` and
+`code` are text-only agentic styles powered by
+[Pydantic AI Harness](https://pydantic.dev/docs/ai/harness/). Pass the enum
+(`ExtractionStyle.SEARCH`) or the string (`"search"`). Non-text inputs and a
+missing harness extra fail before the model call.
 
 ### `extract(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
@@ -73,14 +83,33 @@ and per-item retry behavior.
 
 ### `iter_extract_many_async(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
-Return an async iterator of `(input_index, result)` pairs in completion order.
-Inputs are consumed lazily, at most `max_concurrency` items are scheduled, and
-results are available before the complete batch finishes. Simultaneous
-completions are yielded in input-index order.
+Return an async iterator of `(input_index, result)` pairs in **completion
+order**. Inputs are consumed lazily, at most `max_concurrency` items are
+scheduled, and results are available before the complete batch finishes.
+Simultaneous completions are yielded in input-index order.
+
+This is the streaming counterpart to `extract_many_async`, which waits for every
+item and returns a list in **input order**. Keep the original `input_files`
+sequence (or a name on `ExtractionInput`) if you need to map `input_index` back
+to a path.
 
 With `return_exceptions=False`, the first failure cancels and awaits outstanding
 work before being raised. With `return_exceptions=True`, item exceptions are
 yielded in the result position and streaming continues.
+
+```python
+async for index, result in iter_extract_many_async(
+    schema=PdfInfo,
+    model="openai:gpt-5",
+    input_files=paths,
+    return_exceptions=True,
+    max_concurrency=5,
+):
+    if isinstance(result, Exception):
+        print(f"{index} failed: {result}")
+    else:
+        print(index, result.summary)
+```
 
 ### `extract_many_with_results(schema, model, input_files, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_concurrency=5, return_exceptions=False, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
@@ -102,6 +131,19 @@ result ordering, and per-item retry behavior.
 Sum token usage across batch extraction results, for example the list returned
 by `extract_many_with_results` or `extract_many_with_results_async`. Returns a
 single [`Usage`](#usage) whose fields are the totals of the successful items.
+
+## Choosing a batch API
+
+| API | Returns | Order | When to use |
+| --- | --- | --- | --- |
+| `extract_many` / `extract_many_async` | `list[T]` (or exceptions in place) | Input order | You want the full batch before continuing. |
+| `iter_extract_many_async` | `(input_index, result)` as items finish | Completion order | Large or generator inputs; start work before the last item completes. |
+| `extract_many_with_results` / `_async` | `list[ExtractionResult[T]]` | Input order | Per-item usage, attempts, duration, and sanitized source labels. |
+
+`extract_many` and `extract_many_with_results` raise `RuntimeError` from a
+running event loop; use the `_async` siblings or the iterator instead. See
+[`examples/batch/stream_batch_extract.py`](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/examples/batch/stream_batch_extract.py)
+for a side-by-side run.
 
 ## Input and result contracts
 

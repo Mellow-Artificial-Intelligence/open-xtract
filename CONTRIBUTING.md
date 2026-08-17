@@ -113,6 +113,14 @@ OPENEXTRACT_LIVE_SMOKE=1 uv run pytest -m integration tests/test_live_smoke.py -
 
 See [docs/live-smoke.md](docs/live-smoke.md).
 
+## Documentation site
+
+Markdown under `docs/` is built with Jekyll and deployed by
+[`.github/workflows/deploy-docs.yml`](.github/workflows/deploy-docs.yml).
+User/agent how-tos are `docs/guide.md` and `docs/agents.md`. `docs/llms.txt`
+is copied through as a static file for coding agents. The landing page is
+`docs/index.html`. Do not add `docs/.nojekyll`; the workflow uploads `_site`.
+
 ## Release checklist (maintainers)
 
 Use this before cutting a release (a version bump on `main` publishes only after

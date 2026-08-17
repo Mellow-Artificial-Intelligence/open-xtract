@@ -169,6 +169,21 @@ Confirm the module imports cleanly: `python -c "import examples.cli.schemas"`.
 Inspect per-item `error` / `error_type` entries. Fix the failing inputs, or omit
 `--continue-on-error` / `return_exceptions` to fail fast on the first error.
 
+## Choosing a batch API
+
+- `extract_many` / `extract_many_async` wait for the full batch and return
+  results in **input order**.
+- `iter_extract_many_async` yields `(input_index, result)` in **completion
+  order**, consumes generators lazily, and never schedules more than
+  `max_concurrency` items. Use it when you want to start processing before the
+  last item finishes.
+- `extract_many_with_results*` keep input order and add per-item usage,
+  attempts, duration, and a sanitized source label.
+
+Default fail-fast cancels outstanding work after the first error.
+`return_exceptions=True` puts per-item exceptions in the result position and
+continues. See [API reference](api-reference.md#choosing-a-batch-api).
+
 ## Sync batch inside an async event loop
 
 **Symptoms**
@@ -185,6 +200,8 @@ results = await extract_many_async(schema=..., model=..., input_files=...)
 
 ## Related
 
+- [Guide](guide.md)
+- [For agents](agents.md)
 - [CLI contracts](cli.md)
 - [Provider matrix](providers.md)
 - [README error handling](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/README.md#error-handling)

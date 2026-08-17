@@ -1,0 +1,45 @@
+# openextract
+
+> Extract structured Pydantic models from documents, images, audio, and video using LLMs.
+
+Python 3.12+. Install `openextract` plus a provider extra (`openextract[openai]`, `openextract[anthropic]`, `openextract[xai]`, or `openextract[all]`). The library does not load `.env` files; the CLI and examples do. Public API is `openextract.__all__`. Do not import `openextract._*` modules.
+
+Site: https://mellow-artificial-intelligence.github.io/openextract/
+Repo: https://github.com/Mellow-Artificial-Intelligence/openextract
+
+## Docs
+
+- [Guide](https://mellow-artificial-intelligence.github.io/openextract/guide.html): install, inputs, styles, sessions, batch, errors, CLI
+- [For agents](https://mellow-artificial-intelligence.github.io/openextract/agents.html): which API to generate, do-nots, TestModel
+- [API reference](https://mellow-artificial-intelligence.github.io/openextract/api-reference.html): CI-checked public signatures
+- [CLI contracts](https://mellow-artificial-intelligence.github.io/openextract/cli.html): stdout/stderr/exit codes
+- [Providers](https://mellow-artificial-intelligence.github.io/openextract/providers.html): extras, credentials, media matrix
+- [Troubleshooting](https://mellow-artificial-intelligence.github.io/openextract/troubleshooting.html): extras, URLs, retries, batch choice
+
+## Contract
+
+```python
+from pydantic import BaseModel
+from openextract import extract
+
+class Info(BaseModel):
+    summary: str
+
+extract(schema=Info, model="openai:gpt-5", input_file="doc.pdf")
+```
+
+Inputs: `str` path/URL, `pathlib.Path`, `bytes` or file-like (**`media_type` required**), or `ExtractionInput`. Default cap 50 MiB → `InputTooLargeError`.
+
+One-shot: `extract`, `extract_async`, `extract_with_usage`, `extract_with_usage_async`.
+Sessions: `Extractor`, `AsyncExtractor`, `RetryPolicy` (context managers; not thread-safe / one event loop).
+Batch (provisional): `extract_many` input order (not from a running loop); `iter_extract_many_async` completion-order `(index, result)`; `extract_many_with_results*` + `total_usage`.
+Styles: `direct` (default, any media); `search`/`code` text-only + `pydantic-ai-harness`.
+OpenAI: `openai:` → Responses API; `openai-chat:` for Chat Completions.
+
+Exceptions (all subclass `ExtractionError`): `UrlFetchError`, `InputTooLargeError`, `SchemaValidationError`, `ModelError` (`.retryable`, `.status_code`, `.provider`, `.retry_after`), `ProviderNotInstalledError`. Invalid retry/concurrency options raise `ValueError`.
+
+CLI: `openextract INPUT --schema mod:Class --model openai:gpt-5`. Exit 0 success; 1 usage; 2–6 mapped errors; 7 partial batch. Parse stdout only.
+
+Retries: `max_retries` default 0; only transient `ModelError`. Media is resolved once and reused.
+
+Tests without keys: `pydantic_ai.models.test.TestModel`.
