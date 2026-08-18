@@ -9,6 +9,15 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Importable extract agents: `define_agent` / `define_remote_agent` package a
+  model, style, instructions, and `output_schema` behind a description, and
+  `subagents` compose them. `load_agent` / `load_agents` /
+  `load_agent_directory` load them from a directory (`agent.py`,
+  `subagents/`, `instructions.md`), a Python file, or `module:attribute`.
+  Agents are accepted anywhere a swarm takes `agents`.
+- Remote agents over HTTP with `RemoteAgentError` (retried on transient
+  statuses and transport failures) and per-request auth providers in
+  `openextract.auth`: `bearer`, `basic`, and `vercel_oidc`.
 - Swarms: `extract_swarm` / `extract_swarm_async` run several agents over one
   input and return the reduced result, and
   `extract_swarm_with_results*` additionally report each agent's

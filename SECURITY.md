@@ -72,6 +72,17 @@ configuration cannot silently disable the cap.
 `OPENEXTRACT_ALLOW_PRIVATE_URLS` is intended for trusted environments (local
 tests, on-prem services). Enabling it removes the private-host guardrail.
 
+### Remote extraction agents
+
+`define_remote_agent(url=...)` posts document bytes to an HTTP endpoint. The
+resolved URL goes through the same scheme check and host validation as document
+URLs, including on every call when `url` is a callable, so a rotating URL
+provider cannot redirect extraction traffic at a private or metadata address. A
+local agent server therefore needs `OPENEXTRACT_ALLOW_PRIVATE_URLS=1`.
+
+Auth headers from `openextract.auth` are resolved per request and sent only to
+that resolved URL. Redirects are not followed for agent requests.
+
 ### What is protected / not guaranteed
 
 **Protected (best effort):**
@@ -87,6 +98,7 @@ tests, on-prem services). Enabling it removes the private-host guardrail.
 - DNS rebinding (a hostname resolving to different IPs across lookups)
 - Safety of the model provider after bytes are fetched
 - Non-HTTP SSRF channels outside this fetcher
+- Trustworthiness of a remote agent endpoint you configured, or of the data it returns beyond schema validation
 
 If you need a one-off internal fetch without disabling validation globally,
 download the bytes with your own HTTP client and pass them to `extract()` as

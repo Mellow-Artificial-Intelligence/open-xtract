@@ -7,11 +7,13 @@ from pydantic import BaseModel
 from pydantic_ai.models.test import TestModel
 
 from openextract import (
+    DefinedAgent,
     ExtractionInput,
     ExtractionResult,
     ModelError,
     SwarmMember,
     SwarmReduce,
+    define_agent,
     extract_swarm,
     extract_swarm_async,
     extract_swarm_with_results,
@@ -101,6 +103,22 @@ class TestResolveSwarmMembers:
     def test_empty_list_is_rejected(self):
         with pytest.raises(ValueError, match="at least one model"):
             resolve_swarm_members([])
+
+    def test_an_agent_that_contributes_no_model_is_rejected(self):
+        empty = DefinedAgent(description="group with nothing in it")
+        with pytest.raises(ValueError, match="at least one model"):
+            resolve_swarm_members(empty)
+
+    def test_defined_agents_are_flattened_into_members(self):
+        agent = define_agent(
+            "Invoices",
+            model="test:a",
+            subagents=[define_agent("Totals", model="test:b")],
+        )
+        assert [member.model for member in resolve_swarm_members(agent)] == [
+            "test:a",
+            "test:b",
+        ]
 
     def test_size_may_not_contradict_an_agent_list(self):
         with pytest.raises(ValueError, match="size cannot be combined"):

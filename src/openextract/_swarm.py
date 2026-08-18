@@ -17,6 +17,7 @@ from ._agent import (
     _run_extraction_async,
     _usage_from_result,
 )
+from ._agents import AgentInput, DefinedAgent, RemoteAgent, SwarmMember, flatten_agent
 from ._batch import _require_no_running_loop
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
@@ -29,6 +30,7 @@ from ._config import (
 from ._errors import _extraction_errors
 from ._media import _get_media_async, _item_source_label
 from ._reduce import SwarmReduce, normalize_reduce, reduce_outputs
+from ._remote import run_remote_extraction
 from ._retry import _run_with_retries_async
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
 from ._types import (
@@ -41,31 +43,13 @@ from ._types import (
 )
 
 if TYPE_CHECKING:
-    from pydantic_ai.models import Model
+    pass
 
 _DEFAULT_SWARM_CONCURRENCY = 5
 
 
-@dataclass(frozen=True)
-class SwarmMember:
-    """One agent in a swarm: a model plus optional per-agent overrides.
-
-    ``instructions`` and ``style`` win over the swarm-wide values, so a single
-    swarm can pair a ``search`` reader with a ``direct`` reader over the same
-    document.
-    """
-
-    model: str | Model
-    instructions: str | None = None
-    style: ExtractionStyle | str | None = None
-
-
-# A swarm agent: a model identifier, a configured pydantic-ai ``Model``, or a
-# :class:`SwarmMember` carrying per-agent overrides.
-type SwarmAgentInput = str | Model | SwarmMember
-
 # One agent or a list of them, as accepted by the ``agents`` argument.
-type SwarmAgents = SwarmAgentInput | Sequence[SwarmAgentInput]
+type SwarmAgents = AgentInput | Sequence[AgentInput]
 
 
 @dataclass(frozen=True)
@@ -93,7 +77,9 @@ def resolve_swarm_members(
     """Expand the ``agents`` argument into one :class:`SwarmMember` per agent.
 
     A single agent plus ``size`` fans that agent out ``size`` times. A list of
-    agents is used as-is, and ``size`` may not contradict its length.
+    agents is used as-is, and ``size`` may not contradict its length. Defined
+    agents are flattened first, so a parent with subagents contributes one
+    member per leaf.
 
     Raises:
         ValueError: If ``agents`` is empty, ``size`` is outside 1..16, or
@@ -102,7 +88,9 @@ def resolve_swarm_members(
     raw = _as_agent_list(agents)
     if not raw:
         raise ValueError("agents must include at least one model.")
-    members = [item if isinstance(item, SwarmMember) else SwarmMember(item) for item in raw]
+    members = [member for item in raw for member in flatten_agent(item)]
+    if not members:
+        raise ValueError("agents must include at least one model.")
     if len(members) == 1:
         return [members[0]] * _validate_swarm_size(1 if size is None else size)
     if size is not None and size != len(members):
@@ -114,11 +102,13 @@ def resolve_swarm_members(
     return members
 
 
-def _as_agent_list(agents: SwarmAgents) -> list[SwarmAgentInput]:
+def _as_agent_list(agents: SwarmAgents) -> list[AgentInput]:
     """Accept one agent or a sequence of agents without splitting a model id."""
-    if isinstance(agents, str | SwarmMember) or not isinstance(agents, Sequence):
-        return [cast(SwarmAgentInput, agents)]
-    return [cast(SwarmAgentInput, agent) for agent in agents]
+    if isinstance(agents, str | SwarmMember | DefinedAgent | RemoteAgent) or not isinstance(
+        agents, Sequence
+    ):
+        return [cast(AgentInput, agents)]
+    return [cast(AgentInput, agent) for agent in agents]
 
 
 def _agent_instructions(base: str | None, index: int, total: int) -> str | None:
@@ -130,6 +120,11 @@ def _agent_instructions(base: str | None, index: int, total: int) -> str | None:
         "Prefer recall: extract every matching record you can justify from the source."
     )
     return f"{base.strip()}\n\n{role}" if base and base.strip() else role
+
+
+def _remote_label(agent: RemoteAgent) -> str:
+    """Identify a remote agent in results without resolving a lazy URL."""
+    return agent.url if isinstance(agent.url, str) else agent.description
 
 
 async def _run_member(
@@ -155,6 +150,28 @@ async def _run_member(
     member_instructions = _agent_instructions(
         instructions if member.instructions is None else member.instructions, index, total
     )
+    if isinstance(member.model, RemoteAgent):
+        output, usage, attempts = await run_remote_extraction(
+            schema,
+            member.model,
+            file_bytes,
+            file_type,
+            instructions=member_instructions,
+            style=member_style,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+        )
+        return ExtractionResult(
+            output=output,
+            usage=usage,
+            attempts=attempts,
+            duration=time.perf_counter() - started,
+            model=_remote_label(member.model),
+            media_type=media_type,
+            source=source_label,
+            warnings=(),
+        )
     with prepared_style_run(member_style, file_bytes, file_type) as (capabilities, style_inputs):
         with _extraction_errors():
             agent = _build_agent(

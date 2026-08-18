@@ -335,6 +335,41 @@ print(swarm.output, swarm.usage, swarm.reduce)
 per field), or `first`. Agents that fail are reported in `swarm.agents`; only
 an all-agent failure raises. `size=N` fans one agent out up to 16 ways.
 
+### Agents
+
+`define_agent` packages a model, style, instructions, and output schema behind
+a description, and `subagents` compose several into one. An agent is accepted
+anywhere a swarm takes `agents`:
+
+```python
+from openextract import define_agent, extract_swarm
+
+line_items = define_agent("Line items", model="openai:gpt-5.5", instructions="Rows only.")
+totals = define_agent("Totals", model="openai:gpt-5.5", instructions="Totals and dates.")
+invoices = define_agent("Invoices", output_schema=Invoice, subagents=[line_items, totals])
+
+invoice = extract_swarm(schema=Invoice, agents=invoices, input_file="invoice.pdf")
+```
+
+Agents also load from disk or an import path, so a repository can ship them
+next to the code — `load_agent("agents/invoices")` reads `agent.py`,
+`subagents/`, and `instructions.md`; `load_agent("my_pkg.agents:invoices")`
+imports one.
+
+`define_remote_agent` points at an HTTP extraction service instead of a local
+model, with per-request auth from `openextract.auth`:
+
+```python
+from openextract import define_remote_agent
+from openextract.auth import bearer
+
+remote = define_remote_agent(
+    url="https://agents.example.com",
+    description="Hosted invoice reader",
+    auth=bearer(lambda: os.environ["AGENT_TOKEN"]),
+)
+```
+
 ### Streaming batch
 
 `extract_many` waits for every item and returns a list in **input order**.

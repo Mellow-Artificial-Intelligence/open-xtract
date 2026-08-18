@@ -145,7 +145,8 @@ document that one model handles well does not need one.
 
 ### `SwarmMember`
 
-`SwarmMember(model, instructions=None, style=None)` is one agent. Its
+`SwarmMember(model, instructions=None, style=None)` is one agent, where `model`
+is a model identifier, a configured pydantic-ai `Model`, or a `RemoteAgent`. Its
 `instructions` and `style` override the swarm-wide values, so a `search` reader
 and a `direct` reader can share the same swarm. A bare model identifier or a
 configured pydantic-ai `Model` is accepted anywhere a `SwarmMember` is.
@@ -161,7 +162,8 @@ exception it raised in agent order, `usage` sums the successful agents, and
 
 Expand the `agents` argument into one `SwarmMember` per agent. A single agent
 plus `size` fans it out `size` times (1..16); a list is used as-is and `size`
-may not contradict its length.
+may not contradict its length. [Defined agents](#agents) are flattened first,
+so a parent with subagents contributes one member per leaf.
 
 ### `extract_swarm(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
@@ -183,6 +185,93 @@ and finish.
 ### `extract_swarm_with_results_async(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, on_agent_start=None, on_agent=None)`
 
 Async counterpart to `extract_swarm_with_results`.
+
+## Agents
+
+An agent packages what a swarm member would otherwise repeat at every call
+site — model, style, instructions, and output schema — so a caller imports a
+specialist instead of re-specifying it. Agents compose: a parent with
+`subagents` flattens into one swarm member per leaf, so an agent is accepted
+anywhere `agents` is.
+
+### `define_agent(description, *, model=None, style=None, instructions=None, output_schema=None, subagents=())`
+
+Define a local agent. `description` is required. `model` is optional only when
+`subagents` is non-empty (a pure group). `output_schema` must be a
+`pydantic.BaseModel` subclass. Returns a frozen `DefinedAgent`.
+
+### `define_remote_agent(url, description, *, auth=None, headers=None, path='/extract', output_schema=None)`
+
+Define an agent served over HTTP. Returns a frozen `RemoteAgent`. `url` may be
+a callable (sync or async) so a rotating deployment URL is resolved per
+request; `headers` and `auth` likewise. See [Remote agent
+protocol](#remote-agent-protocol).
+
+### `flatten_agent(agent)`
+
+Expand one agent into the `SwarmMember` list it contributes: its own model
+first (when it has one), then each subagent's members, depth first.
+
+### `resolve_output_schema(agent)`
+
+Return the agent's `output_schema`, or raise `ValueError` naming the agent when
+it declared none.
+
+### `load_agent(spec)`
+
+Load one agent from a directory, a Python file, or a `module:attribute` path. A
+`DefinedAgent` / `RemoteAgent` passes through unchanged. A file or module must
+expose the agent as a module-level name (`agent` for files, the named attribute
+for `module:attribute`).
+
+### `load_agents(spec)`
+
+Load several agents from a comma-separated string or a sequence of specs.
+
+### `load_agent_directory(directory)`
+
+Load an agent from a directory laid out as:
+
+```text
+invoices/
+  agent.py          # defines `agent = define_agent(...)`
+  instructions.md   # used when the agent declared no instructions
+  subagents/
+    line_items.py   # each defines `agent = ...`
+    totals/         # nested directories load recursively
+```
+
+Entries beginning with `.` or `_` are skipped and subagents load in sorted
+order. A directory with subagents but no `agent.py` becomes a group agent named
+after the directory; a directory with exactly one subagent resolves to it.
+
+### Remote agent protocol
+
+`RemoteAgent` posts to `url + path` with
+`{"schema": <JSON Schema>, "input": {"data": <base64>, "mediaType": <MIME>}, "instructions": ..., "style": ...}`
+and reads `{"output": ..., "usage": {...}}` — a bare object is treated as the
+output, and `{"error": "..."}` (at any status) raises `RemoteAgentError`.
+`usage` is accepted in either `inputTokens` or `input_tokens` spelling. HTTP
+408/409/425/429/5xx and transport failures are retryable and honour
+`max_retries`.
+
+The agent URL goes through the same SSRF host allowlist as document URLs, so a
+local agent server needs `OPENEXTRACT_ALLOW_PRIVATE_URLS=1`.
+
+### `openextract.auth`
+
+Outbound auth header providers for `define_remote_agent(auth=...)`. Each is
+resolved per request, so a refreshed credential is picked up without redefining
+the agent.
+
+| Helper | Header |
+| --- | --- |
+| `bearer(token)` | `Authorization: Bearer <token>` |
+| `basic((username, password))` | `Authorization: Basic <base64>` |
+| `vercel_oidc()` | Bearer token read from `VERCEL_OIDC_TOKEN` |
+
+`bearer` and `basic` accept the value itself or a callable (sync or async)
+returning it.
 
 ## Swarm reduce
 

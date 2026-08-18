@@ -14,6 +14,8 @@ Import only names in `openextract.__all__`. Modules whose names start with `_` (
 
 Swarm surface (provisional): `extract_swarm*`, `SwarmMember`, `SwarmResult`, `SwarmReduce`, `reduce_outputs`, `resolve_swarm_members`.
 
+Agent surface (provisional): `define_agent`, `define_remote_agent`, `DefinedAgent`, `RemoteAgent`, `flatten_agent`, `resolve_output_schema`, `load_agent`, `load_agents`, `load_agent_directory`, `RemoteAgentError`, and the `openextract.auth` helpers.
+
 Stable enough to generate against: `extract`, `extract_async`, `extract_with_usage`, `extract_with_usage_async`, `Usage`, and the exception types. Provisional (still public, may evolve before 1.0): sessions, batch helpers, `ExtractionInput` / `ExtractionResult`, `ExtractionStyle`, CLI flags.
 
 Canonical signatures: [API reference](api-reference.md). CI fails if those headings drift from the installed callables.
@@ -46,6 +48,9 @@ Always define a real `pydantic.BaseModel` subclass. Do not ask the library for f
 | Many inputs, stream as done | `iter_extract_many_async` — yields `(input_index, result)` in **completion order** |
 | Per-item usage / timing | `extract_many_with_results*` + `total_usage` |
 | Several agents on **one** input | `extract_swarm` / `extract_swarm_async` |
+| A reusable specialist (model + style + instructions + schema) | `define_agent`, passed as `agents` |
+| An extraction service over HTTP | `define_remote_agent` + `openextract.auth` |
+| Agents shipped in a repository | `load_agent` / `load_agents` (directory, file, `module:attribute`) |
 | Per-agent usage / failures from a swarm | `extract_swarm_with_results*` → `SwarmResult` |
 | Shell / CI | `openextract` CLI; parse **stdout** only |
 
@@ -71,6 +76,7 @@ Catch `ExtractionError` as the fallback. Prefer the specific subclass:
 - `SchemaValidationError` — output mismatch (tighten `instructions` / schema; this is not retried)
 - `ModelError` — inspect `.retryable` before retrying yourself; the library already retries when `max_retries > 0`
 - `ProviderNotInstalledError` — print the exception; it includes the install command
+- `RemoteAgentError` — a remote agent endpoint failed; inspect `.status_code` and `.retryable`
 
 Do not catch `Exception` and retry. Do not retry `SchemaValidationError` unless the user asked for it.
 
