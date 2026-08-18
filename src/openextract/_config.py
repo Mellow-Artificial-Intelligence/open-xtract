@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 
 _DEFAULT_URL_FETCH_TIMEOUT = 30.0
 _DEFAULT_MAX_REDIRECTS = 10
@@ -15,25 +16,13 @@ _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
 _MAX_INPUT_BYTES_ENV = "OPENEXTRACT_MAX_INPUT_BYTES"
 
 
-def _env_positive_float(name: str, default: float) -> float:
-    """Parse a positive float from ``name``; return ``default`` when unset or invalid."""
+def _env_positive[N: (int, float)](name: str, default: N, parse: Callable[[str], N]) -> N:
+    """Parse a positive number from ``name``; return ``default`` when unset or invalid."""
     raw = os.environ.get(name, "").strip()
     if not raw:
         return default
     try:
-        value = float(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-def _env_positive_int(name: str, default: int) -> int:
-    """Parse a positive int from ``name``; return ``default`` when unset or invalid."""
-    raw = os.environ.get(name, "").strip()
-    if not raw:
-        return default
-    try:
-        value = int(raw)
+        value = parse(raw)
     except ValueError:
         return default
     return value if value > 0 else default
@@ -46,12 +35,26 @@ def _allow_private_urls() -> bool:
 
 def _url_fetch_timeout() -> float:
     """HTTP timeout in seconds for URL fetches (``OPENEXTRACT_URL_TIMEOUT``)."""
-    return _env_positive_float(_URL_TIMEOUT_ENV, _DEFAULT_URL_FETCH_TIMEOUT)
+    return _env_positive(_URL_TIMEOUT_ENV, _DEFAULT_URL_FETCH_TIMEOUT, float)
 
 
 def _max_redirects() -> int:
     """Maximum redirect hops when fetching URLs (``OPENEXTRACT_MAX_REDIRECTS``)."""
-    return _env_positive_int(_MAX_REDIRECTS_ENV, _DEFAULT_MAX_REDIRECTS)
+    return _env_positive(_MAX_REDIRECTS_ENV, _DEFAULT_MAX_REDIRECTS, int)
+
+
+def _positive_int(value: object) -> int | None:
+    """Return ``value`` when it is a real ``int`` (not ``bool``) of at least 1."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return None
+    return value
+
+
+def _finite_number(value: object) -> float | None:
+    """Return ``value`` as a float when it is a real finite number (not ``bool``)."""
+    if isinstance(value, bool) or not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    return float(value)
 
 
 def _resolve_max_input_bytes(max_input_bytes: object) -> int:
@@ -71,11 +74,19 @@ def _resolve_max_input_bytes(max_input_bytes: object) -> int:
             value = int(raw)
         except ValueError as exc:
             raise ValueError(f"{_MAX_INPUT_BYTES_ENV} must be a positive integer.") from exc
-    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+    limit = _positive_int(value)
+    if limit is None:
         if from_environment:
             raise ValueError(f"{_MAX_INPUT_BYTES_ENV} must be a positive integer.")
         raise ValueError("max_input_bytes must be a positive integer.")
-    return value
+    return limit
+
+
+def _validate_non_negative_seconds(value: object, *, name: str) -> None:
+    """Reject anything that is not a finite number of seconds at or above zero."""
+    seconds = _finite_number(value)
+    if seconds is None or seconds < 0:
+        raise ValueError(f"{name} must be a finite non-negative number of seconds.")
 
 
 def _validate_retry_options(
@@ -85,37 +96,18 @@ def _validate_retry_options(
 ) -> None:
     if isinstance(max_retries, bool) or not isinstance(max_retries, int) or max_retries < 0:
         raise ValueError("max_retries must be a non-negative integer.")
-    if (
-        isinstance(retry_backoff, bool)
-        or not isinstance(retry_backoff, int | float)
-        or not math.isfinite(retry_backoff)
-        or retry_backoff < 0
-    ):
-        raise ValueError("retry_backoff must be a finite non-negative number of seconds.")
-    if (
-        isinstance(retry_max_backoff, bool)
-        or not isinstance(retry_max_backoff, int | float)
-        or not math.isfinite(retry_max_backoff)
-        or retry_max_backoff < 0
-    ):
-        raise ValueError("retry_max_backoff must be a finite non-negative number of seconds.")
+    _validate_non_negative_seconds(retry_backoff, name="retry_backoff")
+    _validate_non_negative_seconds(retry_max_backoff, name="retry_max_backoff")
 
 
 def _validate_max_concurrency(max_concurrency: object) -> None:
-    if (
-        isinstance(max_concurrency, bool)
-        or not isinstance(max_concurrency, int)
-        or max_concurrency < 1
-    ):
+    if _positive_int(max_concurrency) is None:
         raise ValueError("max_concurrency must be a positive integer.")
 
 
 def _validate_timeout(value: object, *, name: str) -> float:
-    if (
-        isinstance(value, bool)
-        or not isinstance(value, int | float)
-        or not math.isfinite(value)
-        or value <= 0
-    ):
+    """Return ``value`` as a float, rejecting anything but a finite positive number."""
+    seconds = _finite_number(value)
+    if seconds is None or seconds <= 0:
         raise ValueError(f"{name} must be a finite positive number of seconds.")
-    return float(value)
+    return seconds

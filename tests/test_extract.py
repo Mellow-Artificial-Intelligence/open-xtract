@@ -20,7 +20,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 from pydantic_ai import BinaryContent
 
-import openextract._extract as extract_module
+import openextract._agent as agent_module
 from openextract import (
     ExtractionError,
     ExtractionInput,
@@ -42,32 +42,33 @@ from openextract import (
     iter_extract_many_async,
     total_usage,
 )
-from openextract._extract import (
-    _fetch_url,
-    _fetch_url_async,
-    _get_media,
-    _get_media_async,
-    _get_media_type,
-    _install_hint,
-    _is_public_ip,
-    _is_safe_host,
-    _is_transient_model_exception,
-    _item_source_label,
-    _map_exception,
+from openextract._agent import _install_hint, _model_identifier
+from openextract._batch import _run_with_shared_agent, _run_with_shared_agent_result
+from openextract._config import (
     _max_redirects,
-    _model_identifier,
+    _resolve_max_input_bytes,
+    _url_fetch_timeout,
+)
+from openextract._errors import (
+    _is_transient_model_exception,
+    _map_exception,
     _model_retry_after,
     _model_status_code,
     _parse_retry_after,
-    _read_from_path,
-    _resolve_item,
-    _resolve_max_input_bytes,
-    _retry_delay,
-    _run_with_shared_agent,
-    _run_with_shared_agent_result,
-    _safe_source_context,
-    _url_fetch_timeout,
 )
+from openextract._media import (
+    _get_media,
+    _get_media_async,
+    _get_media_type,
+    _is_public_ip,
+    _is_safe_host,
+    _item_source_label,
+    _read_from_path,
+    _read_url_with_client_async,
+    _safe_source_context,
+)
+from openextract._retry import _retry_delay
+from openextract._types import _resolve_item
 
 
 def _build_response(
@@ -223,7 +224,7 @@ class TestGetMedia:
         client.build_request.assert_called_once_with("GET", "https://example.com/page.html")
         client.send.assert_called_once_with(client.build_request.return_value, stream=True)
         # follow_redirects is disabled at the httpx layer; redirects are followed
-        # manually in _fetch_url so the SSRF host check runs at every hop.
+        # manually by the URL reader so the SSRF host check runs at every hop.
         assert media_bytes == b"<html>remote</html>"
         assert media_type == "text/html"
 
@@ -510,14 +511,16 @@ class TestIsSafeHost:
         assert _is_safe_host("weird.example.com") is False
 
 
-class TestFetchUrl:
+class TestUrlRedirectHandling:
+    """The URL reader follows redirects manually so SSRF checks run at every hop."""
+
     def test_refuses_private_host(self):
         with pytest.raises(UrlFetchError, match="non-public host"):
-            _fetch_url("http://127.0.0.1/secret")
+            _get_media("http://127.0.0.1/secret")
 
     def test_refuses_aws_metadata_url(self):
         with pytest.raises(UrlFetchError, match="non-public host"):
-            _fetch_url("http://169.254.169.254/latest/meta-data/")
+            _get_media("http://169.254.169.254/latest/meta-data/")
 
     def test_follows_safe_redirect(self, mocker):
         redirect = _build_response(
@@ -526,10 +529,11 @@ class TestFetchUrl:
         final = _build_response(content=b"ok", content_type="text/html")
         _, client = _mock_sync_http_client(mocker, side_effect=[redirect, final])
 
-        response = _fetch_url("https://1.1.1.1/start")
+        media_bytes, media_type = _get_media("https://1.1.1.1/start")
 
-        assert response is final
-        assert client.get.call_count == 2
+        assert media_bytes == b"ok"
+        assert media_type == "text/html"
+        assert client.send.call_count == 2
 
     def test_blocks_redirect_to_private_host(self, mocker):
         redirect = _build_response(
@@ -541,14 +545,14 @@ class TestFetchUrl:
         _mock_sync_http_client(mocker, response=redirect)
 
         with pytest.raises(UrlFetchError, match="non-public host"):
-            _fetch_url("https://1.1.1.1/start")
+            _get_media("https://1.1.1.1/start")
 
     def test_redirect_without_location_raises_url_fetch_error(self, mocker):
         no_location = _build_response(content=b"", status_code=302, is_redirect=True, location=None)
         _mock_sync_http_client(mocker, response=no_location)
 
         with pytest.raises(UrlFetchError, match="missing Location"):
-            _fetch_url("https://1.1.1.1/start")
+            _get_media("https://1.1.1.1/start")
 
     def test_too_many_redirects_raises(self, mocker):
         redirect = _build_response(
@@ -557,31 +561,42 @@ class TestFetchUrl:
         _mock_sync_http_client(mocker, response=redirect)
 
         with pytest.raises(UrlFetchError, match="Too many redirects"):
-            _fetch_url("https://1.1.1.1/loop")
+            _get_media("https://1.1.1.1/loop")
 
 
-class TestFetchUrlAsync:
+def _mock_async_http_client(*, response=None, side_effect=None):
+    """Build an AsyncClient double for the streaming URL reader."""
+    client = MagicMock()
+    client.build_request.return_value = MagicMock()
+    client.send = (
+        AsyncMock(side_effect=side_effect) if side_effect else AsyncMock(return_value=response)
+    )
+    return client
+
+
+class TestUrlRedirectHandlingAsync:
     async def test_refuses_private_host_before_request(self):
-        client = MagicMock()
-        client.get = AsyncMock()
+        client = _mock_async_http_client(response=_build_response())
 
         with pytest.raises(UrlFetchError, match="non-public host"):
-            await _fetch_url_async("http://127.0.0.1/secret", client)
+            await _read_url_with_client_async("http://127.0.0.1/secret", client, limit=1024)
 
-        client.get.assert_not_awaited()
+        client.send.assert_not_awaited()
 
     async def test_follows_safe_redirect(self):
         redirect = _build_response(
             content=b"", status_code=302, is_redirect=True, location="https://2.2.2.2/final"
         )
         final = _build_response(content=b"ok")
-        client = MagicMock()
-        client.get = AsyncMock(side_effect=[redirect, final])
+        client = _mock_async_http_client(side_effect=[redirect, final])
 
-        response = await _fetch_url_async("https://1.1.1.1/start", client)
+        content, headers = await _read_url_with_client_async(
+            "https://1.1.1.1/start", client, limit=1024
+        )
 
-        assert response is final
-        assert client.get.await_count == 2
+        assert content == b"ok"
+        assert headers["content-type"] == "application/octet-stream"
+        assert client.send.await_count == 2
 
     async def test_blocks_redirect_to_private_host(self):
         redirect = _build_response(
@@ -590,31 +605,28 @@ class TestFetchUrlAsync:
             is_redirect=True,
             location="http://169.254.169.254/latest/meta-data/",
         )
-        client = MagicMock()
-        client.get = AsyncMock(return_value=redirect)
+        client = _mock_async_http_client(response=redirect)
 
         with pytest.raises(UrlFetchError, match="non-public host"):
-            await _fetch_url_async("https://1.1.1.1/start", client)
+            await _read_url_with_client_async("https://1.1.1.1/start", client, limit=1024)
 
-        client.get.assert_awaited_once()
+        client.send.assert_awaited_once()
 
     async def test_redirect_without_location_raises(self):
         response = _build_response(is_redirect=True, status_code=302, location=None)
-        client = MagicMock()
-        client.get = AsyncMock(return_value=response)
+        client = _mock_async_http_client(response=response)
 
         with pytest.raises(UrlFetchError, match="missing Location"):
-            await _fetch_url_async("https://1.1.1.1/start", client)
+            await _read_url_with_client_async("https://1.1.1.1/start", client, limit=1024)
 
     async def test_too_many_redirects_raises(self):
         redirect = _build_response(
             is_redirect=True, status_code=302, location="https://1.1.1.1/loop"
         )
-        client = MagicMock()
-        client.get = AsyncMock(return_value=redirect)
+        client = _mock_async_http_client(response=redirect)
 
         with pytest.raises(UrlFetchError, match="Too many redirects"):
-            await _fetch_url_async("https://1.1.1.1/loop", client)
+            await _read_url_with_client_async("https://1.1.1.1/loop", client, limit=1024)
 
 
 class TestGetMediaAsync:
@@ -777,7 +789,7 @@ class TestUrlFetchConfiguration:
         fake_response = _build_response(content=b"ok")
         client_cls, _ = _mock_sync_http_client(mocker, response=fake_response)
 
-        _fetch_url("https://1.1.1.1/doc.pdf")
+        _get_media("https://1.1.1.1/doc.pdf")
 
         assert client_cls.call_args.kwargs["timeout"] == 45.0
 
@@ -797,7 +809,7 @@ class TestUrlFetchConfiguration:
         _mock_sync_http_client(mocker, response=redirect)
 
         with pytest.raises(UrlFetchError, match="Too many redirects \\(>2\\)"):
-            _fetch_url("https://1.1.1.1/loop")
+            _get_media("https://1.1.1.1/loop")
 
     def test_invalid_max_redirects_falls_back_to_default(self, monkeypatch):
         monkeypatch.setenv("OPENEXTRACT_MAX_REDIRECTS", "-1")
@@ -966,7 +978,7 @@ def test_lazy_agent_proxy_constructs_pydantic_agent(mocker):
     expected = MagicMock()
     pydantic_agent = mocker.patch("pydantic_ai.Agent", return_value=expected)
 
-    result = extract_module.Agent("openai:gpt-5", output_type=_Person)
+    result = agent_module.Agent("openai:gpt-5", output_type=_Person)
 
     assert result is expected
     pydantic_agent.assert_called_once_with("openai:gpt-5", output_type=_Person)
@@ -1357,6 +1369,13 @@ class TestModelErrorMetadataHelpers:
         error.headers = {"Retry-After": "5"}  # type: ignore[attr-defined]
 
         assert _model_retry_after(error) == 5
+
+    def test_retry_after_scan_continues_past_header_sets_without_the_key(self):
+        error = Exception("failed")
+        error.headers = {"x-request-id": "123"}  # type: ignore[attr-defined]
+        error.response = MagicMock(headers={"Retry-After": "4"})  # type: ignore[attr-defined]
+
+        assert _model_retry_after(error) == 4
 
     def test_retry_after_from_bedrock_metadata_headers(self):
         error = Exception("failed")

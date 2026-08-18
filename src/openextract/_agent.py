@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from typing import TYPE_CHECKING, TypeVar, cast
-
-from pydantic import BaseModel
+from typing import TYPE_CHECKING, cast
 
 from ._config import _validate_timeout
 from ._errors import _extraction_errors
-from ._types import Usage
+from ._types import T, Usage
 from .exceptions import ProviderNotInstalledError
 
 if TYPE_CHECKING:
@@ -27,8 +25,6 @@ else:
 
         return PydanticAgent(*args, **kwargs)
 
-
-T = TypeVar("T", bound=BaseModel)
 
 _OPENAI_PREFIX = "openai:"
 _OPENAI_RESPONSES_PREFIX = "openai-responses:"

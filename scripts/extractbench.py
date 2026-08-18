@@ -36,7 +36,7 @@ from openextract import (
     SchemaValidationError,
     Usage,
 )
-from openextract._extract import _install_hint, _route_model
+from openextract._agent import _install_hint, _route_model
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = REPO_ROOT / ".extractbench"

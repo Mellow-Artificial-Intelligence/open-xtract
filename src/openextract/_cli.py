@@ -23,6 +23,18 @@ from .exceptions import (
     UrlFetchError,
 )
 
+# Exit code per failure mode, most specific first: ``main`` walks this table
+# instead of repeating one ``except`` clause per exception type.
+_EXIT_CODES: tuple[tuple[type[BaseException], int], ...] = (
+    (UrlFetchError, 2),
+    (SchemaValidationError, 3),
+    (ModelError, 4),
+    (ProviderNotInstalledError, 6),
+    (ExtractionError, 5),
+    (ValueError, 1),
+)
+_HANDLED_ERRORS = tuple(exc_type for exc_type, _ in _EXIT_CODES)
+
 
 def _resolve_schema(schema_path: str) -> type[BaseModel]:
     """Resolve a ``module:ClassName`` string to a Pydantic ``BaseModel`` subclass."""
@@ -105,6 +117,15 @@ def _print_json(payload: Any, *, as_repr: bool) -> None:
         print(repr(payload))
         return
     print(json.dumps(payload, indent=2, default=str))
+
+
+def _exit_code_for(exc: BaseException) -> int:
+    """Return the CLI exit code for ``exc``, taking the most specific match.
+
+    Only ever called for exceptions caught through :data:`_EXIT_CODES`, so a
+    match always exists.
+    """
+    return next(code for exc_type, code in _EXIT_CODES if isinstance(exc, exc_type))
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -222,72 +243,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("error: --usage requires exactly one input file", file=sys.stderr)
         return 1
 
-    media_type = args.media_type
+    common_options: dict[str, Any] = {
+        "schema": schema_cls,
+        "model": args.model,
+        "instructions": args.instructions,
+        "style": args.style,
+        "media_type": args.media_type,
+        "max_input_bytes": args.max_input_bytes,
+        "max_retries": args.max_retries,
+        "retry_backoff": args.retry_backoff,
+        "retry_max_backoff": args.retry_max_backoff,
+    }
     batch_failures = 0
 
     try:
         if len(input_files) == 1:
             input_file = input_files[0]
             if args.usage:
-                result, usage = extract_with_usage(
-                    schema=schema_cls,
-                    model=args.model,
-                    input_file=input_file,
-                    instructions=args.instructions,
-                    style=args.style,
-                    media_type=media_type,
-                    max_input_bytes=args.max_input_bytes,
-                    max_retries=args.max_retries,
-                    retry_backoff=args.retry_backoff,
-                    retry_max_backoff=args.retry_max_backoff,
-                )
+                result, usage = extract_with_usage(input_file=input_file, **common_options)
                 payload: Any = {"result": result.model_dump(), "usage": _usage_payload(usage)}
             else:
-                payload = extract(
-                    schema=schema_cls,
-                    model=args.model,
-                    input_file=input_file,
-                    instructions=args.instructions,
-                    style=args.style,
-                    media_type=media_type,
-                    max_input_bytes=args.max_input_bytes,
-                    max_retries=args.max_retries,
-                    retry_backoff=args.retry_backoff,
-                    retry_max_backoff=args.retry_max_backoff,
-                )
+                payload = extract(input_file=input_file, **common_options)
         else:
             results = extract_many(
-                schema=schema_cls,
-                model=args.model,
                 input_files=input_files,
-                instructions=args.instructions,
-                style=args.style,
-                media_type=media_type,
-                max_input_bytes=args.max_input_bytes,
-                max_retries=args.max_retries,
-                retry_backoff=args.retry_backoff,
-                retry_max_backoff=args.retry_max_backoff,
                 return_exceptions=args.continue_on_error,
+                **common_options,
             )
             payload, batch_failures = _batch_payload(results, input_files)
-    except UrlFetchError as exc:
+    except _HANDLED_ERRORS as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 2
-    except SchemaValidationError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 3
-    except ModelError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 4
-    except ProviderNotInstalledError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 6
-    except ExtractionError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 5
-    except ValueError as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 1
+        return _exit_code_for(exc)
 
     if args.output == "repr":
         _print_json(payload, as_repr=True)

@@ -1,80 +1,59 @@
-"""One-shot extraction APIs and internal re-exports."""
+"""One-shot extraction APIs."""
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
-from typing import TYPE_CHECKING, TypeVar, cast
+from typing import TYPE_CHECKING, cast
 
-import httpx
 from pydantic import BaseModel
 
 from ._agent import (
-    Agent,
     _build_agent,
-    _install_hint,
-    _model_identifier,
     _resolve_run_inputs,
-    _route_model,
     _run_extraction,
     _run_extraction_async,
     _usage_from_result,
 )
-from ._batch import (
-    _run_with_shared_agent,
-    _run_with_shared_agent_result,
-    extract_many,
-    extract_many_async,
-    extract_many_with_results,
-    extract_many_with_results_async,
-    iter_extract_many_async,
-)
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
-    _max_redirects,
     _resolve_max_input_bytes,
-    _url_fetch_timeout,
     _validate_retry_options,
 )
-from ._errors import (
-    _extraction_errors,
-    _is_transient_model_exception,
-    _map_exception,
-    _model_retry_after,
-    _model_status_code,
-    _parse_retry_after,
-)
-from ._media import (
-    _fetch_url,
-    _fetch_url_async,
-    _get_media,
-    _get_media_async,
-    _get_media_type,
-    _is_public_ip,
-    _is_safe_host,
-    _item_source_label,
-    _read_from_path,
-    _read_url_with_client,
-    _safe_source_context,
-)
-from ._retry import _retry_delay, _run_with_retries_async, _run_with_retries_sync
-from ._session import AsyncExtractor, Extractor
+from ._errors import _extraction_errors
+from ._media import _get_media, _get_media_async
+from ._retry import _run_with_retries_async, _run_with_retries_sync
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
-from ._types import (
-    ExtractionInput,
-    ExtractionInputLike,
-    ExtractionResult,
-    RetryPolicy,
-    Usage,
-    _resolve_item,
-    total_usage,
-)
+from ._types import ExtractionInputLike, T, Usage
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent as PydanticAgent
     from pydantic_ai.models import Model
 
-T = TypeVar("T", bound=BaseModel)
+
+@contextmanager
+def _agent_with_inputs(
+    schema: type[BaseModel],
+    model: str | Model,
+    instructions: str | None,
+    style: ExtractionStyle,
+    file_bytes: bytes,
+    file_type: str,
+) -> Iterator[tuple[PydanticAgent, list]]:
+    """Yield the agent and run inputs for already-resolved media.
+
+    Shared by the sync and async preparation paths, which differ only in how
+    they read the media.
+    """
+    with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
+        with _extraction_errors():
+            agent = _build_agent(
+                schema,
+                model,
+                instructions,
+                extra_capabilities=capabilities,
+            )
+        yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
 
 
 @contextmanager
@@ -94,15 +73,8 @@ def _prepare_extraction(
             media_type=media_type,
             max_input_bytes=max_input_bytes,
         )
-    with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
-        with _extraction_errors():
-            agent = _build_agent(
-                schema,
-                model,
-                instructions,
-                extra_capabilities=capabilities,
-            )
-        yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
+    with _agent_with_inputs(schema, model, instructions, style, file_bytes, file_type) as prepared:
+        yield prepared
 
 
 @asynccontextmanager
@@ -114,34 +86,42 @@ async def _prepare_extraction_async(
     media_type: str | None,
     max_input_bytes: int,
     style: ExtractionStyle,
-    client: httpx.AsyncClient | None = None,
 ) -> AsyncIterator[tuple[PydanticAgent, list]]:
     """Prepare one async extraction while applying public exception mapping."""
     with _extraction_errors():
         file_bytes, file_type = await _get_media_async(
             input_file,
-            client,
             media_type=media_type,
             max_input_bytes=max_input_bytes,
         )
-    with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
-        with _extraction_errors():
-            agent = _build_agent(
-                schema,
-                model,
-                instructions,
-                extra_capabilities=capabilities,
-            )
-        yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
+    with _agent_with_inputs(schema, model, instructions, style, file_bytes, file_type) as prepared:
+        yield prepared
 
 
-def _extract_once(
+def _extract_once(agent: PydanticAgent, inputs: list) -> BaseModel:
+    """Perform a single sync extraction attempt; return the schema instance."""
+    return cast(BaseModel, _run_extraction(agent, inputs).output)
+
+
+def _extract_once_with_usage(agent: PydanticAgent, inputs: list) -> tuple[BaseModel, Usage]:
+    """Perform a single sync attempt; return the schema instance and its usage."""
+    result = _run_extraction(agent, inputs)
+    return cast(BaseModel, result.output), _usage_from_result(result)
+
+
+async def _extract_once_async(agent: PydanticAgent, inputs: list) -> BaseModel:
+    """Perform a single async extraction attempt; return the schema instance."""
+    result = await _run_extraction_async(agent, inputs)
+    return cast(BaseModel, result.output)
+
+
+async def _extract_once_with_usage_async(
     agent: PydanticAgent,
     inputs: list,
-) -> T:
-    """Perform a single sync extraction attempt; return the schema instance."""
-    result = _run_extraction(agent, inputs)
-    return cast(T, result.output)
+) -> tuple[BaseModel, Usage]:
+    """Perform a single async attempt; return the schema instance and its usage."""
+    result = await _run_extraction_async(agent, inputs)
+    return cast(BaseModel, result.output), _usage_from_result(result)
 
 
 def _oneshot_options(
@@ -150,15 +130,80 @@ def _oneshot_options(
     retry_backoff: float,
     retry_max_backoff: float,
     max_input_bytes: int | None,
-) -> tuple[ExtractionStyle, int, int, float, float]:
+) -> tuple[ExtractionStyle, int]:
+    """Validate the retry knobs and resolve the style and byte limit up front."""
     _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
-    return (
-        normalize_style(style),
-        _resolve_max_input_bytes(max_input_bytes),
-        max_retries,
-        retry_backoff,
-        retry_max_backoff,
+    return normalize_style(style), _resolve_max_input_bytes(max_input_bytes)
+
+
+def _run_oneshot[R](
+    attempt: Callable[[PydanticAgent, list], R],
+    schema: type[BaseModel],
+    model: str | Model,
+    input_file: ExtractionInputLike,
+    instructions: str | None,
+    *,
+    style: ExtractionStyle | str,
+    media_type: str | None,
+    max_input_bytes: int | None,
+    max_retries: int,
+    retry_backoff: float,
+    retry_max_backoff: float,
+) -> R:
+    """Prepare one sync extraction and run ``attempt`` under the retry policy."""
+    resolved_style, limit = _oneshot_options(
+        style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
     )
+    with _prepare_extraction(
+        schema,
+        model,
+        input_file,
+        instructions,
+        media_type,
+        limit,
+        resolved_style,
+    ) as (agent, inputs):
+        return _run_with_retries_sync(
+            lambda: attempt(agent, inputs),
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+        )
+
+
+async def _run_oneshot_async[R](
+    attempt: Callable[[PydanticAgent, list], Awaitable[R]],
+    schema: type[BaseModel],
+    model: str | Model,
+    input_file: ExtractionInputLike,
+    instructions: str | None,
+    *,
+    style: ExtractionStyle | str,
+    media_type: str | None,
+    max_input_bytes: int | None,
+    max_retries: int,
+    retry_backoff: float,
+    retry_max_backoff: float,
+) -> R:
+    """Async counterpart to :func:`_run_oneshot`."""
+    resolved_style, limit = _oneshot_options(
+        style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
+    )
+    async with _prepare_extraction_async(
+        schema,
+        model,
+        input_file,
+        instructions,
+        media_type,
+        limit,
+        resolved_style,
+    ) as (agent, inputs):
+        return await _run_with_retries_async(
+            lambda: attempt(agent, inputs),
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+        )
 
 
 def extract(
@@ -215,24 +260,22 @@ def extract(
         ValueError: If ``style`` is invalid or ``search``/``code`` is used with
             a non-text document.
     """
-    style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
-        style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
-    )
-    with _prepare_extraction(
-        schema,
-        model,
-        input_file,
-        instructions,
-        media_type,
-        limit,
-        style,
-    ) as (agent, inputs):
-        return _run_with_retries_sync(
-            lambda: _extract_once(agent, inputs),
+    return cast(
+        T,
+        _run_oneshot(
+            _extract_once,
+            schema,
+            model,
+            input_file,
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
-        )
+        ),
+    )
 
 
 def extract_with_usage(
@@ -250,71 +293,26 @@ def extract_with_usage(
 ) -> tuple[T, Usage]:
     """Extract structured data and return ``(output, Usage)`` for token accounting.
 
-    Same retry semantics as :func:`extract`. Returns a :class:`Usage` describing
-    the tokens consumed by the successful model call.
+    Takes the same arguments and has the same retry semantics as
+    :func:`extract`. Returns a :class:`Usage` describing the tokens consumed by
+    the successful model call.
     """
-    style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
-        style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
-    )
-    with _prepare_extraction(
-        schema,
-        model,
-        input_file,
-        instructions,
-        media_type,
-        limit,
-        style,
-    ) as (agent, inputs):
-
-        def _once() -> tuple[T, Usage]:
-            result = _run_extraction(agent, inputs)
-            return cast(T, result.output), _usage_from_result(result)
-
-        return _run_with_retries_sync(
-            _once,
+    return cast(
+        "tuple[T, Usage]",
+        _run_oneshot(
+            _extract_once_with_usage,
+            schema,
+            model,
+            input_file,
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
-        )
-
-
-async def extract_with_usage_async(
-    schema: type[T],
-    model: str | Model,
-    input_file: ExtractionInputLike,
-    instructions: str | None = None,
-    *,
-    style: ExtractionStyle | str = "direct",
-    media_type: str | None = None,
-    max_input_bytes: int | None = None,
-    max_retries: int = 0,
-    retry_backoff: float = 1.0,
-    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
-) -> tuple[T, Usage]:
-    """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
-    style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
-        style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
+        ),
     )
-    async with _prepare_extraction_async(
-        schema,
-        model,
-        input_file,
-        instructions,
-        media_type,
-        limit,
-        style,
-    ) as (agent, inputs):
-
-        async def _once() -> tuple[T, Usage]:
-            result = await _run_extraction_async(agent, inputs)
-            return cast(T, result.output), _usage_from_result(result)
-
-        return await _run_with_retries_async(
-            _once,
-            max_retries=max_retries,
-            retry_backoff=retry_backoff,
-            retry_max_backoff=retry_max_backoff,
-        )
 
 
 async def extract_async(
@@ -331,78 +329,59 @@ async def extract_async(
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``."""
-    style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
-        style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
-    )
-    async with _prepare_extraction_async(
-        schema,
-        model,
-        input_file,
-        instructions,
-        media_type,
-        limit,
-        style,
-    ) as (agent, inputs):
-
-        async def _once() -> T:
-            result = await _run_extraction_async(agent, inputs)
-            return cast(T, result.output)
-
-        return await _run_with_retries_async(
-            _once,
+    return cast(
+        T,
+        await _run_oneshot_async(
+            _extract_once_async,
+            schema,
+            model,
+            input_file,
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
-        )
+        ),
+    )
+
+
+async def extract_with_usage_async(
+    schema: type[T],
+    model: str | Model,
+    input_file: ExtractionInputLike,
+    instructions: str | None = None,
+    *,
+    style: ExtractionStyle | str = "direct",
+    media_type: str | None = None,
+    max_input_bytes: int | None = None,
+    max_retries: int = 0,
+    retry_backoff: float = 1.0,
+    retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+) -> tuple[T, Usage]:
+    """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
+    return cast(
+        "tuple[T, Usage]",
+        await _run_oneshot_async(
+            _extract_once_with_usage_async,
+            schema,
+            model,
+            input_file,
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+        ),
+    )
 
 
 __all__ = [
-    "Agent",
-    "Extractor",
-    "AsyncExtractor",
-    "RetryPolicy",
-    "ExtractionInput",
-    "ExtractionResult",
-    "Usage",
     "extract",
     "extract_async",
     "extract_with_usage",
     "extract_with_usage_async",
-    "extract_many",
-    "extract_many_async",
-    "iter_extract_many_async",
-    "extract_many_with_results",
-    "extract_many_with_results_async",
-    "total_usage",
-    "_build_agent",
-    "_extract_once",
-    "_fetch_url",
-    "_fetch_url_async",
-    "_get_media",
-    "_get_media_async",
-    "_get_media_type",
-    "_install_hint",
-    "_is_public_ip",
-    "_is_safe_host",
-    "_is_transient_model_exception",
-    "_item_source_label",
-    "_map_exception",
-    "_max_redirects",
-    "_model_identifier",
-    "_model_retry_after",
-    "_model_status_code",
-    "_parse_retry_after",
-    "_prepare_extraction",
-    "_read_from_path",
-    "_read_url_with_client",
-    "_resolve_item",
-    "_resolve_max_input_bytes",
-    "_resolve_run_inputs",
-    "_retry_delay",
-    "_route_model",
-    "_run_extraction",
-    "_run_with_shared_agent",
-    "_run_with_shared_agent_result",
-    "_safe_source_context",
-    "_url_fetch_timeout",
 ]
