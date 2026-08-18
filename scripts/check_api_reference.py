@@ -21,6 +21,8 @@ PUBLIC_FUNCTIONS = (
     "extract_many_with_results",
     "extract_many_with_results_async",
     "total_usage",
+    "normalize_reduce",
+    "reduce_outputs",
 )
 SIGNATURE_HEADING = re.compile(r"^### `([a-z_]+)(\(.*\))`$", re.MULTILINE)
 

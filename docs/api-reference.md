@@ -132,6 +132,33 @@ Sum token usage across batch extraction results, for example the list returned
 by `extract_many_with_results` or `extract_many_with_results_async`. Returns a
 single [`Usage`](#usage) whose fields are the totals of the successful items.
 
+## Swarm reduce
+
+A swarm runs several agents over one input and folds their outputs into a
+single result. The fold strategy is `SwarmReduce`; the reducers are public so a
+caller can combine outputs it gathered itself.
+
+### SwarmReduce
+
+`merge` (default) unions list fields and fills each scalar field from the first
+agent that produced a value. `vote` keeps the most frequent non-empty value per
+field, breaking ties toward the earlier agent; list fields have no majority, so
+they fall back to `merge`. `first` returns the first successful agent's output
+untouched. Pass the enum (`SwarmReduce.VOTE`) or the string (`"vote"`).
+
+### `normalize_reduce(reduce='merge')`
+
+Return a valid `SwarmReduce` for an enum member or string, or raise
+`ValueError` naming the allowed strategies.
+
+### `reduce_outputs(values, reduce='merge')`
+
+Fold a sequence of same-schema Pydantic model instances into one instance.
+`merge` and `vote` reduce the dumped payloads and re-validate the combined
+value, so the return value always satisfies the schema; a combination that no
+longer validates raises `SchemaValidationError`. An empty `values` raises
+`ValueError`.
+
 ## Choosing a batch API
 
 | API | Returns | Order | When to use |
