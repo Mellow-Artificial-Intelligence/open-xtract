@@ -101,16 +101,12 @@ class TestArgparse:
         assert "usage" in captured.err.lower()
 
     def test_missing_schema_exits_nonzero(self, capsys):
-        with pytest.raises(SystemExit) as exc_info:
-            main(["input.txt", "--model", "xai:grok-4.3"])
-        assert exc_info.value.code != 0
+        assert main(["input.txt", "--model", "xai:grok-4.3"]) == 1
         captured = capsys.readouterr()
         assert "schema" in captured.err.lower()
 
     def test_missing_model_exits_nonzero(self, capsys):
-        with pytest.raises(SystemExit) as exc_info:
-            main(["input.txt", "--schema", "tests.test_cli:_FixtureSchema"])
-        assert exc_info.value.code != 0
+        assert main(["input.txt", "--schema", "tests.test_cli:_FixtureSchema"]) == 1
         captured = capsys.readouterr()
         assert "model" in captured.err.lower()
 
@@ -629,3 +625,216 @@ class TestMainBatchAndUsage:
         assert mock_extract.call_args.kwargs["input_file"] is stdin.buffer
         assert mock_extract.call_args.kwargs["media_type"] == "application/pdf"
         stdin.buffer.read.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Swarm and agent flags
+# ---------------------------------------------------------------------------
+
+_AGENT_SOURCE = """
+from openextract import define_agent
+from tests.test_cli import _FixtureSchema
+
+agent = define_agent({description!r}, model={model!r}, output_schema=_FixtureSchema)
+"""
+
+_SCHEMALESS_AGENT_SOURCE = """
+from openextract import define_agent
+
+agent = define_agent({description!r}, model={model!r})
+"""
+
+
+def _write_agent(path, description="Fixture", model="test:a", source=_AGENT_SOURCE):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source.format(description=description, model=model), encoding="utf-8")
+    return str(path)
+
+
+def _patch_swarm(mocker, output=None, usage_result=None):
+    plain = mocker.patch("openextract._cli.extract_swarm")
+    plain.return_value = output if output is not None else _FixtureSchema(name="Ada", age=36)
+    rich = mocker.patch("openextract._cli.extract_swarm_with_results")
+    rich.return_value = usage_result
+    return plain, rich
+
+
+class _SwarmResultStub:
+    def __init__(self):
+        self.output = _FixtureSchema(name="Ada", age=36)
+        self.usage = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)
+        self.agents = (1, 2)
+        self.reduce = MagicMock(value="vote")
+
+
+class TestSwarmFlags:
+    def test_swarm_size_fans_out_one_model(self, mocker, capsys):
+        plain, _ = _patch_swarm(mocker)
+        assert (
+            main(
+                [
+                    "input.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--model",
+                    "test:a",
+                    "--swarm",
+                    "3",
+                ]
+            )
+            == 0
+        )
+        assert plain.call_args.args[1] == ["test:a"]
+        assert plain.call_args.kwargs["size"] == 3
+        assert "Ada" in capsys.readouterr().out
+
+    def test_models_list_becomes_the_agent_list(self, mocker):
+        plain, _ = _patch_swarm(mocker)
+        assert (
+            main(
+                [
+                    "input.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--models",
+                    "test:a, test:b",
+                    "--reduce",
+                    "vote",
+                ]
+            )
+            == 0
+        )
+        assert plain.call_args.args[1] == ["test:a", "test:b"]
+        assert plain.call_args.kwargs["size"] is None
+        assert plain.call_args.kwargs["reduce"] == "vote"
+
+    def test_usage_reports_agent_count_and_reduce(self, mocker, capsys):
+        _patch_swarm(mocker, usage_result=_SwarmResultStub())
+        assert (
+            main(
+                [
+                    "input.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--models",
+                    "test:a,test:b",
+                    "--usage",
+                ]
+            )
+            == 0
+        )
+        payload = capsys.readouterr().out
+        assert '"agents": 2' in payload
+        assert '"reduce": "vote"' in payload
+        assert '"total_tokens": 3' in payload
+
+    def test_a_single_model_stays_a_one_shot_call(self, mocker):
+        swarm = mocker.patch("openextract._cli.extract_swarm")
+        _patch_extract(mocker, return_value=_FixtureSchema(name="Ada", age=36))
+        assert (
+            main(
+                [
+                    "input.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--model",
+                    "test:a",
+                ]
+            )
+            == 0
+        )
+        swarm.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "extra,message",
+        [
+            (["--model", "test:a", "--swarm", "0"], "--swarm must be a positive integer"),
+            (["--models", "test:a,test:b", "--swarm", "3"], "does not match"),
+            (["--models", "test:a,test:b", "--model", "test:c"], "not both"),
+        ],
+    )
+    def test_invalid_swarm_combinations_exit_one(self, capsys, extra, message):
+        argv = ["input.txt", "--schema", "tests.test_cli:_FixtureSchema", *extra]
+        assert main(argv) == 1
+        assert message in capsys.readouterr().err
+
+    def test_swarm_flags_require_a_single_input(self, capsys):
+        assert (
+            main(
+                [
+                    "a.txt",
+                    "b.txt",
+                    "--schema",
+                    "tests.test_cli:_FixtureSchema",
+                    "--model",
+                    "test:a",
+                    "--swarm",
+                    "2",
+                ]
+            )
+            == 1
+        )
+        assert "single input" in capsys.readouterr().err
+
+
+class TestAgentFlags:
+    def test_an_agent_supplies_the_model_and_schema(self, mocker, tmp_path):
+        path = _write_agent(tmp_path / "invoices.py")
+        run = _patch_extract(mocker, return_value=_FixtureSchema(name="Ada", age=36))
+        assert main(["input.txt", "--agent", path]) == 0
+        assert run.call_args.kwargs["schema"] is _FixtureSchema
+
+    def test_an_explicit_schema_still_wins(self, mocker, tmp_path):
+        path = _write_agent(tmp_path / "invoices.py", source=_SCHEMALESS_AGENT_SOURCE)
+        run = _patch_extract(mocker, return_value=_FixtureSchema(name="Ada", age=36))
+        argv = ["input.txt", "--agent", path, "--schema", "tests.test_cli:_FixtureSchema"]
+        assert main(argv) == 0
+        assert run.call_args.kwargs["schema"] is _FixtureSchema
+
+    def test_an_agent_without_a_schema_needs_one(self, capsys, tmp_path):
+        path = _write_agent(tmp_path / "invoices.py", source=_SCHEMALESS_AGENT_SOURCE)
+        assert main(["input.txt", "--agent", path]) == 1
+        assert "--schema is required" in capsys.readouterr().err
+
+    def test_several_agents_form_a_swarm(self, mocker, tmp_path):
+        first = _write_agent(tmp_path / "a.py", description="First")
+        second = _write_agent(tmp_path / "b.py", description="Second")
+        plain, _ = _patch_swarm(mocker)
+        assert main(["input.txt", "--agents", f"{first},{second}"]) == 0
+        assert [agent.description for agent in plain.call_args.args[1]] == ["First", "Second"]
+
+    def test_agent_and_agents_are_mutually_exclusive(self, capsys, tmp_path):
+        path = _write_agent(tmp_path / "a.py")
+        assert main(["input.txt", "--agent", path, "--agents", path]) == 1
+        assert "not both" in capsys.readouterr().err
+
+    def test_an_agent_may_be_fanned_out_with_swarm(self, mocker, tmp_path):
+        path = _write_agent(tmp_path / "a.py")
+        plain, _ = _patch_swarm(mocker)
+        assert main(["input.txt", "--agent", path, "--swarm", "2"]) == 0
+        assert plain.call_args.kwargs["size"] == 2
+
+    def test_agents_may_not_be_combined_with_a_batch(self, capsys, tmp_path):
+        path = _write_agent(tmp_path / "a.py")
+        assert main(["a.txt", "b.txt", "--agent", path]) == 1
+        assert "single input" in capsys.readouterr().err
+
+    def test_a_missing_agent_path_exits_one(self, capsys):
+        assert main(["input.txt", "--agent", "no-such-agent"]) == 1
+        assert "Expected a directory" in capsys.readouterr().err
+
+
+class TestRemoteAgentExit:
+    def test_remote_agent_failures_exit_eight(self, mocker, capsys):
+        from openextract import RemoteAgentError
+
+        _patch_extract(mocker, side_effect=RemoteAgentError("agent unreachable"))
+        argv = [
+            "input.txt",
+            "--schema",
+            "tests.test_cli:_FixtureSchema",
+            "--model",
+            "test:a",
+        ]
+        assert main(argv) == 8
+        assert "agent unreachable" in capsys.readouterr().err

@@ -471,6 +471,18 @@ openextract ./reports/q4.pdf \
   --usage
 ```
 
+Swarm one input across several models, or extract with an agent:
+
+```bash
+openextract ./reports/q4.pdf \
+  --schema mypkg.schemas:Invoice \
+  --models openai:gpt-5.5,anthropic:claude-opus-4-8 \
+  --reduce vote
+
+# --schema is optional when the agent declares an output_schema
+openextract ./reports/q4.pdf --agent ./agents/invoices
+```
+
 Read from stdin:
 
 ```bash
@@ -499,7 +511,8 @@ cat ./reports/q4.pdf | openextract - \
 
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
 `5` other extraction error, `6` missing provider extra, `7` partial batch failure
-(`--continue-on-error`), `1` any other failure (including bad `--schema` paths).
+(`--continue-on-error`), `8` remote agent failure, `1` any other failure
+(including missing or bad `--schema` / `--model`).
 
 Extraction errors are written to stderr; successful JSON, usage payloads, and
 `--continue-on-error` batch arrays are written to stdout. Missing provider extras
@@ -595,7 +608,7 @@ below even though it is not exported from `__all__`.
 | `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
 | `ModelError` | Stable | Raised for provider/model API failures, with `provider`, `status_code`, `retryable`, and `retry_after` metadata where available. |
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
-| `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, and partial-batch exit code `7` are intended to remain. |
+| `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, partial-batch exit code `7`, and remote-agent exit code `8` are intended to remain. |
 
 No pre-1.0 signature changes are currently proposed for stable symbols.
 

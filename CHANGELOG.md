@@ -9,6 +9,10 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- CLI swarm and agent flags: `--swarm N`, `--models a,b`, `--agent SPEC`,
+  `--agents SPEC,SPEC`, and `--reduce merge|vote|first`. `--schema` is now
+  optional when an agent declares an `output_schema`, and `--usage` on a swarm
+  reports the agent count and reduce strategy. Remote agent failures exit `8`.
 - Agents are accepted by `extract`, `extract_async`, `extract_with_usage`, and
   `extract_with_usage_async` in the `model` position, and an agent declaring an
   `output_schema` can be passed as `schema` — `extract(agent, input_file)`.

@@ -53,6 +53,7 @@ Always define a real `pydantic.BaseModel` subclass. Do not ask the library for f
 | Agents shipped in a repository | `load_agent` / `load_agents` (directory, file, `module:attribute`) |
 | Per-agent usage / failures from a swarm | `extract_swarm_with_results*` → `SwarmResult` |
 | Shell / CI | `openextract` CLI; parse **stdout** only |
+| A swarm or agent from the shell | `--swarm` / `--models` / `--agent` / `--agents` / `--reduce` |
 
 ## Input rules (common bugs)
 
