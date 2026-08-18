@@ -48,7 +48,7 @@ Always define a real `pydantic.BaseModel` subclass. Do not ask the library for f
 | Many inputs, stream as done | `iter_extract_many_async` — yields `(input_index, result)` in **completion order** |
 | Per-item usage / timing | `extract_many_with_results*` + `total_usage` |
 | Several agents on **one** input | `extract_swarm` / `extract_swarm_async` |
-| A reusable specialist (model + style + instructions + schema) | `define_agent`, passed as `agents` |
+| A reusable specialist (model + style + instructions + schema) | `define_agent`, then `extract(agent, input_file)` or `agents=` |
 | An extraction service over HTTP | `define_remote_agent` + `openextract.auth` |
 | Agents shipped in a repository | `load_agent` / `load_agents` (directory, file, `module:attribute`) |
 | Per-agent usage / failures from a swarm | `extract_swarm_with_results*` → `SwarmResult` |

@@ -9,6 +9,11 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Agents are accepted by `extract`, `extract_async`, `extract_with_usage`, and
+  `extract_with_usage_async` in the `model` position, and an agent declaring an
+  `output_schema` can be passed as `schema` — `extract(agent, input_file)`.
+  A single-model agent runs as a one-shot call; an agent with subagents or a
+  remote endpoint fans out into a swarm and its outputs are reduced.
 - Importable extract agents: `define_agent` / `define_remote_agent` package a
   model, style, instructions, and `output_schema` behind a description, and
   `subagents` compose them. `load_agent` / `load_agents` /
