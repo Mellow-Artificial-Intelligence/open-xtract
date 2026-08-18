@@ -23,6 +23,11 @@ PUBLIC_FUNCTIONS = (
     "total_usage",
     "normalize_reduce",
     "reduce_outputs",
+    "extract_swarm",
+    "extract_swarm_async",
+    "extract_swarm_with_results",
+    "extract_swarm_with_results_async",
+    "resolve_swarm_members",
 )
 SIGNATURE_HEADING = re.compile(r"^### `([a-z_]+)(\(.*\))`$", re.MULTILINE)
 

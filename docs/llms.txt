@@ -33,6 +33,7 @@ Inputs: `str` path/URL, `pathlib.Path`, `bytes` or file-like (**`media_type` req
 One-shot: `extract`, `extract_async`, `extract_with_usage`, `extract_with_usage_async`.
 Sessions: `Extractor`, `AsyncExtractor`, `RetryPolicy` (context managers; not thread-safe / one event loop).
 Batch (provisional): `extract_many` input order (not from a running loop); `iter_extract_many_async` completion-order `(index, result)`; `extract_many_with_results*` + `total_usage`.
+Swarm (provisional): `extract_swarm*` runs N agents on **one** input (`agents` = model id / `Model` / `SwarmMember`, `size` ≤ 16, `reduce` = `merge` | `vote` | `first`); `extract_swarm_with_results*` returns `SwarmResult` (`output`, `agents`, `usage`, `reduce`). Not from a running loop.
 Styles: `direct` (default, any media); `search`/`code` text-only + `pydantic-ai-harness`.
 OpenAI: `openai:` → Responses API; `openai-chat:` for Chat Completions.
 

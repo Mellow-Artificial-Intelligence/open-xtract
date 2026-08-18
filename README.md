@@ -302,6 +302,39 @@ Each `ExtractionResult` carries `output`, `usage`, `attempts`, `duration`,
 `model`, `media_type`, and a sanitized `source` (never raw media, credentials,
 or query strings). The async sibling is `extract_many_with_results_async`.
 
+### Swarm extraction
+
+`extract_many` scales across inputs. A swarm scales across *agents* on one
+input: the file is loaded once, the agents run concurrently, and their outputs
+are reduced into a single validated object.
+
+```python
+from openextract import SwarmMember, extract_swarm, extract_swarm_with_results
+
+# Two models cross-checking each other, majority per field.
+invoice = extract_swarm(
+    schema=Invoice,
+    agents=["openai:gpt-5.5", "anthropic:claude-opus-4-8"],
+    input_file="invoice.pdf",
+    reduce="vote",
+)
+
+# Per-agent instructions, plus per-agent usage and failures.
+swarm = extract_swarm_with_results(
+    schema=Invoice,
+    agents=[
+        SwarmMember("openai:gpt-5.5", instructions="Line items only."),
+        SwarmMember("openai:gpt-5.5", instructions="Totals and dates only."),
+    ],
+    input_file="invoice.pdf",
+)
+print(swarm.output, swarm.usage, swarm.reduce)
+```
+
+`reduce` is `merge` (union lists, fill fields, the default), `vote` (majority
+per field), or `first`. Agents that fail are reported in `swarm.agents`; only
+an all-agent failure raises. `size=N` fans one agent out up to 16 ways.
+
 ### Streaming batch
 
 `extract_many` waits for every item and returns a list in **input order**.

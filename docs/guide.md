@@ -169,6 +169,51 @@ async for index, item in iter_extract_many_async(
 
 See [`examples/batch/stream_batch_extract.py`](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/examples/batch/stream_batch_extract.py).
 
+## Swarms
+
+`extract_many` scales across inputs; a swarm scales across *agents* on **one**
+input. The file is loaded once, the agents run concurrently, and their outputs
+are reduced into a single validated object.
+
+```python
+from openextract import SwarmMember, extract_swarm, extract_swarm_with_results
+
+# Three passes of one model, merged.
+invoice = extract_swarm(
+    schema=Invoice, agents="openai:gpt-5", input_file="invoice.pdf", size=3
+)
+
+# Two models cross-checking each other, majority per field.
+invoice = extract_swarm(
+    schema=Invoice,
+    agents=["openai:gpt-5", "anthropic:claude-opus-4-8"],
+    input_file="invoice.pdf",
+    reduce="vote",
+)
+
+# Per-agent instructions and styles, plus per-agent diagnostics.
+swarm = extract_swarm_with_results(
+    schema=Invoice,
+    agents=[
+        SwarmMember("openai:gpt-5", instructions="Line items only.", style="search"),
+        SwarmMember("openai:gpt-5", instructions="Totals and dates only."),
+    ],
+    input_file="invoice.txt",
+)
+print(swarm.output, swarm.usage, swarm.reduce)
+```
+
+`reduce` is `merge` (union lists, fill fields), `vote` (majority per field), or
+`first`. A swarm survives partial failure: agents that raised appear in
+`swarm.agents`, and only every agent failing raises. `size` is capped at 16,
+and `max_concurrency` defaults to `min(5, agents)`.
+
+Reach for a swarm when one pass under-recalls — a long document, a wide schema,
+or a result worth cross-checking with a second model. One document one model
+handles well does not need one.
+
+See [`examples/advanced/swarm_extract.py`](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/examples/advanced/swarm_extract.py).
+
 ## Errors
 
 All public exceptions subclass `ExtractionError`.

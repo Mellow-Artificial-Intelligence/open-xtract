@@ -46,6 +46,7 @@ uv run python -m examples.run_all
 | `images/` | `receipt_extraction.py` | Anthropic | Receipt-style fields from an image |
 | `documents/` | `invoice_extraction.py` | Anthropic | Invoice schema from PDF or image (`--fixture`) |
 | `batch/` | `batch_extract.py` | OpenAI | Concurrent `extract_many()` |
+| `advanced/` | `swarm_extract.py` | OpenAI + Anthropic | Parallel agents on one input via `extract_swarm_with_results()` |
 | `batch/` | `stream_batch_extract.py` | TestModel | `iter_extract_many_async` completion order vs `extract_many` input order |
 | `async/` | `async_extract.py` | Anthropic | `extract_async()` |
 | `advanced/` | `extract_with_usage.py` | xAI | `extract_with_usage()` and token counts |
