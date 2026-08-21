@@ -11,6 +11,7 @@ from pathlib import Path
 ALWAYS_ALL = frozenset(
     {
         ".github/workflows/ci.yml",
+        ".github/actions/detect-jobs/action.yml",
         "pyproject.toml",
         "uv.lock",
         ".python-version",

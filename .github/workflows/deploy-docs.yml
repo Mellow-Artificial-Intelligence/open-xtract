@@ -18,14 +18,15 @@ permissions:
   pages: write
   id-token: write
 
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Build is read-only, so it only needs to serialize against itself per ref.
+    # Superseded pull-request builds are cancelled instead of queued.
+    concurrency:
+      group: pages-build-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - name: Checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
@@ -46,6 +47,11 @@ jobs:
   deploy:
     if: github.event_name != 'pull_request'
     needs: build
+    # Pages allows one deployment at a time; queue rather than cancel so a
+    # merged commit is never dropped.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
