@@ -454,15 +454,42 @@ openextract ./reports/q4.pdf \
   --output json
 ```
 
-Batch multiple files (JSON array output):
+Batch multiple files (JSON array output, `--max-concurrency` in-flight at once):
 
 ```bash
 openextract ./invoices/a.pdf ./invoices/b.pdf \
   --schema mypkg.schemas:Invoice \
-  --model xai:grok-4.3
+  --model xai:grok-4.3 \
+  --max-concurrency 8
 ```
 
-Token usage (single file):
+Stream a large batch as JSONL — each record is written the moment its input
+finishes, with progress on stderr, so downstream tooling can start consuming
+immediately:
+
+```bash
+openextract ./invoices/*.pdf \
+  --schema mypkg.schemas:Invoice \
+  --model xai:grok-4.3 \
+  --output jsonl --continue-on-error --progress \
+  | jq -c 'select(.result) | .result'
+```
+
+Mix media types in one run with a JSONL manifest (`source` required;
+`media_type` and `name` optional per line):
+
+```bash
+cat > inputs.jsonl <<'EOF'
+{"source": "./invoices/a.pdf", "media_type": "application/pdf", "name": "invoice-a"}
+{"source": "https://example.com/report", "media_type": "text/html"}
+EOF
+openextract --manifest inputs.jsonl \
+  --schema mypkg.schemas:Invoice \
+  --model xai:grok-4.3 \
+  --output jsonl
+```
+
+Token usage (single file or batch; batches add per-item and aggregate usage):
 
 ```bash
 openextract ./reports/q4.pdf \
@@ -499,23 +526,38 @@ cat ./reports/q4.pdf | openextract - \
 - `--style` is `direct` (default), `search` (file tools on text), or `code`
   (write Python against text). `search` needs `pydantic-ai-harness`; `code`
   needs `pydantic-ai-harness[codemode]`.
-- `--media-type` sets MIME type for stdin or overrides guessing for paths/URLs.
-- `--usage` prints a JSON object with `result` and `usage` (single input only).
-- `--output` is `json` (default) or `repr`.
+- `--media-type` sets MIME type for stdin, overrides guessing for paths/URLs,
+  and is the fallback for manifest entries without their own.
+- `--manifest` reads inputs from a JSONL file with per-item media types and
+  display names; mutually exclusive with positional inputs.
+- `--usage` prints `result` and `usage` for a single input; batches report
+  per-item usage plus an aggregate.
+- `--output` is `json` (default), `jsonl` (one record per completed input,
+  written incrementally in completion order with an `index` field), or `repr`.
+- `--max-concurrency` bounds in-flight extractions for batches (default 5).
+- `--progress` reports per-item batch completion on stderr only.
 - `--max-retries`, `--retry-backoff`, and `--retry-max-backoff` match the Python
   API retry behavior.
 - `--max-input-bytes` overrides the 50 MiB per-input cap.
 - `--continue-on-error` (batch only) keeps processing when an input fails; each
   failure is emitted inline as `{"input", "error", "error_type"}` and the command
   exits `7` if any input failed. Without it, a batch aborts on the first failure.
+- `--swarm N`, `--models a,b`, `--agent SPEC`, `--agents SPEC,SPEC`, and
+  `--reduce merge|vote|first` run several agents over a **single** input and
+  fold their outputs; `--schema` is optional when an agent declares an
+  `output_schema`.
+
+Concurrency, retry, and size options are validated before any model call.
 
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
 `5` other extraction error, `6` missing provider extra, `7` partial batch failure
-(`--continue-on-error`), `8` remote agent failure, `1` any other failure
-(including missing or bad `--schema` / `--model`).
+(`--continue-on-error`), `8` remote agent failure, `130` interrupted, `141`
+broken pipe, `1` any other failure (including missing or bad
+`--schema` / `--model` and invalid manifests).
 
-Extraction errors are written to stderr; successful JSON, usage payloads, and
-`--continue-on-error` batch arrays are written to stdout. Missing provider extras
+Extraction errors and progress are written to stderr; successful JSON, JSONL
+records, usage payloads, and `--continue-on-error` batch arrays are written to
+stdout. Missing provider extras
 exit `6` and include the same install hint as the Python API, for example
 `pip install 'openextract[xai]'`. Partial batch failures with `--continue-on-error`
 still print the full batch array to stdout, write a warning to stderr, and exit `7`.

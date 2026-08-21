@@ -3,21 +3,29 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import importlib
 import json
+import os
 import sys
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from typing import Any, BinaryIO, cast
 
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ._agents import DefinedAgent, RemoteAgent, load_agent, load_agents
-from ._batch import extract_many
+from ._batch import _iter_extractions
+from ._config import (
+    _resolve_max_input_bytes,
+    _validate_max_concurrency,
+    _validate_retry_options,
+)
 from ._extract import extract, extract_with_usage
 from ._reduce import SwarmReduce
-from ._styles import ExtractionStyle
+from ._styles import ExtractionStyle, normalize_style
 from ._swarm import extract_swarm, extract_swarm_with_results
+from ._types import ExtractionInput, ExtractionInputLike, ExtractionResult
 from .exceptions import (
     ExtractionError,
     ModelError,
@@ -26,6 +34,12 @@ from .exceptions import (
     SchemaValidationError,
     UrlFetchError,
 )
+
+_EXIT_PARTIAL_FAILURE = 7
+_EXIT_REMOTE_AGENT = 8
+_EXIT_INTERRUPTED = 130  # 128 + SIGINT, the conventional Ctrl-C exit code
+_EXIT_BROKEN_PIPE = 141  # 128 + SIGPIPE, the conventional broken-pipe exit code
+_MANIFEST_KEYS = frozenset({"source", "media_type", "name"})
 
 
 def _resolve_schema(schema_path: str) -> type[BaseModel]:
@@ -58,7 +72,7 @@ def _split_list(value: str | None) -> list[str]:
     return [item.strip() for item in (value or "").split(",") if item.strip()]
 
 
-def _resolve_agents(args) -> list[DefinedAgent | RemoteAgent]:
+def _resolve_agents(args: argparse.Namespace) -> list[DefinedAgent | RemoteAgent]:
     """Load the agents named by ``--agent`` / ``--agents``."""
     if args.agent and args.agents:
         raise ValueError("use --agent or --agents, not both")
@@ -77,7 +91,10 @@ def _agent_schema(agents: list[DefinedAgent | RemoteAgent]) -> type[BaseModel] |
     return None
 
 
-def _swarm_agents(args, agents: list[DefinedAgent | RemoteAgent]) -> list | None:
+def _swarm_agents(
+    args: argparse.Namespace,
+    agents: list[DefinedAgent | RemoteAgent],
+) -> list | None:
     """Build the swarm agent list, or ``None`` when this is a one-shot run.
 
     ``--agents`` and ``--models`` list the agents outright; ``--swarm`` fans a
@@ -94,16 +111,26 @@ def _swarm_agents(args, agents: list[DefinedAgent | RemoteAgent]) -> list | None
     return None
 
 
-def _validate_swarm_args(args, agents: list, inputs: list) -> None:
+def _validate_swarm_args(
+    args: argparse.Namespace,
+    agents: list[DefinedAgent | RemoteAgent],
+    items: list[ExtractionInputLike],
+) -> None:
     """Reject swarm flag combinations before any input is loaded."""
     if args.swarm < 1:
         raise ValueError("--swarm must be a positive integer")
     models = _split_list(args.models)
-    if (args.swarm > 1 or len(models) > 1 or agents) and len(inputs) != 1:
-        raise ValueError(
-            "--swarm, --models, --agent, and --agents apply to a single input; "
-            "omit them for batch files"
-        )
+    if agents or len(models) > 1 or args.swarm > 1:
+        if args.manifest is not None or len(items) != 1:
+            raise ValueError(
+                "--swarm, --models, --agent, and --agents apply to a single input; "
+                "omit them for batch files and manifests"
+            )
+        if args.output == "jsonl":
+            raise ValueError(
+                "--swarm, --models, --agent, and --agents produce a single result; "
+                "use --output json or repr"
+            )
     if len(models) > 1 and args.swarm > 1 and args.swarm != len(models):
         raise ValueError("--swarm does not match the number of --models")
     if args.models and args.model:
@@ -126,6 +153,60 @@ def _resolve_input_files(
     return cast(list[str | bytes | BinaryIO], raw_inputs)
 
 
+def _parse_manifest_entry(text: str, line_number: int) -> ExtractionInput:
+    """Validate one manifest line and build its ``ExtractionInput``."""
+    try:
+        record = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"manifest line {line_number}: invalid JSON: {exc}") from exc
+    if not isinstance(record, dict):
+        raise ValueError(f"manifest line {line_number}: expected a JSON object")
+    unknown = sorted(set(record) - _MANIFEST_KEYS)
+    if unknown:
+        raise ValueError(f"manifest line {line_number}: unknown keys: {', '.join(unknown)}")
+    source = record.get("source")
+    if not isinstance(source, str) or not source:
+        raise ValueError(f"manifest line {line_number}: 'source' must be a non-empty string")
+    if source == "-":
+        raise ValueError(f"manifest line {line_number}: stdin (-) is not supported in manifests")
+    media_type = record.get("media_type")
+    if media_type is not None and not isinstance(media_type, str):
+        raise ValueError(f"manifest line {line_number}: 'media_type' must be a string")
+    name = record.get("name")
+    if name is not None and not isinstance(name, str):
+        raise ValueError(f"manifest line {line_number}: 'name' must be a string")
+    return ExtractionInput(source=source, media_type=media_type, name=name)
+
+
+def _load_manifest(path: str) -> list[ExtractionInput]:
+    """Parse a JSONL manifest file into per-item extraction inputs."""
+    entries: list[ExtractionInput] = []
+    with open(path, encoding="utf-8") as handle:
+        for line_number, line in enumerate(handle, start=1):
+            text = line.strip()
+            if not text:
+                continue
+            entries.append(_parse_manifest_entry(text, line_number))
+    if not entries:
+        raise ValueError(f"manifest '{path}' contains no entries")
+    return entries
+
+
+def _resolve_cli_inputs(
+    args: argparse.Namespace,
+) -> tuple[list[ExtractionInputLike], list[str]]:
+    """Resolve positional inputs or a manifest into items plus display labels."""
+    if args.manifest is not None:
+        if args.input_files:
+            raise ValueError("--manifest cannot be combined with positional input files")
+        entries = _load_manifest(args.manifest)
+        return list(entries), [entry.name or cast(str, entry.source) for entry in entries]
+    if not args.input_files:
+        raise ValueError("provide one or more input files, or --manifest")
+    resolved = _resolve_input_files(args.input_files, media_type=args.media_type)
+    return cast(list[ExtractionInputLike], resolved), list(args.input_files)
+
+
 def _usage_payload(usage) -> dict[str, int]:
     return {
         "input_tokens": usage.input_tokens,
@@ -134,36 +215,227 @@ def _usage_payload(usage) -> dict[str, int]:
     }
 
 
-def _batch_payload(
-    results: list,
-    inputs: list[str | bytes | BinaryIO],
-) -> tuple[list[Any], int]:
-    """Build the JSON entries for a batch run and count per-item failures.
-
-    Successful items serialize to their model dump. Failed items (only present
-    when ``--continue-on-error`` runs the batch with ``return_exceptions=True``)
-    become an error object tagged with the originating input.
-    """
-    payload: list[Any] = []
-    failures = 0
-    for item, result in zip(inputs, results, strict=True):
-        if isinstance(result, BaseException):
-            failures += 1
-            payload.append(
-                {
-                    "input": item if isinstance(item, str) else "<bytes>",
-                    "error": str(result),
-                    "error_type": type(result).__name__,
-                }
-            )
-        else:
-            payload.append(result.model_dump())
-    return payload, failures
+def _failure_record(label: str, error: BaseException) -> dict[str, Any]:
+    return {
+        "input": label,
+        "error": str(error),
+        "error_type": type(error).__name__,
+    }
 
 
-def _run_swarm(args, schema_cls, swarm_agents: list, input_file) -> Any:
-    """Run a swarm over one input and build its CLI payload."""
-    options = {
+def _item_record(label: str, result: object, *, with_usage: bool) -> dict[str, Any]:
+    """Build the labeled record for one completed batch item."""
+    if isinstance(result, BaseException):
+        return _failure_record(label, result)
+    if with_usage:
+        rich = cast(ExtractionResult[Any], result)
+        return {
+            "input": label,
+            "result": rich.output.model_dump(),
+            "usage": _usage_payload(rich.usage),
+        }
+    return {"input": label, "result": cast(BaseModel, result).model_dump()}
+
+
+def _array_entry(label: str, result: object, *, with_usage: bool) -> Any:
+    """Build one JSON-array entry, keeping the legacy bare shape for successes."""
+    if with_usage or isinstance(result, BaseException):
+        return _item_record(label, result, with_usage=with_usage)
+    return cast(BaseModel, result).model_dump()
+
+
+def _print_json(payload: Any, *, as_repr: bool) -> None:
+    if as_repr:
+        print(repr(payload), flush=True)
+        return
+    print(json.dumps(payload, indent=2, default=str), flush=True)
+
+
+def _emit_json_line(record: dict[str, Any]) -> None:
+    """Write one JSONL record and flush so consumers see it immediately."""
+    print(json.dumps(record, default=str), flush=True)
+
+
+def _discard_stdout() -> None:
+    """Point stdout at ``os.devnull`` so interpreter-exit flushes stay quiet."""
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(devnull, sys.stdout.fileno())
+        os.close(devnull)
+    except OSError:
+        pass
+
+
+def _print_batch_payload(
+    ordered: list[tuple[int, object]],
+    labels: list[str],
+    usage_totals: dict[str, int],
+    *,
+    with_usage: bool,
+    as_repr: bool,
+) -> None:
+    """Emit the buffered batch payload in input order."""
+    ordered.sort(key=lambda pair: pair[0])
+    entries = [
+        _array_entry(labels[index], result, with_usage=with_usage) for index, result in ordered
+    ]
+    payload: Any = {"results": entries, "usage": usage_totals} if with_usage else entries
+    _print_json(payload, as_repr=as_repr)
+
+
+async def _run_batch_async(
+    schema_cls: type[BaseModel],
+    items: list[ExtractionInputLike],
+    labels: list[str],
+    limit: int,
+    args: argparse.Namespace,
+    model: str,
+) -> int:
+    """Stream the batch, emitting records (JSONL) or buffering them (array)."""
+    with_usage = args.usage
+    jsonl = args.output == "jsonl"
+    # _iter_extractions is an async generator function; its AsyncIterator return
+    # annotation hides the aclose() needed for deterministic finalization.
+    stream = cast(
+        "AsyncGenerator[tuple[int, object], None]",
+        _iter_extractions(
+            schema_cls,
+            model,
+            items,
+            args.instructions,
+            max_concurrency=args.max_concurrency,
+            return_exceptions=args.continue_on_error,
+            media_type=args.media_type,
+            max_input_bytes=limit,
+            max_retries=args.max_retries,
+            retry_backoff=args.retry_backoff,
+            retry_max_backoff=args.retry_max_backoff,
+            rich=with_usage,
+            style=normalize_style(args.style),
+        ),
+    )
+    total = len(items)
+    ordered: list[tuple[int, object]] = []
+    completed = 0
+    failed = 0
+    usage_totals = {"input_tokens": 0, "output_tokens": 0, "total_tokens": 0}
+    try:
+        async for index, result in stream:
+            completed += 1
+            if isinstance(result, BaseException):
+                failed += 1
+            elif with_usage:
+                usage = cast(ExtractionResult[Any], result).usage
+                usage_totals["input_tokens"] += usage.input_tokens
+                usage_totals["output_tokens"] += usage.output_tokens
+                usage_totals["total_tokens"] += usage.total_tokens
+            if jsonl:
+                record = _item_record(labels[index], result, with_usage=with_usage)
+                _emit_json_line({"index": index, **record})
+            else:
+                ordered.append((index, result))
+            if args.progress:
+                print(
+                    f"progress: {completed}/{total} completed ({failed} failed): {labels[index]}",
+                    file=sys.stderr,
+                    flush=True,
+                )
+    finally:
+        # Deterministically finalize the generator so outstanding work is
+        # cancelled before the event loop closes, even on emit failures.
+        await stream.aclose()
+
+    if jsonl:
+        if with_usage:
+            _emit_json_line({"summary": {"inputs": total, "failed": failed, "usage": usage_totals}})
+    else:
+        _print_batch_payload(
+            ordered,
+            labels,
+            usage_totals,
+            with_usage=with_usage,
+            as_repr=args.output == "repr",
+        )
+
+    if failed:
+        print(
+            f"warning: {failed} of {total} input(s) failed; see output for details",
+            file=sys.stderr,
+        )
+        return _EXIT_PARTIAL_FAILURE
+    return 0
+
+
+def _run_batch(
+    schema_cls: type[BaseModel],
+    items: list[ExtractionInputLike],
+    labels: list[str],
+    args: argparse.Namespace,
+    model: str,
+) -> int:
+    """Validate batch options before any model call, then run the batch."""
+    _validate_retry_options(args.max_retries, args.retry_backoff, args.retry_max_backoff)
+    limit = _resolve_max_input_bytes(args.max_input_bytes)
+    return asyncio.run(_run_batch_async(schema_cls, items, labels, limit, args, model))
+
+
+def _print_single_payload(payload: Any, args: argparse.Namespace) -> None:
+    """Print a single-result payload in the requested output format."""
+    if args.output == "repr":
+        _print_json(payload, as_repr=True)
+    elif not args.usage and isinstance(payload, BaseModel):
+        print(payload.model_dump_json(indent=2))
+    else:
+        _print_json(payload, as_repr=False)
+
+
+def _run_single(
+    schema_cls: type[BaseModel],
+    input_file: ExtractionInputLike,
+    args: argparse.Namespace,
+    model: str | DefinedAgent | RemoteAgent,
+) -> int:
+    """Run a single extraction with the legacy output shapes."""
+    if args.usage:
+        result, usage = extract_with_usage(
+            schema=schema_cls,
+            model=model,
+            input_file=input_file,
+            instructions=args.instructions,
+            style=args.style,
+            media_type=args.media_type,
+            max_input_bytes=args.max_input_bytes,
+            max_retries=args.max_retries,
+            retry_backoff=args.retry_backoff,
+            retry_max_backoff=args.retry_max_backoff,
+        )
+        payload: Any = {"result": result.model_dump(), "usage": _usage_payload(usage)}
+    else:
+        payload = extract(
+            schema=schema_cls,
+            model=model,
+            input_file=input_file,
+            instructions=args.instructions,
+            style=args.style,
+            media_type=args.media_type,
+            max_input_bytes=args.max_input_bytes,
+            max_retries=args.max_retries,
+            retry_backoff=args.retry_backoff,
+            retry_max_backoff=args.retry_max_backoff,
+        )
+
+    _print_single_payload(payload, args)
+    return 0
+
+
+def _run_swarm(
+    schema_cls: type[BaseModel],
+    swarm_agents: list,
+    input_file: ExtractionInputLike,
+    args: argparse.Namespace,
+) -> int:
+    """Run a swarm over one input and print its payload."""
+    options: dict[str, Any] = {
         "instructions": args.instructions,
         "size": args.swarm if len(swarm_agents) == 1 else None,
         "style": args.style,
@@ -174,22 +446,18 @@ def _run_swarm(args, schema_cls, swarm_agents: list, input_file) -> Any:
         "retry_backoff": args.retry_backoff,
         "retry_max_backoff": args.retry_max_backoff,
     }
-    if not args.usage:
-        return extract_swarm(schema_cls, swarm_agents, input_file, **options)
-    swarm = extract_swarm_with_results(schema_cls, swarm_agents, input_file, **options)
-    return {
-        "result": swarm.output.model_dump(),
-        "usage": _usage_payload(swarm.usage),
-        "agents": len(swarm.agents),
-        "reduce": swarm.reduce.value,
-    }
-
-
-def _print_json(payload: Any, *, as_repr: bool) -> None:
-    if as_repr:
-        print(repr(payload))
-        return
-    print(json.dumps(payload, indent=2, default=str))
+    if args.usage:
+        swarm = extract_swarm_with_results(schema_cls, swarm_agents, input_file, **options)
+        payload: Any = {
+            "result": swarm.output.model_dump(),
+            "usage": _usage_payload(swarm.usage),
+            "agents": len(swarm.agents),
+            "reduce": swarm.reduce.value,
+        }
+    else:
+        payload = extract_swarm(schema_cls, swarm_agents, input_file, **options)
+    _print_single_payload(payload, args)
+    return 0
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -199,9 +467,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "input_files",
-        nargs="+",
+        nargs="*",
         metavar="input_file",
-        help="One or more paths/URLs, or '-' to read bytes from stdin.",
+        help=(
+            "One or more paths/URLs, or '-' to read bytes from stdin. Omit when using --manifest."
+        ),
     )
     parser.add_argument(
         "--schema",
@@ -265,12 +535,28 @@ def _build_parser() -> argparse.ArgumentParser:
         "--media-type",
         default=None,
         metavar="MIME",
-        help="MIME type (required for stdin; optional override for paths/URLs).",
+        help=(
+            "MIME type (required for stdin; optional override for paths/URLs "
+            "and fallback for manifest entries without their own)."
+        ),
+    )
+    parser.add_argument(
+        "--manifest",
+        default=None,
+        metavar="FILE",
+        help=(
+            'JSONL file of inputs, one {"source": ..., "media_type"?: ..., '
+            '"name"?: ...} object per line. Mutually exclusive with positional '
+            "input files; always uses batch semantics."
+        ),
     )
     parser.add_argument(
         "--usage",
         action="store_true",
-        help="Print token usage (single input only).",
+        help=(
+            "Include token usage: single inputs keep the {result, usage} shape; "
+            "batches report per-item and aggregate usage."
+        ),
     )
     parser.add_argument(
         "--continue-on-error",
@@ -282,9 +568,24 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--output",
-        choices=("json", "repr"),
+        choices=("json", "jsonl", "repr"),
         default="json",
-        help="Output format: 'json' (default) or 'repr'.",
+        help=(
+            "Output format: 'json' (default), 'jsonl' (one record per completed "
+            "input, written incrementally), or 'repr'."
+        ),
+    )
+    parser.add_argument(
+        "--max-concurrency",
+        type=int,
+        default=5,
+        metavar="N",
+        help="Maximum in-flight extractions for batch runs (default 5).",
+    )
+    parser.add_argument(
+        "--progress",
+        action="store_true",
+        help="Batch only: report per-item completion progress on stderr.",
     )
     parser.add_argument(
         "--max-retries",
@@ -334,68 +635,36 @@ def main(argv: Sequence[str] | None = None) -> int:
             )
         if not args.model and not args.models and not agents:
             raise ValueError("--model, --models, or --agent/--agents is required")
-        input_files = _resolve_input_files(args.input_files, media_type=args.media_type)
-        _validate_swarm_args(args, agents, input_files)
     except (ImportError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    if args.usage and len(input_files) != 1:
-        print("error: --usage requires exactly one input file", file=sys.stderr)
+    try:
+        items, labels = _resolve_cli_inputs(args)
+        _validate_swarm_args(args, agents, items)
+    except OSError as exc:
+        print(f"error: cannot read manifest: {exc}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
 
     swarm_agents = _swarm_agents(args, agents)
     single_model = agents[0] if agents else (args.model or _split_list(args.models)[0])
-    media_type = args.media_type
-    batch_failures = 0
 
     try:
+        _validate_max_concurrency(args.max_concurrency)
         if swarm_agents is not None:
-            payload = _run_swarm(args, schema_cls, swarm_agents, input_files[0])
-        elif len(input_files) == 1:
-            input_file = input_files[0]
-            if args.usage:
-                result, usage = extract_with_usage(
-                    schema=schema_cls,
-                    model=single_model,
-                    input_file=input_file,
-                    instructions=args.instructions,
-                    style=args.style,
-                    media_type=media_type,
-                    max_input_bytes=args.max_input_bytes,
-                    max_retries=args.max_retries,
-                    retry_backoff=args.retry_backoff,
-                    retry_max_backoff=args.retry_max_backoff,
-                )
-                payload: Any = {"result": result.model_dump(), "usage": _usage_payload(usage)}
-            else:
-                payload = extract(
-                    schema=schema_cls,
-                    model=single_model,
-                    input_file=input_file,
-                    instructions=args.instructions,
-                    style=args.style,
-                    media_type=media_type,
-                    max_input_bytes=args.max_input_bytes,
-                    max_retries=args.max_retries,
-                    retry_backoff=args.retry_backoff,
-                    retry_max_backoff=args.retry_max_backoff,
-                )
-        else:
-            results = extract_many(
-                schema=schema_cls,
-                model=cast(str, single_model),
-                input_files=input_files,
-                instructions=args.instructions,
-                style=args.style,
-                media_type=media_type,
-                max_input_bytes=args.max_input_bytes,
-                max_retries=args.max_retries,
-                retry_backoff=args.retry_backoff,
-                retry_max_backoff=args.retry_max_backoff,
-                return_exceptions=args.continue_on_error,
-            )
-            payload, batch_failures = _batch_payload(results, input_files)
+            return _run_swarm(schema_cls, swarm_agents, items[0], args)
+        if args.manifest is not None or len(items) > 1 or args.output == "jsonl":
+            return _run_batch(schema_cls, items, labels, args, cast(str, single_model))
+        return _run_single(schema_cls, items[0], args, single_model)
+    except BrokenPipeError:
+        _discard_stdout()
+        return _EXIT_BROKEN_PIPE
+    except KeyboardInterrupt:
+        print("error: interrupted", file=sys.stderr)
+        return _EXIT_INTERRUPTED
     except UrlFetchError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -407,7 +676,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         return 4
     except RemoteAgentError as exc:
         print(f"error: {exc}", file=sys.stderr)
-        return 8
+        return _EXIT_REMOTE_AGENT
     except ProviderNotInstalledError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 6
@@ -417,22 +686,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-
-    if args.output == "repr":
-        _print_json(payload, as_repr=True)
-    elif not args.usage and isinstance(payload, BaseModel):
-        print(payload.model_dump_json(indent=2))
-    else:
-        _print_json(payload, as_repr=False)
-
-    if batch_failures:
-        print(
-            f"warning: {batch_failures} of {len(input_files)} input(s) failed; "
-            "see output for details",
-            file=sys.stderr,
-        )
-        return 7  # partial batch failure under --continue-on-error
-    return 0
 
 
 if __name__ == "__main__":  # pragma: no cover
