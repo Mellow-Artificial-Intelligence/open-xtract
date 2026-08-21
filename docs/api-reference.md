@@ -132,6 +132,7 @@ Sum token usage across batch extraction results, for example the list returned
 by `extract_many_with_results` or `extract_many_with_results_async`. Returns a
 single [`Usage`](#usage) whose fields are the totals of the successful items.
 
+<<<<<<< HEAD
 ## Swarm
 
 A swarm runs several agents over one input and reduces their outputs. The input
@@ -184,6 +185,8 @@ and finish.
 
 Async counterpart to `extract_swarm_with_results`.
 
+=======
+>>>>>>> origin/main
 ## Swarm reduce
 
 A swarm runs several agents over one input and folds their outputs into a
