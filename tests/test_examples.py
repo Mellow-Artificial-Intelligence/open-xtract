@@ -32,6 +32,7 @@ ALL_MODULES = [
     "examples.advanced.retry_extract",
     "examples.advanced.reusable_sessions",
     "examples.advanced.extraction_styles",
+    "examples.advanced.swarm_extract",
     "examples.advanced.error_handling",
     "examples.audio.meeting_notes",
 ]

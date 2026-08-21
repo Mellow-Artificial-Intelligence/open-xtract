@@ -132,6 +132,61 @@ Sum token usage across batch extraction results, for example the list returned
 by `extract_many_with_results` or `extract_many_with_results_async`. Returns a
 single [`Usage`](#usage) whose fields are the totals of the successful items.
 
+<<<<<<< HEAD
+## Swarm
+
+A swarm runs several agents over one input and reduces their outputs. The input
+is fetched and decoded once, so a swarm costs one load and N model calls. Each
+agent is told its position in the swarm so it works independently instead of
+assuming a peer covered a section.
+
+Use a swarm when one pass under-recalls: a long document, a schema with many
+optional fields, or a job worth cross-checking with a second model. One
+document that one model handles well does not need one.
+
+### `SwarmMember`
+
+`SwarmMember(model, instructions=None, style=None)` is one agent. Its
+`instructions` and `style` override the swarm-wide values, so a `search` reader
+and a `direct` reader can share the same swarm. A bare model identifier or a
+configured pydantic-ai `Model` is accepted anywhere a `SwarmMember` is.
+
+### `SwarmResult`
+
+Returned by `extract_swarm_with_results*`. `output` is the reduced instance,
+`agents` holds each agent's [`ExtractionResult`](#extractionresult) or the
+exception it raised in agent order, `usage` sums the successful agents, and
+`reduce` is the strategy that produced `output`.
+
+### `resolve_swarm_members(agents, size=None)`
+
+Expand the `agents` argument into one `SwarmMember` per agent. A single agent
+plus `size` fans it out `size` times (1..16); a list is used as-is and `size`
+may not contradict its length.
+
+### `extract_swarm(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Run the agents concurrently over one input and return the reduced schema
+instance. `max_concurrency` defaults to `min(5, agents)`. Agent failures are
+tolerated as long as one agent succeeds; if every agent fails, the first
+failure is raised. Raises `RuntimeError` from a running event loop.
+
+### `extract_swarm_async(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Async counterpart to `extract_swarm`.
+
+### `extract_swarm_with_results(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, on_agent_start=None, on_agent=None)`
+
+Same run, returning a [`SwarmResult`](#swarmresult). `on_agent_start(index,
+total)` and `on_agent(index, total, result)` report progress as agents start
+and finish.
+
+### `extract_swarm_with_results_async(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, on_agent_start=None, on_agent=None)`
+
+Async counterpart to `extract_swarm_with_results`.
+
+=======
+>>>>>>> origin/main
 ## Swarm reduce
 
 A swarm runs several agents over one input and folds their outputs into a

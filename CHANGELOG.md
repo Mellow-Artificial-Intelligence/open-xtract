@@ -9,6 +9,13 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Swarms: `extract_swarm` / `extract_swarm_async` run several agents over one
+  input and return the reduced result, and
+  `extract_swarm_with_results*` additionally report each agent's
+  `ExtractionResult`, the summed usage, and the reduce strategy. Agents are a
+  model identifier, a configured pydantic-ai `Model`, or a `SwarmMember` with
+  per-agent `instructions` / `style`; `size` fans one agent out up to 16 ways.
+  The input is loaded once for the whole swarm.
 - Swarm reduce strategies: `SwarmReduce` (`merge`, `vote`, `first`),
   `normalize_reduce`, and `reduce_outputs` fold several same-schema outputs
   into one validated instance.

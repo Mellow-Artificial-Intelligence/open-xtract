@@ -12,6 +12,8 @@ This page is the integration contract for coding agents, IDE tools, and generate
 
 Import only names in `openextract.__all__`. Modules whose names start with `_` (`openextract._extract`, `_batch`, `_session`, `_cli`, …) are private and may change without deprecation.
 
+Swarm surface (provisional): `extract_swarm*`, `SwarmMember`, `SwarmResult`, `SwarmReduce`, `reduce_outputs`, `resolve_swarm_members`.
+
 Stable enough to generate against: `extract`, `extract_async`, `extract_with_usage`, `extract_with_usage_async`, `Usage`, and the exception types. Provisional (still public, may evolve before 1.0): sessions, batch helpers, `ExtractionInput` / `ExtractionResult`, `ExtractionStyle`, CLI flags.
 
 Canonical signatures: [API reference](api-reference.md). CI fails if those headings drift from the installed callables.
@@ -43,6 +45,8 @@ Always define a real `pydantic.BaseModel` subclass. Do not ask the library for f
 | Many inputs, want a list | `extract_many` (sync, **not** from a running loop) or `extract_many_async` |
 | Many inputs, stream as done | `iter_extract_many_async` — yields `(input_index, result)` in **completion order** |
 | Per-item usage / timing | `extract_many_with_results*` + `total_usage` |
+| Several agents on **one** input | `extract_swarm` / `extract_swarm_async` |
+| Per-agent usage / failures from a swarm | `extract_swarm_with_results*` → `SwarmResult` |
 | Shell / CI | `openextract` CLI; parse **stdout** only |
 
 ## Input rules (common bugs)

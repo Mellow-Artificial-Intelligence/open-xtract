@@ -9,6 +9,7 @@ _DEFAULT_URL_FETCH_TIMEOUT = 30.0
 _DEFAULT_MAX_REDIRECTS = 10
 _DEFAULT_RETRY_MAX_BACKOFF = 60.0
 _DEFAULT_MAX_INPUT_BYTES = 50 * 1024 * 1024
+_MAX_SWARM_SIZE = 16
 _URL_TIMEOUT_ENV = "OPENEXTRACT_URL_TIMEOUT"
 _MAX_REDIRECTS_ENV = "OPENEXTRACT_MAX_REDIRECTS"
 _ALLOW_PRIVATE_URLS_ENV = "OPENEXTRACT_ALLOW_PRIVATE_URLS"
@@ -108,6 +109,17 @@ def _validate_max_concurrency(max_concurrency: object) -> None:
         or max_concurrency < 1
     ):
         raise ValueError("max_concurrency must be a positive integer.")
+
+
+def _validate_swarm_size(size: object) -> int:
+    """Validate a swarm agent count and return it.
+
+    The upper bound keeps a typo (``size=1000``) from fanning out into a
+    provider-rate-limit incident before any model call is made.
+    """
+    if isinstance(size, bool) or not isinstance(size, int) or size < 1 or size > _MAX_SWARM_SIZE:
+        raise ValueError(f"size must be an integer from 1 to {_MAX_SWARM_SIZE}.")
+    return size
 
 
 def _validate_timeout(value: object, *, name: str) -> float:
