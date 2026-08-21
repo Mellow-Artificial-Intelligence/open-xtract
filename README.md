@@ -498,6 +498,18 @@ openextract ./reports/q4.pdf \
   --usage
 ```
 
+Swarm one input across several models, or extract with an agent:
+
+```bash
+openextract ./reports/q4.pdf \
+  --schema mypkg.schemas:Invoice \
+  --models openai:gpt-5.5,anthropic:claude-opus-4-8 \
+  --reduce vote
+
+# --schema is optional when the agent declares an output_schema
+openextract ./reports/q4.pdf --agent ./agents/invoices
+```
+
 Read from stdin:
 
 ```bash
@@ -530,13 +542,18 @@ cat ./reports/q4.pdf | openextract - \
 - `--continue-on-error` (batch only) keeps processing when an input fails; each
   failure is emitted inline as `{"input", "error", "error_type"}` and the command
   exits `7` if any input failed. Without it, a batch aborts on the first failure.
+- `--swarm N`, `--models a,b`, `--agent SPEC`, `--agents SPEC,SPEC`, and
+  `--reduce merge|vote|first` run several agents over a **single** input and
+  fold their outputs; `--schema` is optional when an agent declares an
+  `output_schema`.
 
 Concurrency, retry, and size options are validated before any model call.
 
 Exit codes: `0` success, `2` URL fetch error, `3` schema validation error, `4` model error,
 `5` other extraction error, `6` missing provider extra, `7` partial batch failure
-(`--continue-on-error`), `130` interrupted, `141` broken pipe, `1` any other
-failure (including bad `--schema` paths and invalid manifests).
+(`--continue-on-error`), `8` remote agent failure, `130` interrupted, `141`
+broken pipe, `1` any other failure (including missing or bad
+`--schema` / `--model` and invalid manifests).
 
 Extraction errors and progress are written to stderr; successful JSON, JSONL
 records, usage payloads, and `--continue-on-error` batch arrays are written to
@@ -633,7 +650,7 @@ below even though it is not exported from `__all__`.
 | `SchemaValidationError` | Stable | Raised when model output cannot be validated against the requested schema. |
 | `ModelError` | Stable | Raised for provider/model API failures, with `provider`, `status_code`, `retryable`, and `retry_after` metadata where available. |
 | `ProviderNotInstalledError` | Stable | Raised when the requested model provider extra is missing. Install hints may become more specific as providers are added. |
-| `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, and partial-batch exit code `7` are intended to remain. |
+| `openextract` CLI | Provisional | The command, core flags, JSON output, stderr error reporting, provider-install exit code `6`, partial-batch exit code `7`, and remote-agent exit code `8` are intended to remain. |
 
 No pre-1.0 signature changes are currently proposed for stable symbols.
 

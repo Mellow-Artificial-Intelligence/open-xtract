@@ -24,13 +24,14 @@ exit code `7` is returned — the batch output is still written.
 | Code | Meaning | Typical cause |
 | ---- | ------- | ------------- |
 | `0` | Success | Single-file or full-batch success |
-| `1` | Usage / setup error | Bad `--schema`, stdin without `--media-type`, invalid manifest, invalid concurrency/retry/size options, argparse failures |
+| `1` | Usage / setup error | Missing or bad `--schema` / `--model`, stdin without `--media-type`, invalid manifest, invalid concurrency/retry/size/swarm options, unloadable `--agent`, argparse failures |
 | `2` | URL fetch error | `UrlFetchError` (network failure, HTTP error, SSRF refusal) |
 | `3` | Schema validation error | `SchemaValidationError` |
 | `4` | Model API error | `ModelError` |
 | `5` | Other extraction error | `InputTooLargeError` and other `ExtractionError` subclasses |
 | `6` | Missing provider SDK | `ProviderNotInstalledError` |
 | `7` | Partial batch failure | `--continue-on-error` with one or more per-item failures |
+| `8` | Remote agent failure | `RemoteAgentError` from a `--agent` / `--agents` HTTP endpoint |
 | `130` | Interrupted | Ctrl-C / SIGINT; outstanding batch work is cancelled |
 | `141` | Broken pipe | stdout closed by the consumer (e.g. `head`); exits silently |
 
@@ -268,6 +269,36 @@ exit immediately with code `4`.
 flag, the CLI uses `OPENEXTRACT_MAX_INPUT_BYTES` or the 50 MiB default. Values
 must be positive integers. Oversized inputs fail before a model call and exit
 `5`; URL bodies and stdin remain bounded even without a reliable length header.
+
+## Swarms and agents
+
+`--swarm N` runs N copies of one model over a single input. `--models a,b`
+runs one agent per model. `--reduce` folds the outputs: `merge` (default),
+`vote`, or `first`.
+
+```bash
+openextract ./invoices/q4.pdf \
+  --schema mypkg.schemas:Invoice \
+  --models openai:gpt-5,anthropic:claude-opus-4-8 \
+  --reduce vote
+```
+
+`--agent SPEC` extracts with an [agent](agents.md) — a directory, a Python
+file, or `module:attribute`. `--agents SPEC,SPEC` runs several. An agent that
+declares an `output_schema` makes `--schema` optional:
+
+```bash
+openextract ./invoices/q4.pdf --agent ./agents/invoices
+```
+
+- These flags apply to a **single** positional input; combining them with
+  several input files, `--manifest`, or `--output jsonl` exits `1`.
+- `--swarm` may not contradict the length of `--models`, and `--model` and
+  `--models` are mutually exclusive.
+- A lone `--agent` is not itself a swarm, but an agent with subagents (or a
+  remote endpoint) still fans out and its outputs are reduced.
+- With `--usage`, a swarm prints `{"result": ..., "usage": ..., "agents": N,
+  "reduce": "..."}` instead of the single-call shape.
 
 ## Extraction styles
 

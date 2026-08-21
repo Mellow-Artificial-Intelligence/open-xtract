@@ -14,6 +14,7 @@ from typing import Any, BinaryIO, cast
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
+from ._agents import DefinedAgent, RemoteAgent, load_agent, load_agents
 from ._batch import _iter_extractions
 from ._config import (
     _resolve_max_input_bytes,
@@ -21,17 +22,21 @@ from ._config import (
     _validate_retry_options,
 )
 from ._extract import extract, extract_with_usage
+from ._reduce import SwarmReduce
 from ._styles import ExtractionStyle, normalize_style
+from ._swarm import extract_swarm, extract_swarm_with_results
 from ._types import ExtractionInput, ExtractionInputLike, ExtractionResult
 from .exceptions import (
     ExtractionError,
     ModelError,
     ProviderNotInstalledError,
+    RemoteAgentError,
     SchemaValidationError,
     UrlFetchError,
 )
 
 _EXIT_PARTIAL_FAILURE = 7
+_EXIT_REMOTE_AGENT = 8
 _EXIT_INTERRUPTED = 130  # 128 + SIGINT, the conventional Ctrl-C exit code
 _EXIT_BROKEN_PIPE = 141  # 128 + SIGPIPE, the conventional broken-pipe exit code
 _MANIFEST_KEYS = frozenset({"source", "media_type", "name"})
@@ -60,6 +65,76 @@ def _resolve_schema(schema_path: str) -> type[BaseModel]:
         raise ValueError(f"'{schema_path}' does not refer to a Pydantic BaseModel subclass.")
 
     return cls
+
+
+def _split_list(value: str | None) -> list[str]:
+    """Split a comma-separated CLI list, dropping blank entries."""
+    return [item.strip() for item in (value or "").split(",") if item.strip()]
+
+
+def _resolve_agents(args: argparse.Namespace) -> list[DefinedAgent | RemoteAgent]:
+    """Load the agents named by ``--agent`` / ``--agents``."""
+    if args.agent and args.agents:
+        raise ValueError("use --agent or --agents, not both")
+    if args.agent:
+        return [load_agent(args.agent)]
+    if args.agents:
+        return load_agents(args.agents)
+    return []
+
+
+def _agent_schema(agents: list[DefinedAgent | RemoteAgent]) -> type[BaseModel] | None:
+    """Return the first output schema declared by the loaded agents, if any."""
+    for agent in agents:
+        if agent.output_schema is not None:
+            return agent.output_schema
+    return None
+
+
+def _swarm_agents(
+    args: argparse.Namespace,
+    agents: list[DefinedAgent | RemoteAgent],
+) -> list | None:
+    """Build the swarm agent list, or ``None`` when this is a one-shot run.
+
+    ``--agents`` and ``--models`` list the agents outright; ``--swarm`` fans a
+    single model out. A lone ``--agent`` is not a swarm — it may still fan out
+    on its own if it declares subagents, which ``extract`` handles.
+    """
+    models = _split_list(args.models)
+    if len(agents) > 1:
+        return agents
+    if len(models) > 1:
+        return models
+    if args.swarm > 1:
+        return agents or models or [args.model]
+    return None
+
+
+def _validate_swarm_args(
+    args: argparse.Namespace,
+    agents: list[DefinedAgent | RemoteAgent],
+    items: list[ExtractionInputLike],
+) -> None:
+    """Reject swarm flag combinations before any input is loaded."""
+    if args.swarm < 1:
+        raise ValueError("--swarm must be a positive integer")
+    models = _split_list(args.models)
+    if agents or len(models) > 1 or args.swarm > 1:
+        if args.manifest is not None or len(items) != 1:
+            raise ValueError(
+                "--swarm, --models, --agent, and --agents apply to a single input; "
+                "omit them for batch files and manifests"
+            )
+        if args.output == "jsonl":
+            raise ValueError(
+                "--swarm, --models, --agent, and --agents produce a single result; "
+                "use --output json or repr"
+            )
+    if len(models) > 1 and args.swarm > 1 and args.swarm != len(models):
+        raise ValueError("--swarm does not match the number of --models")
+    if args.models and args.model:
+        raise ValueError("use --model or --models, not both")
 
 
 def _resolve_input_files(
@@ -214,6 +289,7 @@ async def _run_batch_async(
     labels: list[str],
     limit: int,
     args: argparse.Namespace,
+    model: str,
 ) -> int:
     """Stream the batch, emitting records (JSONL) or buffering them (array)."""
     with_usage = args.usage
@@ -224,7 +300,7 @@ async def _run_batch_async(
         "AsyncGenerator[tuple[int, object], None]",
         _iter_extractions(
             schema_cls,
-            args.model,
+            model,
             items,
             args.instructions,
             max_concurrency=args.max_concurrency,
@@ -295,23 +371,35 @@ def _run_batch(
     items: list[ExtractionInputLike],
     labels: list[str],
     args: argparse.Namespace,
+    model: str,
 ) -> int:
     """Validate batch options before any model call, then run the batch."""
     _validate_retry_options(args.max_retries, args.retry_backoff, args.retry_max_backoff)
     limit = _resolve_max_input_bytes(args.max_input_bytes)
-    return asyncio.run(_run_batch_async(schema_cls, items, labels, limit, args))
+    return asyncio.run(_run_batch_async(schema_cls, items, labels, limit, args, model))
+
+
+def _print_single_payload(payload: Any, args: argparse.Namespace) -> None:
+    """Print a single-result payload in the requested output format."""
+    if args.output == "repr":
+        _print_json(payload, as_repr=True)
+    elif not args.usage and isinstance(payload, BaseModel):
+        print(payload.model_dump_json(indent=2))
+    else:
+        _print_json(payload, as_repr=False)
 
 
 def _run_single(
     schema_cls: type[BaseModel],
     input_file: ExtractionInputLike,
     args: argparse.Namespace,
+    model: str | DefinedAgent | RemoteAgent,
 ) -> int:
     """Run a single extraction with the legacy output shapes."""
     if args.usage:
         result, usage = extract_with_usage(
             schema=schema_cls,
-            model=args.model,
+            model=model,
             input_file=input_file,
             instructions=args.instructions,
             style=args.style,
@@ -325,7 +413,7 @@ def _run_single(
     else:
         payload = extract(
             schema=schema_cls,
-            model=args.model,
+            model=model,
             input_file=input_file,
             instructions=args.instructions,
             style=args.style,
@@ -336,12 +424,39 @@ def _run_single(
             retry_max_backoff=args.retry_max_backoff,
         )
 
-    if args.output == "repr":
-        _print_json(payload, as_repr=True)
-    elif not args.usage and isinstance(payload, BaseModel):
-        print(payload.model_dump_json(indent=2))
+    _print_single_payload(payload, args)
+    return 0
+
+
+def _run_swarm(
+    schema_cls: type[BaseModel],
+    swarm_agents: list,
+    input_file: ExtractionInputLike,
+    args: argparse.Namespace,
+) -> int:
+    """Run a swarm over one input and print its payload."""
+    options: dict[str, Any] = {
+        "instructions": args.instructions,
+        "size": args.swarm if len(swarm_agents) == 1 else None,
+        "style": args.style,
+        "reduce": args.reduce,
+        "media_type": args.media_type,
+        "max_input_bytes": args.max_input_bytes,
+        "max_retries": args.max_retries,
+        "retry_backoff": args.retry_backoff,
+        "retry_max_backoff": args.retry_max_backoff,
+    }
+    if args.usage:
+        swarm = extract_swarm_with_results(schema_cls, swarm_agents, input_file, **options)
+        payload: Any = {
+            "result": swarm.output.model_dump(),
+            "usage": _usage_payload(swarm.usage),
+            "agents": len(swarm.agents),
+            "reduce": swarm.reduce.value,
+        }
     else:
-        _print_json(payload, as_repr=False)
+        payload = extract_swarm(schema_cls, swarm_agents, input_file, **options)
+    _print_single_payload(payload, args)
     return 0
 
 
@@ -360,13 +475,47 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--schema",
-        required=True,
-        help="Pydantic model import path in 'module:ClassName' form.",
+        default=None,
+        help=(
+            "Pydantic model import path in 'module:ClassName' form. Optional "
+            "when --agent/--agents supplies an output schema."
+        ),
     )
     parser.add_argument(
         "--model",
-        required=True,
+        default=None,
         help="pydantic-ai model identifier (e.g. 'xai:grok-4.3').",
+    )
+    parser.add_argument(
+        "--models",
+        default=None,
+        metavar="ID,ID",
+        help="Comma-separated model identifiers, one per swarm agent.",
+    )
+    parser.add_argument(
+        "--agent",
+        default=None,
+        metavar="SPEC",
+        help="Agent to extract with: a directory, a Python file, or 'module:attribute'.",
+    )
+    parser.add_argument(
+        "--agents",
+        default=None,
+        metavar="SPEC,SPEC",
+        help="Comma-separated agent specs, one per swarm agent.",
+    )
+    parser.add_argument(
+        "--swarm",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Run N parallel agents over a single input (default 1).",
+    )
+    parser.add_argument(
+        "--reduce",
+        choices=tuple(item.value for item in SwarmReduce),
+        default=SwarmReduce.MERGE.value,
+        help="How a swarm folds agent outputs: 'merge' (default), 'vote', or 'first'.",
     )
     parser.add_argument(
         "--instructions",
@@ -478,13 +627,21 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        schema_cls = _resolve_schema(args.schema)
+        agents = _resolve_agents(args)
+        schema_cls = _resolve_schema(args.schema) if args.schema else _agent_schema(agents)
+        if schema_cls is None:
+            raise ValueError(
+                "--schema is required unless --agent/--agents supplies an output schema"
+            )
+        if not args.model and not args.models and not agents:
+            raise ValueError("--model, --models, or --agent/--agents is required")
     except (ImportError, ValueError) as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
     try:
         items, labels = _resolve_cli_inputs(args)
+        _validate_swarm_args(args, agents, items)
     except OSError as exc:
         print(f"error: cannot read manifest: {exc}", file=sys.stderr)
         return 1
@@ -492,11 +649,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
+    swarm_agents = _swarm_agents(args, agents)
+    single_model = agents[0] if agents else (args.model or _split_list(args.models)[0])
+
     try:
         _validate_max_concurrency(args.max_concurrency)
+        if swarm_agents is not None:
+            return _run_swarm(schema_cls, swarm_agents, items[0], args)
         if args.manifest is not None or len(items) > 1 or args.output == "jsonl":
-            return _run_batch(schema_cls, items, labels, args)
-        return _run_single(schema_cls, items[0], args)
+            return _run_batch(schema_cls, items, labels, args, cast(str, single_model))
+        return _run_single(schema_cls, items[0], args, single_model)
     except BrokenPipeError:
         _discard_stdout()
         return _EXIT_BROKEN_PIPE
@@ -512,6 +674,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     except ModelError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 4
+    except RemoteAgentError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return _EXIT_REMOTE_AGENT
     except ProviderNotInstalledError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 6
