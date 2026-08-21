@@ -15,6 +15,11 @@ from ._extract import (
     extract_with_usage,
     extract_with_usage_async,
 )
+from ._reduce import (
+    SwarmReduce,
+    normalize_reduce,
+    reduce_outputs,
+)
 from ._session import AsyncExtractor, Extractor
 from ._styles import ExtractionStyle
 from ._types import (
@@ -40,6 +45,7 @@ __all__ = [
     "ExtractionInput",
     "ExtractionResult",
     "ExtractionStyle",
+    "SwarmReduce",
     "extract",
     "extract_async",
     "extract_many",
@@ -49,6 +55,8 @@ __all__ = [
     "extract_many_with_results_async",
     "extract_with_usage",
     "extract_with_usage_async",
+    "normalize_reduce",
+    "reduce_outputs",
     "total_usage",
     "Usage",
     "ExtractionError",

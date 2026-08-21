@@ -9,6 +9,9 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- Swarm reduce strategies: `SwarmReduce` (`merge`, `vote`, `first`),
+  `normalize_reduce`, and `reduce_outputs` fold several same-schema outputs
+  into one validated instance.
 - CLI batch ergonomics for large workflows: `--max-concurrency` (validated
   before any model call), `--output jsonl` for incremental completion-order
   records with an `index` field, `--progress` reporting on stderr only,
