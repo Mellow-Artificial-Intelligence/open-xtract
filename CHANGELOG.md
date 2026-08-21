@@ -8,6 +8,8 @@ timing when that is known.
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-20
+
 ### Added
 - CLI swarm and agent flags: `--swarm N`, `--models a,b`, `--agent SPEC`,
   `--agents SPEC,SPEC`, and `--reduce merge|vote|first`. `--schema` is now
