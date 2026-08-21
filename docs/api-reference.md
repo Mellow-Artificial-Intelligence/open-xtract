@@ -51,21 +51,30 @@ one-shot function arguments.
 (`ExtractionStyle.SEARCH`) or the string (`"search"`). Non-text inputs and a
 missing harness extra fail before the model call.
 
-### `extract(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+`model` also accepts an [agent](#agents), and an agent that declares an
+`output_schema` can be passed as `schema` instead — `extract(invoices, "doc.pdf")`
+is the same call as `extract(Invoice, invoices, "doc.pdf")`. An agent that
+resolves to one local model runs as a normal one-shot call using the agent's
+model, instructions, and style; an agent with subagents or a remote endpoint
+runs as a [swarm](#swarm) and its outputs are reduced. Omitting `input_file`
+raises `ValueError`; the parameter is optional only so the agent form can shift
+it left. The same applies to the three siblings below.
 
 Extract one input synchronously and return an instance of `schema`.
 
-### `extract_async(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_async(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract`. It uses `Agent.run` and returns an instance of
 `schema`.
 
-### `extract_with_usage(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_with_usage(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Extract one input synchronously and return `(output, Usage)`. It has the same
 retry behavior as `extract`; `Usage` describes the successful model call.
 
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_with_usage_async(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract_with_usage`; returns `(output, Usage)`.
 

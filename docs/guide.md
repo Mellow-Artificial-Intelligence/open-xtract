@@ -235,6 +235,20 @@ invoices = define_agent("Invoices", output_schema=Invoice, subagents=[line_items
 invoice = extract_swarm(schema=Invoice, agents=invoices, input_file="invoice.pdf")
 ```
 
+An agent works in `extract` too. When it declares an `output_schema`, the schema
+argument is redundant and can be dropped:
+
+```python
+from openextract import extract
+
+invoice = extract(invoices, "invoice.pdf")          # agent supplies model + schema
+invoice = extract(Invoice, line_items, "invoice.pdf")  # explicit schema, agent as the model
+```
+
+A single-model agent runs as an ordinary one-shot call. An agent with subagents
+(or a remote endpoint) fans out into a swarm and its outputs are merged, so the
+same call scales with the agent rather than the call site.
+
 Agents also load from disk, so a repository can ship them next to the code:
 
 ```text

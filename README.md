@@ -351,6 +351,15 @@ invoices = define_agent("Invoices", output_schema=Invoice, subagents=[line_items
 invoice = extract_swarm(schema=Invoice, agents=invoices, input_file="invoice.pdf")
 ```
 
+An agent works in `extract` too, and supplies the schema when it declares one:
+
+```python
+invoice = extract(invoices, "invoice.pdf")
+```
+
+A single-model agent runs as an ordinary one-shot call; an agent with subagents
+or a remote endpoint fans out into a swarm and its outputs are merged.
+
 Agents also load from disk or an import path, so a repository can ship them
 next to the code — `load_agent("agents/invoices")` reads `agent.py`,
 `subagents/`, and `instructions.md`; `load_agent("my_pkg.agents:invoices")`
