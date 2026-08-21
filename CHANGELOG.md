@@ -28,6 +28,15 @@ timing when that is known.
 - Swarm reduce strategies: `SwarmReduce` (`merge`, `vote`, `first`),
   `normalize_reduce`, and `reduce_outputs` fold several same-schema outputs
   into one validated instance.
+- CLI batch ergonomics for large workflows: `--max-concurrency` (validated
+  before any model call), `--output jsonl` for incremental completion-order
+  records with an `index` field, `--progress` reporting on stderr only,
+  `--manifest` for JSONL per-input `source`/`media_type`/`name` configuration,
+  and `--usage` on batches with per-item plus aggregate token usage via the
+  rich result API. The default JSON array output and exit codes `0`-`7` are
+  unchanged; Ctrl-C now exits `130` and a closed stdout pipe exits `141`, with
+  cancellation, ordering, and partial-failure contracts documented in
+  `docs/cli.md`.
 - `scripts/extractbench.py` runs [ExtractBench](https://github.com/run-llama/ExtractBench)
   through openextract with any `pydantic-ai` model identifier (`--model openai:gpt-5 --test`).
 - Extraction styles: `style='direct'` (default) still sends media to the model
