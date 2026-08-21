@@ -169,6 +169,134 @@ async for index, item in iter_extract_many_async(
 
 See [`examples/batch/stream_batch_extract.py`](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/examples/batch/stream_batch_extract.py).
 
+## Swarms
+
+`extract_many` scales across inputs; a swarm scales across *agents* on **one**
+input. The file is loaded once, the agents run concurrently, and their outputs
+are reduced into a single validated object.
+
+```python
+from openextract import SwarmMember, extract_swarm, extract_swarm_with_results
+
+# Three passes of one model, merged.
+invoice = extract_swarm(
+    schema=Invoice, agents="openai:gpt-5", input_file="invoice.pdf", size=3
+)
+
+# Two models cross-checking each other, majority per field.
+invoice = extract_swarm(
+    schema=Invoice,
+    agents=["openai:gpt-5", "anthropic:claude-opus-4-8"],
+    input_file="invoice.pdf",
+    reduce="vote",
+)
+
+# Per-agent instructions and styles, plus per-agent diagnostics.
+swarm = extract_swarm_with_results(
+    schema=Invoice,
+    agents=[
+        SwarmMember("openai:gpt-5", instructions="Line items only.", style="search"),
+        SwarmMember("openai:gpt-5", instructions="Totals and dates only."),
+    ],
+    input_file="invoice.txt",
+)
+print(swarm.output, swarm.usage, swarm.reduce)
+```
+
+`reduce` is `merge` (union lists, fill fields), `vote` (majority per field), or
+`first`. A swarm survives partial failure: agents that raised appear in
+`swarm.agents`, and only every agent failing raises. `size` is capped at 16,
+and `max_concurrency` defaults to `min(5, agents)`.
+
+Reach for a swarm when one pass under-recalls — a long document, a wide schema,
+or a result worth cross-checking with a second model. One document one model
+handles well does not need one.
+
+See [`examples/advanced/swarm_extract.py`](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/examples/advanced/swarm_extract.py).
+
+## Agents
+
+A swarm member is a model plus instructions plus a style. An agent packages
+that once so callers import a specialist instead of re-describing it, and
+`subagents` compose several into one.
+
+```python
+from pydantic import BaseModel
+from openextract import define_agent, extract_swarm
+
+class Invoice(BaseModel):
+    vendor: str
+    total: float
+
+line_items = define_agent("Line items", model="openai:gpt-5", instructions="Rows only.")
+totals = define_agent("Totals", model="openai:gpt-5", instructions="Totals and dates.")
+invoices = define_agent("Invoices", output_schema=Invoice, subagents=[line_items, totals])
+
+invoice = extract_swarm(schema=Invoice, agents=invoices, input_file="invoice.pdf")
+```
+
+An agent works in `extract` too. When it declares an `output_schema`, the schema
+argument is redundant and can be dropped:
+
+```python
+from openextract import extract
+
+invoice = extract(invoices, "invoice.pdf")          # agent supplies model + schema
+invoice = extract(Invoice, line_items, "invoice.pdf")  # explicit schema, agent as the model
+```
+
+A single-model agent runs as an ordinary one-shot call. An agent with subagents
+(or a remote endpoint) fans out into a swarm and its outputs are merged, so the
+same call scales with the agent rather than the call site.
+
+Agents also load from disk, so a repository can ship them next to the code:
+
+```text
+agents/invoices/
+  agent.py          # agent = define_agent(...)
+  instructions.md   # used when agent.py declares none
+  subagents/
+    line_items.py
+    totals.py
+```
+
+```python
+from openextract import load_agent, load_agents
+
+invoices = load_agent("agents/invoices")        # directory
+totals = load_agent("agents/totals.py")          # file
+imported = load_agent("my_package.agents:invoices")   # module:attribute
+both = load_agents("agents/invoices,agents/receipts")
+```
+
+### Remote agents
+
+`define_remote_agent` points at an HTTP endpoint instead of a local model. It
+posts the JSON Schema, the base64 media, and the style, and reads back
+`{"output": ...}`.
+
+```python
+import os
+
+from openextract import define_remote_agent, extract_swarm
+from openextract.auth import bearer
+
+remote = define_remote_agent(
+    url=lambda: os.environ["INVOICE_AGENT_URL"],
+    description="Hosted invoice reader",
+    auth=bearer(lambda: os.environ["INVOICE_AGENT_TOKEN"]),
+)
+
+invoice = extract_swarm(schema=Invoice, agents=["openai:gpt-5", remote], input_file="invoice.pdf")
+```
+
+`url`, `headers`, and `auth` may be callables (sync or async) resolved per
+request, so rotated credentials are picked up without redefining the agent.
+Transport failures and 408/409/425/429/5xx responses raise a retryable
+`RemoteAgentError` and honour `max_retries`. The endpoint host goes through the
+same SSRF allowlist as document URLs; a local agent server needs
+`OPENEXTRACT_ALLOW_PRIVATE_URLS=1`.
+
 ## Errors
 
 All public exceptions subclass `ExtractionError`.

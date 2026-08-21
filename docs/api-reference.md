@@ -51,21 +51,30 @@ one-shot function arguments.
 (`ExtractionStyle.SEARCH`) or the string (`"search"`). Non-text inputs and a
 missing harness extra fail before the model call.
 
-### `extract(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+`model` also accepts an [agent](#agents), and an agent that declares an
+`output_schema` can be passed as `schema` instead — `extract(invoices, "doc.pdf")`
+is the same call as `extract(Invoice, invoices, "doc.pdf")`. An agent that
+resolves to one local model runs as a normal one-shot call using the agent's
+model, instructions, and style; an agent with subagents or a remote endpoint
+runs as a [swarm](#swarm) and its outputs are reduced. Omitting `input_file`
+raises `ValueError`; the parameter is optional only so the agent form can shift
+it left. The same applies to the three siblings below.
 
 Extract one input synchronously and return an instance of `schema`.
 
-### `extract_async(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_async(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract`. It uses `Agent.run` and returns an instance of
 `schema`.
 
-### `extract_with_usage(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_with_usage(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Extract one input synchronously and return `(output, Usage)`. It has the same
 retry behavior as `extract`; `Usage` describes the successful model call.
 
-### `extract_with_usage_async(schema, model, input_file, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+### `extract_with_usage_async(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
 
 Async counterpart to `extract_with_usage`; returns `(output, Usage)`.
 
@@ -131,6 +140,174 @@ result ordering, and per-item retry behavior.
 Sum token usage across batch extraction results, for example the list returned
 by `extract_many_with_results` or `extract_many_with_results_async`. Returns a
 single [`Usage`](#usage) whose fields are the totals of the successful items.
+
+## Swarm
+
+A swarm runs several agents over one input and reduces their outputs. The input
+is fetched and decoded once, so a swarm costs one load and N model calls. Each
+agent is told its position in the swarm so it works independently instead of
+assuming a peer covered a section.
+
+Use a swarm when one pass under-recalls: a long document, a schema with many
+optional fields, or a job worth cross-checking with a second model. One
+document that one model handles well does not need one.
+
+### `SwarmMember`
+
+`SwarmMember(model, instructions=None, style=None)` is one agent, where `model`
+is a model identifier, a configured pydantic-ai `Model`, or a `RemoteAgent`. Its
+`instructions` and `style` override the swarm-wide values, so a `search` reader
+and a `direct` reader can share the same swarm. A bare model identifier or a
+configured pydantic-ai `Model` is accepted anywhere a `SwarmMember` is.
+
+### `SwarmResult`
+
+Returned by `extract_swarm_with_results*`. `output` is the reduced instance,
+`agents` holds each agent's [`ExtractionResult`](#extractionresult) or the
+exception it raised in agent order, `usage` sums the successful agents, and
+`reduce` is the strategy that produced `output`.
+
+### `resolve_swarm_members(agents, size=None)`
+
+Expand the `agents` argument into one `SwarmMember` per agent. A single agent
+plus `size` fans it out `size` times (1..16); a list is used as-is and `size`
+may not contradict its length. [Defined agents](#agents) are flattened first,
+so a parent with subagents contributes one member per leaf.
+
+### `extract_swarm(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Run the agents concurrently over one input and return the reduced schema
+instance. `max_concurrency` defaults to `min(5, agents)`. Agent failures are
+tolerated as long as one agent succeeds; if every agent fails, the first
+failure is raised. Raises `RuntimeError` from a running event loop.
+
+### `extract_swarm_async(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0)`
+
+Async counterpart to `extract_swarm`.
+
+### `extract_swarm_with_results(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, on_agent_start=None, on_agent=None)`
+
+Same run, returning a [`SwarmResult`](#swarmresult). `on_agent_start(index,
+total)` and `on_agent(index, total, result)` report progress as agents start
+and finish.
+
+### `extract_swarm_with_results_async(schema, agents, input_file, instructions=None, *, size=None, style='direct', reduce='merge', media_type=None, max_input_bytes=None, max_concurrency=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, on_agent_start=None, on_agent=None)`
+
+Async counterpart to `extract_swarm_with_results`.
+
+## Agents
+
+An agent packages what a swarm member would otherwise repeat at every call
+site — model, style, instructions, and output schema — so a caller imports a
+specialist instead of re-specifying it. Agents compose: a parent with
+`subagents` flattens into one swarm member per leaf, so an agent is accepted
+anywhere `agents` is.
+
+### `define_agent(description, *, model=None, style=None, instructions=None, output_schema=None, subagents=())`
+
+Define a local agent. `description` is required. `model` is optional only when
+`subagents` is non-empty (a pure group). `output_schema` must be a
+`pydantic.BaseModel` subclass. Returns a frozen `DefinedAgent`.
+
+### `define_remote_agent(url, description, *, auth=None, headers=None, path='/extract', output_schema=None)`
+
+Define an agent served over HTTP. Returns a frozen `RemoteAgent`. `url` may be
+a callable (sync or async) so a rotating deployment URL is resolved per
+request; `headers` and `auth` likewise. See [Remote agent
+protocol](#remote-agent-protocol).
+
+### `flatten_agent(agent)`
+
+Expand one agent into the `SwarmMember` list it contributes: its own model
+first (when it has one), then each subagent's members, depth first.
+
+### `resolve_output_schema(agent)`
+
+Return the agent's `output_schema`, or raise `ValueError` naming the agent when
+it declared none.
+
+### `load_agent(spec)`
+
+Load one agent from a directory, a Python file, or a `module:attribute` path. A
+`DefinedAgent` / `RemoteAgent` passes through unchanged. A file or module must
+expose the agent as a module-level name (`agent` for files, the named attribute
+for `module:attribute`).
+
+### `load_agents(spec)`
+
+Load several agents from a comma-separated string or a sequence of specs.
+
+### `load_agent_directory(directory)`
+
+Load an agent from a directory laid out as:
+
+```text
+invoices/
+  agent.py          # defines `agent = define_agent(...)`
+  instructions.md   # used when the agent declared no instructions
+  subagents/
+    line_items.py   # each defines `agent = ...`
+    totals/         # nested directories load recursively
+```
+
+Entries beginning with `.` or `_` are skipped and subagents load in sorted
+order. A directory with subagents but no `agent.py` becomes a group agent named
+after the directory; a directory with exactly one subagent resolves to it.
+
+### Remote agent protocol
+
+`RemoteAgent` posts to `url + path` with
+`{"schema": <JSON Schema>, "input": {"data": <base64>, "mediaType": <MIME>}, "instructions": ..., "style": ...}`
+and reads `{"output": ..., "usage": {...}}` — a bare object is treated as the
+output, and `{"error": "..."}` (at any status) raises `RemoteAgentError`.
+`usage` is accepted in either `inputTokens` or `input_tokens` spelling. HTTP
+408/409/425/429/5xx and transport failures are retryable and honour
+`max_retries`.
+
+The agent URL goes through the same SSRF host allowlist as document URLs, so a
+local agent server needs `OPENEXTRACT_ALLOW_PRIVATE_URLS=1`.
+
+### `openextract.auth`
+
+Outbound auth header providers for `define_remote_agent(auth=...)`. Each is
+resolved per request, so a refreshed credential is picked up without redefining
+the agent.
+
+| Helper | Header |
+| --- | --- |
+| `bearer(token)` | `Authorization: Bearer <token>` |
+| `basic((username, password))` | `Authorization: Basic <base64>` |
+| `vercel_oidc()` | Bearer token read from `VERCEL_OIDC_TOKEN` |
+
+`bearer` and `basic` accept the value itself or a callable (sync or async)
+returning it.
+
+## Swarm reduce
+
+A swarm runs several agents over one input and folds their outputs into a
+single result. The fold strategy is `SwarmReduce`; the reducers are public so a
+caller can combine outputs it gathered itself.
+
+### SwarmReduce
+
+`merge` (default) unions list fields and fills each scalar field from the first
+agent that produced a value. `vote` keeps the most frequent non-empty value per
+field, breaking ties toward the earlier agent; list fields have no majority, so
+they fall back to `merge`. `first` returns the first successful agent's output
+untouched. Pass the enum (`SwarmReduce.VOTE`) or the string (`"vote"`).
+
+### `normalize_reduce(reduce='merge')`
+
+Return a valid `SwarmReduce` for an enum member or string, or raise
+`ValueError` naming the allowed strategies.
+
+### `reduce_outputs(values, reduce='merge')`
+
+Fold a sequence of same-schema Pydantic model instances into one instance.
+`merge` and `vote` reduce the dumped payloads and re-validate the combined
+value, so the return value always satisfies the schema; a combination that no
+longer validates raises `SchemaValidationError`. An empty `values` raises
+`ValueError`.
 
 ## Choosing a batch API
 

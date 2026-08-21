@@ -2,6 +2,18 @@
 openextract - Extract structured data from documents, images, audio, and video using LLMs.
 """
 
+from ._agents import (
+    DefinedAgent,
+    RemoteAgent,
+    SwarmMember,
+    define_agent,
+    define_remote_agent,
+    flatten_agent,
+    load_agent,
+    load_agent_directory,
+    load_agents,
+    resolve_output_schema,
+)
 from ._batch import (
     extract_many,
     extract_many_async,
@@ -15,8 +27,21 @@ from ._extract import (
     extract_with_usage,
     extract_with_usage_async,
 )
+from ._reduce import (
+    SwarmReduce,
+    normalize_reduce,
+    reduce_outputs,
+)
 from ._session import AsyncExtractor, Extractor
 from ._styles import ExtractionStyle
+from ._swarm import (
+    SwarmResult,
+    extract_swarm,
+    extract_swarm_async,
+    extract_swarm_with_results,
+    extract_swarm_with_results_async,
+    resolve_swarm_members,
+)
 from ._types import (
     ExtractionInput,
     ExtractionResult,
@@ -29,6 +54,7 @@ from .exceptions import (
     InputTooLargeError,
     ModelError,
     ProviderNotInstalledError,
+    RemoteAgentError,
     SchemaValidationError,
     UrlFetchError,
 )
@@ -40,6 +66,13 @@ __all__ = [
     "ExtractionInput",
     "ExtractionResult",
     "ExtractionStyle",
+    "DefinedAgent",
+    "RemoteAgent",
+    "SwarmMember",
+    "SwarmReduce",
+    "SwarmResult",
+    "define_agent",
+    "define_remote_agent",
     "extract",
     "extract_async",
     "extract_many",
@@ -48,13 +81,26 @@ __all__ = [
     "extract_many_with_results",
     "extract_many_with_results_async",
     "extract_with_usage",
+    "extract_swarm",
+    "extract_swarm_async",
+    "extract_swarm_with_results",
+    "extract_swarm_with_results_async",
     "extract_with_usage_async",
+    "flatten_agent",
+    "load_agent",
+    "load_agent_directory",
+    "load_agents",
+    "normalize_reduce",
+    "reduce_outputs",
+    "resolve_output_schema",
+    "resolve_swarm_members",
     "total_usage",
     "Usage",
     "ExtractionError",
     "InputTooLargeError",
     "ModelError",
     "ProviderNotInstalledError",
+    "RemoteAgentError",
     "SchemaValidationError",
     "UrlFetchError",
 ]

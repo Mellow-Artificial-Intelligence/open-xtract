@@ -9,6 +9,43 @@ timing when that is known.
 ## [Unreleased]
 
 ### Added
+- CLI swarm and agent flags: `--swarm N`, `--models a,b`, `--agent SPEC`,
+  `--agents SPEC,SPEC`, and `--reduce merge|vote|first`. `--schema` is now
+  optional when an agent declares an `output_schema`, and `--usage` on a swarm
+  reports the agent count and reduce strategy. Remote agent failures exit `8`.
+- Agents are accepted by `extract`, `extract_async`, `extract_with_usage`, and
+  `extract_with_usage_async` in the `model` position, and an agent declaring an
+  `output_schema` can be passed as `schema` — `extract(agent, input_file)`.
+  A single-model agent runs as a one-shot call; an agent with subagents or a
+  remote endpoint fans out into a swarm and its outputs are reduced.
+- Importable extract agents: `define_agent` / `define_remote_agent` package a
+  model, style, instructions, and `output_schema` behind a description, and
+  `subagents` compose them. `load_agent` / `load_agents` /
+  `load_agent_directory` load them from a directory (`agent.py`,
+  `subagents/`, `instructions.md`), a Python file, or `module:attribute`.
+  Agents are accepted anywhere a swarm takes `agents`.
+- Remote agents over HTTP with `RemoteAgentError` (retried on transient
+  statuses and transport failures) and per-request auth providers in
+  `openextract.auth`: `bearer`, `basic`, and `vercel_oidc`.
+- Swarms: `extract_swarm` / `extract_swarm_async` run several agents over one
+  input and return the reduced result, and
+  `extract_swarm_with_results*` additionally report each agent's
+  `ExtractionResult`, the summed usage, and the reduce strategy. Agents are a
+  model identifier, a configured pydantic-ai `Model`, or a `SwarmMember` with
+  per-agent `instructions` / `style`; `size` fans one agent out up to 16 ways.
+  The input is loaded once for the whole swarm.
+- Swarm reduce strategies: `SwarmReduce` (`merge`, `vote`, `first`),
+  `normalize_reduce`, and `reduce_outputs` fold several same-schema outputs
+  into one validated instance.
+- CLI batch ergonomics for large workflows: `--max-concurrency` (validated
+  before any model call), `--output jsonl` for incremental completion-order
+  records with an `index` field, `--progress` reporting on stderr only,
+  `--manifest` for JSONL per-input `source`/`media_type`/`name` configuration,
+  and `--usage` on batches with per-item plus aggregate token usage via the
+  rich result API. The default JSON array output and exit codes `0`-`7` are
+  unchanged; Ctrl-C now exits `130` and a closed stdout pipe exits `141`, with
+  cancellation, ordering, and partial-failure contracts documented in
+  `docs/cli.md`.
 - `scripts/extractbench.py` runs [ExtractBench](https://github.com/run-llama/ExtractBench)
   through openextract with any `pydantic-ai` model identifier (`--model openai:gpt-5 --test`).
 - Extraction styles: `style='direct'` (default) still sends media to the model
