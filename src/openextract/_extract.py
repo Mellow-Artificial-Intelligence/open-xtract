@@ -52,8 +52,6 @@ from ._errors import (
     _parse_retry_after,
 )
 from ._media import (
-    _fetch_url,
-    _fetch_url_async,
     _get_media,
     _get_media_async,
     _get_media_type,
@@ -515,8 +513,6 @@ __all__ = [
     "total_usage",
     "_build_agent",
     "_extract_once",
-    "_fetch_url",
-    "_fetch_url_async",
     "_get_media",
     "_get_media_async",
     "_get_media_type",

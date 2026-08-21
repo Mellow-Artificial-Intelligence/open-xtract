@@ -344,12 +344,12 @@ class TestMainBatch:
 
         assert exit_code == 0
         mock_stream.assert_called_once()
-        kwargs = mock_stream.call_args.kwargs
-        assert kwargs["max_concurrency"] == 5
-        assert kwargs["return_exceptions"] is False
-        assert kwargs["max_input_bytes"] == 50 * 1024 * 1024
-        assert kwargs["rich"] is False
-        assert kwargs["style"] is ExtractionStyle.DIRECT
+        options = mock_stream.call_args.args[3]
+        assert options.max_concurrency == 5
+        assert options.return_exceptions is False
+        assert options.max_input_bytes == 50 * 1024 * 1024
+        assert options.rich is False
+        assert options.style is ExtractionStyle.DIRECT
         payload = json.loads(capsys.readouterr().out)
         assert payload == [{"name": "Ada", "age": 36}, {"name": "Ada", "age": 36}]
 
@@ -370,7 +370,7 @@ class TestMainBatch:
 
         main(["a.pdf", "b.pdf", *_BASE_ARGS, "--max-concurrency", "2"])
 
-        assert mock_stream.call_args.kwargs["max_concurrency"] == 2
+        assert mock_stream.call_args.args[3].max_concurrency == 2
         capsys.readouterr()
 
     def test_continue_on_error_passes_return_exceptions(self, mocker, capsys):
@@ -379,7 +379,7 @@ class TestMainBatch:
 
         main(["a.pdf", "b.pdf", *_BASE_ARGS, "--continue-on-error"])
 
-        assert mock_stream.call_args.kwargs["return_exceptions"] is True
+        assert mock_stream.call_args.args[3].return_exceptions is True
         capsys.readouterr()
 
     def test_continue_on_error_reports_failures_and_exits_7(self, mocker, capsys):
@@ -479,7 +479,7 @@ class TestUsage:
         exit_code = main(["a.pdf", "b.pdf", *_BASE_ARGS, "--usage"])
 
         assert exit_code == 0
-        assert mock_stream.call_args.kwargs["rich"] is True
+        assert mock_stream.call_args.args[3].rich is True
         capsys.readouterr()
 
     def test_batch_usage_reports_per_item_and_aggregate(self, mocker, capsys):

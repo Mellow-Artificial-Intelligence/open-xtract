@@ -7,7 +7,8 @@ import ipaddress
 import mimetypes
 import os
 import socket
-from collections.abc import Mapping
+from collections.abc import AsyncIterator, Iterator, Mapping
+from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import BinaryIO, cast
 from urllib.parse import urlparse
@@ -68,7 +69,13 @@ def _item_source_label(source: MediaSource, name: str | None) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------------------
+# Byte-limit enforcement
+# ---------------------------------------------------------------------------
+
+
 def _input_too_large(*, limit: int, observed: int, source: str) -> InputTooLargeError:
+    """Build the single ``InputTooLargeError`` message used by every reader."""
     return InputTooLargeError(
         f"{source} exceeds the configured size limit ({limit} bytes); "
         f"got at least {observed} bytes. Set {_MAX_INPUT_BYTES_ENV} or pass "
@@ -76,37 +83,59 @@ def _input_too_large(*, limit: int, observed: int, source: str) -> InputTooLarge
     )
 
 
+def _reject_declared_size(size: int | None, *, limit: int, source: str) -> None:
+    """Fail before reading when an advertised size already exceeds the cap."""
+    if size is not None and size > limit:
+        raise _input_too_large(limit=limit, observed=size, source=source)
+
+
+class _LimitedBuffer:
+    """Accumulate chunks while failing fast once the byte cap is exceeded.
+
+    Shared by the file-like, sync-response, and async-response readers so the
+    cap is enforced identically no matter where the bytes come from.
+    """
+
+    def __init__(self, *, limit: int, source: str) -> None:
+        self._chunks: list[bytes] = []
+        self._limit = limit
+        self._source = source
+        self.total = 0
+
+    def add(self, chunk: bytes) -> None:
+        self.total += len(chunk)
+        if self.total > self._limit:
+            raise _input_too_large(limit=self._limit, observed=self.total, source=self._source)
+        self._chunks.append(chunk)
+
+    def value(self) -> bytes:
+        return b"".join(self._chunks)
+
+    def next_read_size(self) -> int:
+        """Read at most one byte past the remaining budget to detect overruns."""
+        return min(_INPUT_READ_CHUNK_SIZE, self._limit - self.total + 1)
+
+
 def _enforce_max_input_bytes(data: bytes, *, limit: int, source: str) -> bytes:
-    if len(data) > limit:
-        raise _input_too_large(limit=limit, observed=len(data), source=source)
-    return data
-
-
-def _accumulate_chunk(
-    chunks: list[bytes],
-    chunk: bytes,
-    *,
-    total: int,
-    limit: int,
-    source: str,
-) -> int:
-    total += len(chunk)
-    if total > limit:
-        raise _input_too_large(limit=limit, observed=total, source=source)
-    chunks.append(chunk)
-    return total
+    buffer = _LimitedBuffer(limit=limit, source=source)
+    buffer.add(data)
+    return buffer.value()
 
 
 def _read_file_like_limited(stream: BinaryIO, *, limit: int, source: str) -> bytes:
     """Read a binary stream in bounded chunks, including non-seekable streams."""
-    chunks: list[bytes] = []
-    total = 0
+    buffer = _LimitedBuffer(limit=limit, source=source)
     while True:
-        chunk = stream.read(min(_INPUT_READ_CHUNK_SIZE, limit - total + 1))
+        chunk = stream.read(buffer.next_read_size())
         if not chunk:
             break
-        total = _accumulate_chunk(chunks, chunk, total=total, limit=limit, source=source)
-    return b"".join(chunks)
+        buffer.add(chunk)
+    return buffer.value()
+
+
+# ---------------------------------------------------------------------------
+# SSRF defenses
+# ---------------------------------------------------------------------------
 
 
 def _is_public_ip(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
@@ -153,16 +182,23 @@ def _is_safe_host(host: str | None) -> bool:
     return True
 
 
+def _unsafe_host_error(url: str) -> UrlFetchError:
+    return UrlFetchError(f"Refusing to fetch URL with non-public host: {urlparse(url).hostname!r}")
+
+
 def _require_safe_url(url: str) -> None:
-    host = urlparse(url).hostname
-    if not _is_safe_host(host):
-        raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
+    if not _is_safe_host(urlparse(url).hostname):
+        raise _unsafe_host_error(url)
 
 
 async def _require_safe_url_async(url: str) -> None:
-    host = urlparse(url).hostname
-    if not await asyncio.to_thread(_is_safe_host, host):
-        raise UrlFetchError(f"Refusing to fetch URL with non-public host: {host!r}")
+    if not await asyncio.to_thread(_is_safe_host, urlparse(url).hostname):
+        raise _unsafe_host_error(url)
+
+
+# ---------------------------------------------------------------------------
+# URL fetching
+# ---------------------------------------------------------------------------
 
 
 def _redirect_target(current: str, response: httpx.Response) -> str | None:
@@ -176,41 +212,11 @@ def _redirect_target(current: str, response: httpx.Response) -> str | None:
     return None
 
 
-def _fetch_url(url: str) -> httpx.Response:
-    """Fetch ``url`` with SSRF defenses; validate the host at every redirect hop."""
-    with httpx.Client(follow_redirects=False, timeout=_url_fetch_timeout()) as client:
-        return _fetch_url_with_client(url, client)
+def _too_many_redirects(limit: int) -> UrlFetchError:
+    return UrlFetchError(f"Too many redirects (>{limit})")
 
 
-def _fetch_url_with_client(url: str, client: httpx.Client) -> httpx.Response:
-    """Fetch ``url`` through ``client`` while validating every redirect target."""
-    current = url
-    limit = _max_redirects()
-    for _ in range(limit):
-        _require_safe_url(current)
-        response = client.get(current)
-        nxt = _redirect_target(current, response)
-        if nxt is None:
-            return response
-        current = nxt
-    raise UrlFetchError(f"Too many redirects (>{limit})")
-
-
-async def _fetch_url_async(url: str, client: httpx.AsyncClient) -> httpx.Response:
-    """Async URL fetch with the same redirect-by-redirect SSRF validation."""
-    current = url
-    limit = _max_redirects()
-    for _ in range(limit):
-        await _require_safe_url_async(current)
-        response = await client.get(current)
-        nxt = _redirect_target(current, response)
-        if nxt is None:
-            return response
-        current = nxt
-    raise UrlFetchError(f"Too many redirects (>{limit})")
-
-
-def _response_content_length(response: httpx.Response) -> int | None:
+def _declared_content_length(response: httpx.Response) -> int | None:
     raw = response.headers.get("content-length")
     if raw is None:
         return None
@@ -221,24 +227,17 @@ def _response_content_length(response: httpx.Response) -> int | None:
     return value if value >= 0 else None
 
 
-def _reject_oversized_content_length(response: httpx.Response, *, limit: int, source: str) -> None:
-    content_length = _response_content_length(response)
-    if content_length is not None and content_length > limit:
-        raise _input_too_large(limit=limit, observed=content_length, source=source)
+def _response_buffer(response: httpx.Response, *, limit: int, source: str) -> _LimitedBuffer:
+    """Start a capped buffer for ``response``, rejecting an oversized Content-Length."""
+    _reject_declared_size(_declared_content_length(response), limit=limit, source=source)
+    return _LimitedBuffer(limit=limit, source=source)
 
 
-def _read_response_limited(
-    response: httpx.Response,
-    *,
-    limit: int,
-    source: str,
-) -> bytes:
-    _reject_oversized_content_length(response, limit=limit, source=source)
-    chunks: list[bytes] = []
-    total = 0
+def _read_response_limited(response: httpx.Response, *, limit: int, source: str) -> bytes:
+    buffer = _response_buffer(response, limit=limit, source=source)
     for chunk in response.iter_bytes(chunk_size=_INPUT_READ_CHUNK_SIZE):
-        total = _accumulate_chunk(chunks, chunk, total=total, limit=limit, source=source)
-    return b"".join(chunks)
+        buffer.add(chunk)
+    return buffer.value()
 
 
 async def _read_response_limited_async(
@@ -247,12 +246,10 @@ async def _read_response_limited_async(
     limit: int,
     source: str,
 ) -> bytes:
-    _reject_oversized_content_length(response, limit=limit, source=source)
-    chunks: list[bytes] = []
-    total = 0
+    buffer = _response_buffer(response, limit=limit, source=source)
     async for chunk in response.aiter_bytes(chunk_size=_INPUT_READ_CHUNK_SIZE):
-        total = _accumulate_chunk(chunks, chunk, total=total, limit=limit, source=source)
-    return b"".join(chunks)
+        buffer.add(chunk)
+    return buffer.value()
 
 
 def _read_url_with_client(
@@ -261,7 +258,11 @@ def _read_url_with_client(
     *,
     limit: int,
 ) -> tuple[bytes, Mapping[str, str]]:
-    """Fetch a URL and stream its final response through the byte cap."""
+    """Fetch a URL and stream its final response through the byte cap.
+
+    The host is validated before every hop, so a redirect cannot walk the
+    request onto a private address.
+    """
     current = url
     redirect_limit = _max_redirects()
     for _ in range(redirect_limit):
@@ -279,7 +280,7 @@ def _read_url_with_client(
             current = nxt
         finally:
             response.close()
-    raise UrlFetchError(f"Too many redirects (>{redirect_limit})")
+    raise _too_many_redirects(redirect_limit)
 
 
 async def _read_url_with_client_async(
@@ -306,12 +307,32 @@ async def _read_url_with_client_async(
             current = nxt
         finally:
             await response.aclose()
-    raise UrlFetchError(f"Too many redirects (>{redirect_limit})")
+    raise _too_many_redirects(redirect_limit)
 
 
-def _read_url(url: str, *, limit: int) -> tuple[bytes, Mapping[str, str]]:
-    with httpx.Client(follow_redirects=False, timeout=_url_fetch_timeout()) as client:
-        return _read_url_with_client(url, client, limit=limit)
+@contextmanager
+def _input_client(client: httpx.Client | None) -> Iterator[httpx.Client]:
+    """Yield ``client``, or a short-lived one configured the same way."""
+    if client is not None:
+        yield client
+        return
+    with httpx.Client(follow_redirects=False, timeout=_url_fetch_timeout()) as owned:
+        yield owned
+
+
+@asynccontextmanager
+async def _input_client_async(client: httpx.AsyncClient | None) -> AsyncIterator[httpx.AsyncClient]:
+    """Async counterpart to :func:`_input_client`."""
+    if client is not None:
+        yield client
+        return
+    async with httpx.AsyncClient(follow_redirects=False, timeout=_url_fetch_timeout()) as owned:
+        yield owned
+
+
+# ---------------------------------------------------------------------------
+# Input resolution
+# ---------------------------------------------------------------------------
 
 
 def _media_from_content(
@@ -327,6 +348,20 @@ def _media_from_content(
     return content, media_type
 
 
+def _is_url(file_path: str) -> bool:
+    return file_path.startswith(_URL_PREFIXES)
+
+
+def _read_local_file(file_path: str, *, max_input_bytes: int) -> tuple[bytes, str]:
+    """Read a local path through the byte cap, checking the stat size first."""
+    path = Path(file_path)
+    source = _safe_source_context(file_path)
+    _reject_declared_size(path.stat().st_size, limit=max_input_bytes, source=source)
+    with path.open("rb") as stream:
+        content = _read_file_like_limited(stream, limit=max_input_bytes, source=source)
+    return content, _get_media_type(file_path)
+
+
 def _read_from_path(
     file_path: str,
     *,
@@ -334,25 +369,11 @@ def _read_from_path(
     client: httpx.Client | None = None,
 ) -> tuple[bytes, str]:
     """Read bytes from a local path or http(s) URL; return (bytes, media_type)."""
-    if file_path.startswith(_URL_PREFIXES):
-        if client is None:
-            content, headers = _read_url(file_path, limit=max_input_bytes)
-        else:
-            content, headers = _read_url_with_client(
-                file_path,
-                client,
-                limit=max_input_bytes,
-            )
-        return _media_from_content(file_path, content, headers)
-
-    path = Path(file_path)
-    source = _safe_source_context(file_path)
-    size = path.stat().st_size
-    if size > max_input_bytes:
-        raise _input_too_large(limit=max_input_bytes, observed=size, source=source)
-    with path.open("rb") as stream:
-        content = _read_file_like_limited(stream, limit=max_input_bytes, source=source)
-    return content, _get_media_type(file_path)
+    if not _is_url(file_path):
+        return _read_local_file(file_path, max_input_bytes=max_input_bytes)
+    with _input_client(client) as http_client:
+        content, headers = _read_url_with_client(file_path, http_client, limit=max_input_bytes)
+    return _media_from_content(file_path, content, headers)
 
 
 async def _read_from_path_async(
@@ -362,30 +383,19 @@ async def _read_from_path_async(
     max_input_bytes: int,
 ) -> tuple[bytes, str]:
     """Async counterpart to :func:`_read_from_path`."""
-    if file_path.startswith(_URL_PREFIXES):
-        if client is None:
-            async with httpx.AsyncClient(
-                follow_redirects=False,
-                timeout=_url_fetch_timeout(),
-            ) as owned_client:
-                content, headers = await _read_url_with_client_async(
-                    file_path,
-                    owned_client,
-                    limit=max_input_bytes,
-                )
-        else:
-            content, headers = await _read_url_with_client_async(
-                file_path,
-                client,
-                limit=max_input_bytes,
-            )
-        return _media_from_content(file_path, content, headers)
-
-    return await asyncio.to_thread(
-        _read_from_path,
-        file_path,
-        max_input_bytes=max_input_bytes,
-    )
+    if not _is_url(file_path):
+        return await asyncio.to_thread(
+            _read_from_path,
+            file_path,
+            max_input_bytes=max_input_bytes,
+        )
+    async with _input_client_async(client) as http_client:
+        content, headers = await _read_url_with_client_async(
+            file_path,
+            http_client,
+            limit=max_input_bytes,
+        )
+    return _media_from_content(file_path, content, headers)
 
 
 def _normalize_input(
@@ -417,6 +427,12 @@ def _unsupported_input() -> TypeError:
     )
 
 
+def _require_media_type(media_type: str | None) -> str:
+    if media_type is None:
+        raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
+    return media_type
+
+
 def _get_media(
     input_file: ExtractionInputLike,
     media_type: str | None = None,
@@ -441,20 +457,15 @@ def _get_media(
         return file_bytes, media_type or resolved_type
 
     if isinstance(input_file, bytes):
-        if media_type is None:
-            raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
-        return (
-            _enforce_max_input_bytes(input_file, limit=limit, source="bytes input"),
-            media_type,
-        )
+        resolved_type = _require_media_type(media_type)
+        content = _enforce_max_input_bytes(input_file, limit=limit, source="bytes input")
+        return content, resolved_type
 
     if hasattr(input_file, "read"):
-        if media_type is None:
-            raise TypeError(_BYTES_MEDIA_TYPE_REQUIRED)
-        return (
-            _read_file_like_limited(input_file, limit=limit, source="file-like input"),
-            media_type,
-        )
+        # Validate before touching the stream so an invalid call cannot consume it.
+        resolved_type = _require_media_type(media_type)
+        content = _read_file_like_limited(input_file, limit=limit, source="file-like input")
+        return content, resolved_type
 
     raise _unsupported_input()
 
@@ -477,9 +488,6 @@ async def _get_media_async(
         )
         return file_bytes, media_type or resolved_type
 
-    if isinstance(input_file, bytes):
-        return _get_media(input_file, media_type=media_type, max_input_bytes=limit)
-
     if hasattr(input_file, "read"):
         return await asyncio.to_thread(
             _get_media,
@@ -488,4 +496,6 @@ async def _get_media_async(
             max_input_bytes=limit,
         )
 
+    # ``bytes`` and unsupported inputs are cheap to handle inline; the sync
+    # resolver owns the single copy of that validation.
     return _get_media(input_file, media_type=media_type, max_input_bytes=limit)

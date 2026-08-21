@@ -7,6 +7,7 @@ import time
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
 from email.utils import parsedate_to_datetime
+from typing import Any
 
 import httpx
 from pydantic import ValidationError
@@ -95,29 +96,38 @@ def _model_provider(exc: BaseException) -> str | None:
     return None
 
 
+def _exception_response(exc: BaseException) -> Any:
+    """Return the provider response object carried by ``exc``, when it has one."""
+    response = getattr(exc, "response", None)
+    return getattr(exc, "raw_response", None) if response is None else response
+
+
+def _response_metadata(response: Any, key: str) -> Any:
+    """Read ``key`` out of a botocore-style ``ResponseMetadata`` mapping."""
+    if not isinstance(response, Mapping):
+        return None
+    metadata = response.get("ResponseMetadata")
+    return metadata.get(key) if isinstance(metadata, Mapping) else None
+
+
+def _plain_int(value: object) -> int | None:
+    """Return ``value`` when it is a real ``int`` rather than a ``bool``."""
+    return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
 def _model_status_code(exc: BaseException) -> int | None:
     """Extract an HTTP status code from common provider exception shapes."""
-    status_code = getattr(exc, "status_code", None)
-    if isinstance(status_code, int) and not isinstance(status_code, bool):
-        return status_code
-
-    response = getattr(exc, "response", None)
-    if response is None:
-        response = getattr(exc, "raw_response", None)
-    response_status = getattr(response, "status_code", None)
-    if isinstance(response_status, int) and not isinstance(response_status, bool):
-        return response_status
-
-    if isinstance(response, Mapping):
-        metadata = response.get("ResponseMetadata", {})
-        if isinstance(metadata, Mapping):
-            metadata_status = metadata.get("HTTPStatusCode")
-            if isinstance(metadata_status, int) and not isinstance(metadata_status, bool):
-                return metadata_status
-
-    code = getattr(exc, "code", None)
-    if isinstance(code, int) and not isinstance(code, bool):
-        return code
+    response = _exception_response(exc)
+    candidates = (
+        getattr(exc, "status_code", None),
+        getattr(response, "status_code", None),
+        _response_metadata(response, "HTTPStatusCode"),
+        getattr(exc, "code", None),
+    )
+    for candidate in candidates:
+        status_code = _plain_int(candidate)
+        if status_code is not None:
+            return status_code
     return None
 
 
@@ -145,18 +155,13 @@ def _header_mappings(exc: BaseException) -> list[Mapping]:
     if isinstance(headers, Mapping):
         header_sets.append(headers)
 
-    response = getattr(exc, "response", None)
-    if response is None:
-        response = getattr(exc, "raw_response", None)
+    response = _exception_response(exc)
     response_headers = getattr(response, "headers", None)
     if isinstance(response_headers, Mapping):
         header_sets.append(response_headers)
-    if isinstance(response, Mapping):
-        metadata = response.get("ResponseMetadata", {})
-        if isinstance(metadata, Mapping):
-            metadata_headers = metadata.get("HTTPHeaders", {})
-            if isinstance(metadata_headers, Mapping):
-                header_sets.append(metadata_headers)
+    metadata_headers = _response_metadata(response, "HTTPHeaders")
+    if isinstance(metadata_headers, Mapping):
+        header_sets.append(metadata_headers)
     return header_sets
 
 

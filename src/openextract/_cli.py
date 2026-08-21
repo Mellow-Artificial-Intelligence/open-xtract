@@ -15,15 +15,11 @@ from dotenv import load_dotenv
 from pydantic import BaseModel
 
 from ._agents import DefinedAgent, RemoteAgent, load_agent, load_agents
-from ._batch import _iter_extractions
-from ._config import (
-    _resolve_max_input_bytes,
-    _validate_max_concurrency,
-    _validate_retry_options,
-)
+from ._batch import _BatchOptions, _iter_extractions
+from ._config import _validate_max_concurrency
 from ._extract import extract, extract_with_usage
 from ._reduce import SwarmReduce
-from ._styles import ExtractionStyle, normalize_style
+from ._styles import ExtractionStyle
 from ._swarm import extract_swarm, extract_swarm_with_results
 from ._types import ExtractionInput, ExtractionInputLike, ExtractionResult
 from .exceptions import (
@@ -287,32 +283,18 @@ async def _run_batch_async(
     schema_cls: type[BaseModel],
     items: list[ExtractionInputLike],
     labels: list[str],
-    limit: int,
+    options: _BatchOptions,
     args: argparse.Namespace,
     model: str,
 ) -> int:
     """Stream the batch, emitting records (JSONL) or buffering them (array)."""
-    with_usage = args.usage
+    with_usage = options.rich
     jsonl = args.output == "jsonl"
     # _iter_extractions is an async generator function; its AsyncIterator return
     # annotation hides the aclose() needed for deterministic finalization.
     stream = cast(
         "AsyncGenerator[tuple[int, object], None]",
-        _iter_extractions(
-            schema_cls,
-            model,
-            items,
-            args.instructions,
-            max_concurrency=args.max_concurrency,
-            return_exceptions=args.continue_on_error,
-            media_type=args.media_type,
-            max_input_bytes=limit,
-            max_retries=args.max_retries,
-            retry_backoff=args.retry_backoff,
-            retry_max_backoff=args.retry_max_backoff,
-            rich=with_usage,
-            style=normalize_style(args.style),
-        ),
+        _iter_extractions(schema_cls, model, items, options),
     )
     total = len(items)
     ordered: list[tuple[int, object]] = []
@@ -374,9 +356,19 @@ def _run_batch(
     model: str,
 ) -> int:
     """Validate batch options before any model call, then run the batch."""
-    _validate_retry_options(args.max_retries, args.retry_backoff, args.retry_max_backoff)
-    limit = _resolve_max_input_bytes(args.max_input_bytes)
-    return asyncio.run(_run_batch_async(schema_cls, items, labels, limit, args, model))
+    options = _BatchOptions.resolve(
+        args.instructions,
+        style=args.style,
+        media_type=args.media_type,
+        max_input_bytes=args.max_input_bytes,
+        max_concurrency=args.max_concurrency,
+        return_exceptions=args.continue_on_error,
+        max_retries=args.max_retries,
+        retry_backoff=args.retry_backoff,
+        retry_max_backoff=args.retry_max_backoff,
+        rich=args.usage,
+    )
+    return asyncio.run(_run_batch_async(schema_cls, items, labels, options, args, model))
 
 
 def _print_single_payload(payload: Any, args: argparse.Namespace) -> None:

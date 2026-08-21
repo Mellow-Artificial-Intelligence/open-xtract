@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Iterable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, cast, overload
 
 import httpx
@@ -32,6 +33,58 @@ from ._types import ExtractionInputLike, ExtractionResult, T, _resolve_item
 if TYPE_CHECKING:
     from pydantic_ai import Agent as PydanticAgent
     from pydantic_ai.models import Model
+
+
+@dataclass(frozen=True)
+class _BatchOptions:
+    """Validated knobs shared by every batch entry point.
+
+    Bundling them keeps the internal plumbing (`_iter_extractions`,
+    `_gather_extractions`, `_run_batch_sync`) from re-declaring the same long
+    parameter list, and guarantees validation happens exactly once per call.
+    """
+
+    instructions: str | None
+    style: ExtractionStyle
+    media_type: str | None
+    max_input_bytes: int
+    max_concurrency: int
+    return_exceptions: bool
+    max_retries: int
+    retry_backoff: float
+    retry_max_backoff: float
+    rich: bool
+
+    @classmethod
+    def resolve(
+        cls,
+        instructions: str | None,
+        *,
+        style: ExtractionStyle | str,
+        media_type: str | None,
+        max_input_bytes: int | None,
+        max_concurrency: int,
+        return_exceptions: bool,
+        max_retries: int,
+        retry_backoff: float,
+        retry_max_backoff: float,
+        rich: bool,
+    ) -> _BatchOptions:
+        """Validate and normalize the public batch arguments."""
+        _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
+        _validate_max_concurrency(max_concurrency)
+        return cls(
+            instructions=instructions,
+            style=normalize_style(style),
+            media_type=media_type,
+            max_input_bytes=_resolve_max_input_bytes(max_input_bytes),
+            max_concurrency=max_concurrency,
+            return_exceptions=return_exceptions,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+            rich=rich,
+        )
 
 
 async def _run_with_shared_agent(
@@ -83,20 +136,11 @@ async def _iter_extractions(
     schema: type[T],
     model: str | Model,
     input_files: Iterable[ExtractionInputLike],
-    instructions: str | None,
-    max_concurrency: int,
-    return_exceptions: bool,
-    media_type: str | None,
-    max_input_bytes: int,
-    max_retries: int,
-    retry_backoff: float,
-    retry_max_backoff: float,
-    rich: bool = False,
-    style: ExtractionStyle = ExtractionStyle.DIRECT,
+    options: _BatchOptions,
 ) -> AsyncIterator[tuple[int, T | ExtractionResult[T] | Exception]]:
     """Yield indexed batch results in completion order with bounded work.
 
-    When ``rich`` is true each successful item is yielded as an
+    When ``options.rich`` is true each successful item is yielded as an
     :class:`ExtractionResult[T]`; otherwise the bare schema instance is yielded.
     """
     file_iterator = iter(input_files)
@@ -111,7 +155,9 @@ async def _iter_extractions(
     # code styles bind capabilities to a per-item workspace, so those items
     # each get their own agent.
     shared_agent = (
-        _build_agent(schema, model, instructions) if style is ExtractionStyle.DIRECT else None
+        _build_agent(schema, model, options.instructions)
+        if options.style is ExtractionStyle.DIRECT
+        else None
     )
     stop = asyncio.Event()
     pending: dict[asyncio.Task[object], int] = {}
@@ -124,7 +170,7 @@ async def _iter_extractions(
     ) as client:
 
         async def _run_item(item: ExtractionInputLike) -> object:
-            source, item_media_type, name = _resolve_item(item, media_type)
+            source, item_media_type, name = _resolve_item(item, options.media_type)
             started = time.perf_counter()
             attempts = 0
             try:
@@ -133,9 +179,9 @@ async def _iter_extractions(
                         source,
                         client,
                         media_type=item_media_type,
-                        max_input_bytes=max_input_bytes,
+                        max_input_bytes=options.max_input_bytes,
                     )
-                with prepared_style_run(style, file_bytes, file_type) as (
+                with prepared_style_run(options.style, file_bytes, file_type) as (
                     capabilities,
                     style_inputs,
                 ):
@@ -145,7 +191,7 @@ async def _iter_extractions(
                             run_agent = _build_agent(
                                 schema,
                                 model,
-                                instructions,
+                                options.instructions,
                                 extra_capabilities=capabilities,
                             )
                     else:
@@ -158,17 +204,17 @@ async def _iter_extractions(
                         # or waiting to retry. Do not begin another model call afterward.
                         if stop.is_set():
                             raise asyncio.CancelledError
-                        if rich:
+                        if options.rich:
                             return await _run_with_shared_agent_result(run_agent, inputs)
                         return await _run_with_shared_agent(run_agent, inputs)
 
                     value = await _run_with_retries_async(
                         _once,
-                        max_retries=max_retries,
-                        retry_backoff=retry_backoff,
-                        retry_max_backoff=retry_max_backoff,
+                        max_retries=options.max_retries,
+                        retry_backoff=options.retry_backoff,
+                        retry_max_backoff=options.retry_max_backoff,
                     )
-                if rich:
+                if options.rich:
                     raw_result = cast(Any, value)
                     return ExtractionResult(
                         output=cast(T, raw_result.output),
@@ -182,7 +228,7 @@ async def _iter_extractions(
                     )
                 return value
             except Exception:
-                if not return_exceptions:
+                if not options.return_exceptions:
                     stop.set()
                 raise
 
@@ -194,7 +240,7 @@ async def _iter_extractions(
 
         def _fill_slots() -> None:
             nonlocal exhausted
-            while len(pending) < max_concurrency and not exhausted:
+            while len(pending) < options.max_concurrency and not exhausted:
                 if next_index == 0:
                     item = first_item
                 else:
@@ -222,7 +268,7 @@ async def _iter_extractions(
                     try:
                         result = task.result()
                     except Exception as exc:
-                        if return_exceptions:
+                        if options.return_exceptions:
                             completed.append((index, exc))
                         else:
                             failures.append(exc)
@@ -250,79 +296,27 @@ async def _gather_extractions(
     schema: type[T],
     model: str | Model,
     input_files: Iterable[ExtractionInputLike],
-    instructions: str | None,
-    max_concurrency: int,
-    return_exceptions: bool,
-    media_type: str | None,
-    max_input_bytes: int | None,
-    max_retries: int,
-    retry_backoff: float,
-    retry_max_backoff: float,
-    rich: bool = False,
-    style: ExtractionStyle = ExtractionStyle.DIRECT,
+    options: _BatchOptions,
 ) -> list:
-    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
-    _validate_max_concurrency(max_concurrency)
-    limit = _resolve_max_input_bytes(max_input_bytes)
+    """Drain the streaming batch runner and restore input order."""
     indexed_results = [
-        item
-        async for item in _iter_extractions(
-            schema,
-            model,
-            input_files,
-            instructions,
-            max_concurrency,
-            return_exceptions,
-            media_type,
-            limit,
-            max_retries,
-            retry_backoff,
-            retry_max_backoff,
-            rich,
-            style,
-        )
+        item async for item in _iter_extractions(schema, model, input_files, options)
     ]
     indexed_results.sort(key=lambda item: item[0])
     return [result for _, result in indexed_results]
 
 
-def _extract_many_sync(
+def _run_batch_sync(
     schema: type[T],
     model: str | Model,
     input_files: Iterable[ExtractionInputLike],
-    instructions: str | None,
+    options: _BatchOptions,
     *,
     name: str,
-    style: ExtractionStyle | str,
-    media_type: str | None,
-    max_input_bytes: int | None,
-    max_concurrency: int,
-    return_exceptions: bool,
-    max_retries: int,
-    retry_backoff: float,
-    retry_max_backoff: float,
-    rich: bool,
 ) -> list:
-    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
-    _validate_max_concurrency(max_concurrency)
+    """Run a batch from sync code on a private event loop."""
     _require_no_running_loop(name)
-    return asyncio.run(
-        _gather_extractions(
-            schema,
-            model,
-            input_files,
-            instructions,
-            max_concurrency,
-            return_exceptions,
-            media_type,
-            max_input_bytes,
-            max_retries,
-            retry_backoff,
-            retry_max_backoff,
-            rich=rich,
-            style=normalize_style(style),
-        )
-    )
+    return asyncio.run(_gather_extractions(schema, model, input_files, options))
 
 
 @overload
@@ -405,6 +399,7 @@ def extract_many(
         input_files: Iterable of paths, URLs, ``os.PathLike``, bytes,
             file-like objects, or :class:`ExtractionInput` items.
         instructions: Optional natural-language guidance.
+        style: Extraction strategy, as documented on :func:`extract`.
         media_type: Optional MIME type applied to every item that does not carry
             its own. Required when ``input_files`` contains ``bytes`` or
             file-like objects without a per-item ``media_type``; optional
@@ -429,21 +424,23 @@ def extract_many(
         RuntimeError: If called from a running event loop. Use
             :func:`extract_many_async` in async code instead.
     """
-    return _extract_many_sync(
+    return _run_batch_sync(
         schema,
         model,
         input_files,
-        instructions,
+        _BatchOptions.resolve(
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
+            max_concurrency=max_concurrency,
+            return_exceptions=return_exceptions,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+            rich=False,
+        ),
         name="extract_many",
-        style=style,
-        media_type=media_type,
-        max_input_bytes=max_input_bytes,
-        max_concurrency=max_concurrency,
-        return_exceptions=return_exceptions,
-        max_retries=max_retries,
-        retry_backoff=retry_backoff,
-        retry_max_backoff=retry_max_backoff,
-        rich=False,
     )
 
 
@@ -521,15 +518,18 @@ async def extract_many_async(
         schema,
         model,
         input_files,
-        instructions,
-        max_concurrency,
-        return_exceptions,
-        media_type,
-        max_input_bytes,
-        max_retries,
-        retry_backoff,
-        retry_max_backoff,
-        style=normalize_style(style),
+        _BatchOptions.resolve(
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
+            max_concurrency=max_concurrency,
+            return_exceptions=return_exceptions,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+            rich=False,
+        ),
     )
 
 
@@ -616,9 +616,6 @@ def iter_extract_many_async(
         async for index, result in iter_extract_many_async(...):
             ...
     """
-    _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
-    _validate_max_concurrency(max_concurrency)
-    limit = _resolve_max_input_bytes(max_input_bytes)
     # The shared generator is typed for the richest yield (ExtractionResult);
     # without ``rich`` it only ever yields ``T`` or an exception, so narrow it.
     return cast(
@@ -627,15 +624,18 @@ def iter_extract_many_async(
             schema,
             model,
             input_files,
-            instructions,
-            max_concurrency,
-            return_exceptions,
-            media_type,
-            limit,
-            max_retries,
-            retry_backoff,
-            retry_max_backoff,
-            style=normalize_style(style),
+            _BatchOptions.resolve(
+                instructions,
+                style=style,
+                media_type=media_type,
+                max_input_bytes=max_input_bytes,
+                max_concurrency=max_concurrency,
+                return_exceptions=return_exceptions,
+                max_retries=max_retries,
+                retry_backoff=retry_backoff,
+                retry_max_backoff=retry_max_backoff,
+                rich=False,
+            ),
         ),
     )
 
@@ -711,53 +711,34 @@ def extract_many_with_results(
 ) -> list:
     """Run a batch and return per-item :class:`ExtractionResult` diagnostics.
 
-    Mirrors :func:`extract_many` (same arguments, ordering, concurrency, and
-    retry semantics) but returns richer results carrying token usage, attempt
-    counts, timing, model/media metadata, and a sanitized source label. Use
-    :func:`total_usage` to aggregate token usage across the returned results.
-
-    Args:
-        schema: A Pydantic model class defining the expected output structure.
-        model: The model identifier.
-        input_files: Iterable of paths, URLs, ``os.PathLike``, bytes,
-            file-like objects, or :class:`ExtractionInput` items.
-        instructions: Optional natural-language guidance.
-        media_type: Optional MIME type applied to every item that does not carry
-            its own.
-        max_input_bytes: Per-item byte limit. ``None`` uses
-            ``OPENEXTRACT_MAX_INPUT_BYTES`` or the 50 MiB default.
-        max_concurrency: Maximum number of in-flight extractions.
-        return_exceptions: If True, per-item exceptions are returned in-place
-            instead of raised.
-        max_retries: Per-item retries after ``ModelError``.
-        retry_backoff: Base backoff seconds between per-item retries.
-        retry_max_backoff: Maximum per-item retry delay in seconds.
+    Takes exactly the same arguments as :func:`extract_many` — see that
+    function for their meaning, the ordering and concurrency guarantees, the
+    retry semantics, and the errors raised — but returns richer results
+    carrying token usage, attempt counts, timing, model/media metadata, and a
+    sanitized source label. Use :func:`total_usage` to aggregate token usage
+    across the returned results.
 
     Returns:
         A list of ``ExtractionResult`` (or ``Exception`` when
         ``return_exceptions=True``) in input order.
-
-    Raises:
-        ValueError: If ``max_concurrency`` is less than 1, ``max_retries`` is
-            negative, or a backoff value is negative or non-finite.
-        RuntimeError: If called from a running event loop. Use
-            :func:`extract_many_with_results_async` in async code instead.
     """
-    return _extract_many_sync(
+    return _run_batch_sync(
         schema,
         model,
         input_files,
-        instructions,
+        _BatchOptions.resolve(
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
+            max_concurrency=max_concurrency,
+            return_exceptions=return_exceptions,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+            rich=True,
+        ),
         name="extract_many_with_results",
-        style=style,
-        media_type=media_type,
-        max_input_bytes=max_input_bytes,
-        max_concurrency=max_concurrency,
-        return_exceptions=return_exceptions,
-        max_retries=max_retries,
-        retry_backoff=retry_backoff,
-        retry_max_backoff=retry_max_backoff,
-        rich=True,
     )
 
 
@@ -835,14 +816,16 @@ async def extract_many_with_results_async(
         schema,
         model,
         input_files,
-        instructions,
-        max_concurrency,
-        return_exceptions,
-        media_type,
-        max_input_bytes,
-        max_retries,
-        retry_backoff,
-        retry_max_backoff,
-        rich=True,
-        style=normalize_style(style),
+        _BatchOptions.resolve(
+            instructions,
+            style=style,
+            media_type=media_type,
+            max_input_bytes=max_input_bytes,
+            max_concurrency=max_concurrency,
+            return_exceptions=return_exceptions,
+            max_retries=max_retries,
+            retry_backoff=retry_backoff,
+            retry_max_backoff=retry_max_backoff,
+            rich=True,
+        ),
     )
