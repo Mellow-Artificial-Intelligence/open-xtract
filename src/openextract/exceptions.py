@@ -45,6 +45,31 @@ class ProviderNotInstalledError(ExtractionError):
     """
 
 
+class RemoteAgentError(ExtractionError):
+    """A remote extraction agent could not be reached or returned a failure.
+
+    ``retryable`` defaults to whether ``status_code`` is transient; transport
+    failures (no response at all) are raised as retryable explicitly.
+    """
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        url: str | None = None,
+        status_code: int | None = None,
+        retryable: bool | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.url = url
+        self.status_code = status_code
+        if retryable is None:
+            retryable = status_code is not None and (
+                status_code in {408, 409, 425, 429} or 500 <= status_code <= 599
+            )
+        self.retryable = retryable
+
+
 class InputTooLargeError(ExtractionError):
     """Input media exceeded the configured byte limit."""
 

@@ -8,7 +8,11 @@ import time
 from collections.abc import Awaitable, Callable
 
 from ._config import _validate_retry_options
-from .exceptions import ModelError
+from .exceptions import ModelError, RemoteAgentError
+
+# Failures that carry their own ``retryable`` verdict. Everything else is
+# raised to the caller on the first attempt.
+_RETRYABLE = (ModelError, RemoteAgentError)
 
 
 def _retry_delay(
@@ -40,10 +44,11 @@ def _run_with_retries_sync[R](
     while True:
         try:
             return fn()
-        except ModelError as exc:
+        except _RETRYABLE as exc:
             if not exc.retryable or attempt >= max_retries:
                 raise
-            time.sleep(_retry_delay(retry_backoff, retry_max_backoff, attempt, exc.retry_after))
+            retry_after = getattr(exc, "retry_after", None)
+            time.sleep(_retry_delay(retry_backoff, retry_max_backoff, attempt, retry_after))
             attempt += 1
 
 
@@ -60,10 +65,11 @@ async def _run_with_retries_async[R](
     while True:
         try:
             return await fn()
-        except ModelError as exc:
+        except _RETRYABLE as exc:
             if not exc.retryable or attempt >= max_retries:
                 raise
+            retry_after = getattr(exc, "retry_after", None)
             await asyncio.sleep(
-                _retry_delay(retry_backoff, retry_max_backoff, attempt, exc.retry_after)
+                _retry_delay(retry_backoff, retry_max_backoff, attempt, retry_after)
             )
             attempt += 1
