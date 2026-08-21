@@ -15,56 +15,45 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  UV_FROZEN: "1"
+  UV_NO_PROGRESS: "1"
+
+# Every job detects for itself whether the change set requires it (via the
+# .github/actions/detect-jobs composite action) and skips its own work when it
+# does not. Nothing waits on a gating job, so lint, test, and package all start
+# the moment the run is created.
 jobs:
-  changes:
-    name: Detect changes
+  lint:
     runs-on: ubuntu-latest
-    timeout-minutes: 3
-    outputs:
-      lint: ${{ steps.filter.outputs.lint }}
-      test: ${{ steps.filter.outputs.test }}
-      package: ${{ steps.filter.outputs.package }}
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - name: Detect required jobs
-        id: filter
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: python3 scripts/ci_needed.py
-
-  lint:
-    needs: changes
-    if: needs.changes.outputs.lint == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    env:
-      UV_FROZEN: "1"
-    steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
-        with:
-          persist-credentials: false
+      - id: filter
+        uses: ./.github/actions/detect-jobs
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        if: steps.filter.outputs.lint == 'true'
         with:
           enable-cache: true
-      - run: uv sync --dev
-      - run: uv run --no-sync ruff check .
-      - run: uv run --no-sync ruff format --check .
-      - run: uv run --no-sync ty check
-      - run: uv run --no-sync python scripts/check_api_reference.py
+          cache-dependency-glob: uv.lock
+      - if: steps.filter.outputs.lint == 'true'
+        run: uv sync --dev
+      - if: steps.filter.outputs.lint == 'true'
+        run: uv run --no-sync ruff check .
+      - if: steps.filter.outputs.lint == 'true'
+        run: uv run --no-sync ruff format --check .
+      - if: steps.filter.outputs.lint == 'true'
+        run: uv run --no-sync ty check
+      - if: steps.filter.outputs.lint == 'true'
+        run: uv run --no-sync python scripts/check_api_reference.py
 
   test:
     name: Test (Python ${{ matrix.python-version }})
-    needs: changes
-    if: needs.changes.outputs.test == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    env:
-      UV_FROZEN: "1"
     strategy:
       fail-fast: false
       matrix:
@@ -76,81 +65,79 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - id: filter
+        uses: ./.github/actions/detect-jobs
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        if: steps.filter.outputs.test == 'true'
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
-      - run: uv sync --dev
+          cache-dependency-glob: uv.lock
+      - if: steps.filter.outputs.test == 'true'
+        run: uv sync --dev
+      # -n auto fans the suite across every runner core; coverage is combined
+      # from the workers and enforced in the same process.
       - name: Run tests with coverage
-        if: matrix.coverage
-        run: uv run --no-sync pytest -v --cov=openextract --cov-report=term-missing --cov-fail-under=0
-      - name: Check coverage threshold
-        if: matrix.coverage
-        run: uv run --no-sync coverage report --fail-under=100
+        if: ${{ steps.filter.outputs.test == 'true' && matrix.coverage }}
+        run: >-
+          uv run --no-sync pytest -n auto
+          --cov=openextract --cov-report=term-missing --cov-fail-under=100
       - name: Run tests
-        if: ${{ !matrix.coverage }}
-        run: uv run --no-sync pytest -v
+        if: ${{ steps.filter.outputs.test == 'true' && !matrix.coverage }}
+        run: uv run --no-sync pytest -n auto
 
   package:
     name: Build and install distributions
-    needs: changes
-    if: needs.changes.outputs.package == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4.3.1
         with:
+          fetch-depth: 0
           persist-credentials: false
+      - id: filter
+        uses: ./.github/actions/detect-jobs
       - uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4.2.0
+        if: steps.filter.outputs.package == 'true'
         with:
           python-version: "3.12"
           enable-cache: true
-      - run: uv build
-      - name: Smoke-test wheel
+          cache-dependency-glob: uv.lock
+      - if: steps.filter.outputs.package == 'true'
+        run: uv build
+      - name: Smoke-test wheel and source distribution
+        if: steps.filter.outputs.package == 'true'
         run: |
           uv venv .venv-wheel
-          uv pip install --python .venv-wheel/bin/python dist/*.whl
-          .venv-wheel/bin/python -c "import openextract; assert callable(openextract.extract)"
-          .venv-wheel/bin/openextract --help
-      - name: Smoke-test source distribution
-        run: |
           uv venv .venv-sdist
+          uv pip install --python .venv-wheel/bin/python dist/*.whl
           uv pip install --python .venv-sdist/bin/python dist/*.tar.gz
-          .venv-sdist/bin/python -c "import openextract; assert callable(openextract.extract)"
-          .venv-sdist/bin/openextract --help
+          for venv in .venv-wheel .venv-sdist; do
+            "$venv/bin/python" -c "import openextract; assert callable(openextract.extract)"
+            "$venv/bin/openextract" --help
+          done
 
   ci:
     name: CI
-    needs: [changes, lint, test, package]
+    needs: [lint, test, package]
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     timeout-minutes: 2
     steps:
       - name: Check required jobs
         env:
-          CHANGES: ${{ needs.changes.result }}
           LINT: ${{ needs.lint.result }}
           TEST: ${{ needs.test.result }}
           PACKAGE: ${{ needs.package.result }}
         run: |
-          python3 - <<'PY'
-          import os
-          import sys
-
-          results = {
-              "changes": os.environ["CHANGES"],
-              "lint": os.environ["LINT"],
-              "test": os.environ["TEST"],
-              "package": os.environ["PACKAGE"],
-          }
-          allowed = {"success", "skipped"}
-          failed = [name for name, result in results.items() if result not in allowed]
-          print("job results:", results)
-          if results["changes"] != "success":
-              print("Change detection must succeed")
-              sys.exit(1)
-          if failed:
-              print("Failed jobs:", ", ".join(failed))
-              sys.exit(1)
-          PY
+          echo "job results: lint=$LINT test=$TEST package=$PACKAGE"
+          status=0
+          for entry in "lint:$LINT" "test:$TEST" "package:$PACKAGE"; do
+            if [ "${entry#*:}" != "success" ]; then
+              echo "Job did not succeed: ${entry%%:*} (${entry#*:})"
+              status=1
+            fi
+          done
+          exit "$status"

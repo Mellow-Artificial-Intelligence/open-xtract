@@ -15,7 +15,7 @@ Thanks for your interest in contributing to openextract!
    uv sync --dev
    ```
 
-3. Run tests:
+3. Run tests (add `-n auto` to fan them across cores, as CI does):
    ```bash
    uv run pytest
    ```
@@ -60,9 +60,14 @@ uv run ty check
 ## CI
 
 GitHub Actions (`.github/workflows/ci.yml`) runs lint, tests, and package smoke
-tests. Jobs that a change set cannot affect are skipped (for example a
-docs-only PR does not install Python dependencies). Outdated pull-request runs
-are cancelled when a new commit is pushed. After CI succeeds on `main`,
+tests. All three start in parallel the moment a run is created; each one calls
+the `.github/actions/detect-jobs` composite action first and skips its own work
+when the change set cannot affect it (for example a docs-only PR does not
+install Python dependencies). Nothing waits on a gating job, and the test suite
+runs under `pytest -n auto` across every runner core. The single required check
+is the `CI` job, which fails unless lint, test, and package all succeeded.
+Outdated pull-request runs are cancelled when a new commit is pushed. After CI
+succeeds on `main`,
 [`.github/workflows/release.yml`](.github/workflows/release.yml) publishes to
 PyPI only when the version in `pyproject.toml` is new.
 
@@ -137,8 +142,7 @@ CI is green — [`.github/workflows/release.yml`](.github/workflows/release.yml)
    uv run ruff check .
    uv run ruff format --check .
    uv run ty check
-   uv run pytest -v --cov=openextract --cov-report=term-missing
-   uv run coverage report --fail-under=100
+   uv run pytest -n auto --cov=openextract --cov-report=term-missing --cov-fail-under=100
    ```
 5. **Dependency embargo** — confirm `[tool.uv] exclude-newer` is within the
    rolling 24h window (merge recent `embargo-bump` PRs from

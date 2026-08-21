@@ -8,6 +8,17 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Changed
+- CI wall-clock time roughly halved. Change detection moved out of a gating job
+  into the `.github/actions/detect-jobs` composite action that each job runs for
+  itself, so lint, test, and package now start immediately instead of waiting on
+  a separate runner. The test suite runs under `pytest -n auto` (new
+  `pytest-xdist` dev dependency), and the coverage threshold is enforced by the
+  same pytest process rather than a follow-up `coverage report` step.
+- The docs workflow no longer serializes pull-request builds behind a global
+  `pages` concurrency group; only the deploy job queues on `pages`, and
+  superseded pull-request doc builds are cancelled.
+
 ## [0.11.0] - 2026-08-20
 
 ### Added
