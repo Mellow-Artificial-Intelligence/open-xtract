@@ -300,7 +300,7 @@ def test_window_reduce_backfills_field_citations_when_model_omits_them(tmp_path)
         "properties": {"vendor": {"type": "string"}, "total": {"type": "number"}},
         "required": ["vendor", "total"],
     }
-    pdf = synthetic_pdf(pages=["Vendor Acme Corp", "Total 1,234"])
+    pdf = synthetic_pdf(pages=["Acme Corp", "Total 1,234"])
     path = tmp_path / "bianco.pdf"
     path.write_bytes(pdf)
     data, _usage, citations = extractbench.extract_document_with_citations(

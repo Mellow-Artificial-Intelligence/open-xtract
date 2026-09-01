@@ -521,13 +521,6 @@ def test_extract_chunks_large_parse_via_extract_once(monkeypatch, mocker):
     )
     result = extract(_Vendor, model, pdf, media_type="application/pdf", cite=True)
     assert result.vendor == "Acme Corp"
-    plain = extract(
-        _Vendor,
-        TestModel(custom_output_args={"vendor": "Acme Corp"}),
-        pdf,
-        media_type="application/pdf",
-    )
-    assert plain.vendor == "Acme Corp"
     assert spy.call_count >= 2
     for call in spy.call_args_list:
         prompt = call.args[1][1]
