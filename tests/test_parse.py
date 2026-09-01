@@ -10,23 +10,30 @@ from pydantic import BaseModel
 
 from openextract import Citation
 from openextract._parse import (
+    DEFAULT_RENDER_MAX_EDGE,
     ParsedDocument,
     ParsedPage,
     ParsedSpan,
     _bbox_for_quote,
+    _bitmap_to_png,
+    _channels_for_mode,
     _char_box,
     _char_text,
     _citation_from_value,
+    _encode_png,
     _find_in_text,
     _flush_word,
     _ground_one,
     _iter_field_values,
+    _luma_pixels,
     _normalized_coco,
     _page_size,
     _page_text,
     _pages_prompt_len,
     _parse_pdf_page,
     _pdf_box_to_coco,
+    _render_page_png,
+    _render_scale,
     _split_page,
     _union_coco,
     _union_pdf_boxes,
@@ -37,6 +44,7 @@ from openextract._parse import (
     ground_citations,
     maybe_parsed_inputs,
     parse_windows,
+    parsed_image_inputs,
     parsed_run_inputs,
     parsed_window_inputs,
     try_parse_document,
@@ -527,3 +535,144 @@ def test_extract_chunks_large_parse_via_extract_once(monkeypatch, mocker):
         assert isinstance(prompt, str)
         assert len(prompt) <= 200
         assert "--- Page " in prompt
+
+
+def test_empty_text_pdf_renders_page_images_not_file_upload():
+    from pydantic_ai import BinaryContent
+
+    data = synthetic_pdf(pages=["", ""])
+    parsed = try_parse_document(data, "application/pdf")
+    assert parsed is not None
+    assert not parsed.has_text()
+    assert parsed.has_images()
+    assert all(page.image and page.image.startswith(b"\x89PNG") for page in parsed.pages)
+    assert all(page.image and len(page.image) < 20_000 for page in parsed.pages)
+    inputs, got = maybe_parsed_inputs(data, "application/pdf", parse=True)
+    assert got is parsed or (got is not None and got.has_images())
+    assert inputs is not None
+    pngs = [
+        part
+        for part in inputs
+        if isinstance(part, BinaryContent) and part.media_type == "image/png"
+    ]
+    assert pngs
+    assert all(
+        not (isinstance(part, BinaryContent) and part.media_type == "application/pdf")
+        for part in inputs
+    )
+    fallback = ["pdf-upload"]
+    windows = parsed_window_inputs(got, fallback)
+    assert windows[0] is not fallback
+    assert all(
+        any(isinstance(part, BinaryContent) and part.media_type == "image/png" for part in window)
+        for window in windows
+    )
+    headers_only = ParsedDocument(pages=(_page("", page=1), _page("", page=2)))
+    assert not headers_only.has_images()
+    header_windows = parsed_window_inputs(headers_only, fallback)
+    assert header_windows[0] is not fallback
+    assert all("--- Page " in window[1] for window in header_windows)
+    assert parsed_image_inputs(headers_only)[0].startswith("Extract")
+
+
+def test_render_and_png_helpers(monkeypatch):
+    assert _channels_for_mode("L") == 1
+    assert _channels_for_mode("RGB") == 3
+    assert _channels_for_mode("BGR") == 3
+    assert _channels_for_mode("BGRA") == 4
+    assert _channels_for_mode("nope") == 0
+    assert _render_scale(3300, 2550) == pytest.approx(DEFAULT_RENDER_MAX_EDGE / 3300)
+    assert _render_scale(100, 80) == 1.0
+    assert _render_scale(0, 0) == 1.0
+    assert _luma_pixels(b"\x80", 1, 1, 1) == (b"\x80", 1)
+    assert _luma_pixels(b"\xff\xff\xff", 1, 1, 3)[1] == 1
+    assert _luma_pixels(b"\x10\x20\x30\x40", 1, 1, 4)[1] == 1
+    png = _encode_png(1, 1, b"\xff\x00\x00", 3)
+    assert png.startswith(b"\x89PNG")
+    assert _render_page_png(SimpleNamespace()) is None
+
+    class _BadRender:
+        def render(self, **_kwargs):
+            raise RuntimeError("render")
+
+    assert _render_page_png(_BadRender()) is None
+
+    class _TypeThenFail:
+        def render(self, **kwargs):
+            if "rev_byteorder" in kwargs:
+                raise TypeError("no rev")
+            raise RuntimeError("still no")
+
+    assert _render_page_png(_TypeThenFail()) is None
+
+    class _TypeThenOk:
+        def render(self, **kwargs):
+            if "rev_byteorder" in kwargs:
+                raise TypeError("no rev")
+            return SimpleNamespace(
+                width=1, height=1, mode="BGR", n_channels=3, stride=3, buffer=b"\x00\x11\x22"
+            )
+
+    assert _render_page_png(_TypeThenOk()).startswith(b"\x89PNG")
+    assert _bitmap_to_png(SimpleNamespace(width=0, height=1, buffer=b"x")) is None
+    tight = SimpleNamespace(width=1, height=1, mode="RGB", n_channels=3, stride=1, buffer=b"abc")
+    assert _bitmap_to_png(tight) is None
+    rgba = SimpleNamespace(
+        width=1, height=1, mode="BGRA", n_channels=4, stride=4, buffer=b"\x01\x02\x03\x04"
+    )
+    assert _bitmap_to_png(rgba).startswith(b"\x89PNG")
+    gray = SimpleNamespace(width=1, height=1, mode="L", n_channels=0, stride=1, buffer=b"\x80")
+    assert _bitmap_to_png(gray).startswith(b"\x89PNG")
+
+    class _Closeable:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    bitmap = _Closeable()
+    bitmap.width = 1
+    bitmap.height = 1
+    bitmap.mode = "RGB"
+    bitmap.n_channels = 3
+    bitmap.stride = 3
+    bitmap.buffer = b"\x10\x20\x30"
+
+    class _Page:
+        def render(self, **_kwargs):
+            return bitmap
+
+    assert _render_page_png(_Page()).startswith(b"\x89PNG")
+    assert bitmap.closed is True
+
+    class _SizedPage:
+        def get_size(self):
+            return 2550.0, 3300.0
+
+        def render(self, scale=1, **_kwargs):
+            assert scale == pytest.approx(DEFAULT_RENDER_MAX_EDGE / 3300)
+            return SimpleNamespace(
+                width=1, height=1, mode="RGB", n_channels=3, stride=3, buffer=b"\x10\x20\x30"
+            )
+
+    assert _render_page_png(_SizedPage()).startswith(b"\x89PNG")
+
+
+def test_maybe_parsed_inputs_headers_when_scan_has_no_image(monkeypatch):
+    empty = ParsedDocument(pages=(_page("", page=1),))
+    monkeypatch.setattr("openextract._parse.try_parse_document", lambda *_a, **_k: empty)
+    inputs, parsed = maybe_parsed_inputs(b"%PDF", "application/pdf", parse=True)
+    assert parsed is empty
+    assert inputs == parsed_run_inputs(empty)
+    none = ParsedDocument(pages=())
+    monkeypatch.setattr("openextract._parse.try_parse_document", lambda *_a, **_k: none)
+    assert maybe_parsed_inputs(b"%PDF", "application/pdf", parse=True) == (None, none)
+
+
+def test_split_page_keeps_image_bytes():
+    page = ParsedPage(
+        page=1, text="aaaa bbbb cccc dddd", width=1, height=1, spans=(), image=b"\x89PNG"
+    )
+    slices = _split_page(page, 20)
+    assert len(slices) >= 2
+    assert all(slice_page.image == b"\x89PNG" for slice_page in slices)

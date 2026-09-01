@@ -17,12 +17,13 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 import os
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -72,6 +73,14 @@ DEFAULT_INSTRUCTIONS = (
 DEFAULT_MAX_INPUT_BYTES = 500 * 1024 * 1024
 DEFAULT_CALL_TIMEOUT = 240.0
 DEFAULT_WINDOW_CONCURRENCY = 4
+# ExtractBench InferenceRunner wraps each file at 1800s and retries twice.
+# Window-pool wait for Veralto (41) / long (66) is above that, so the file
+# cap must be ≥ pool budget. 96 windows covers the 6-doc long split with headroom.
+EXTRACTBENCH_FILE_TIMEOUT_FLOOR = 1800.0
+DEFAULT_FILE_TIMEOUT_WINDOWS = 96
+# One extra batch so GLM variance (pueblo 706s vs 720s; W14 298s vs 240s)
+# does not kill a run that is already finishing.
+WINDOW_POOL_SLACK_BATCHES = 1
 _REF_PREFIXES = ("#/$defs/", "#/definitions/")
 
 
@@ -302,10 +311,11 @@ def extract_document_with_citations(
         schema = json_schema_with_citations(schema)
     run_source, run_media_type, parsed = _parse_then_extract_source(source, media_type)
     policy = RetryPolicy(max_retries=max_retries)
-    windows = parse_windows(parsed) if parsed is not None and parsed.has_text() else ()
-    if len(windows) > 1:
+    windows = parse_windows(parsed) if parsed is not None and parsed.pages else ()
+    scanned = parsed is not None and parsed.pages and not parsed.has_text()
+    if len(windows) > 1 or scanned:
         payloads, usage = _extract_parse_windows(
-            windows,
+            windows or (parsed,),
             model,
             schema,
             run_instructions,
@@ -329,6 +339,77 @@ def extract_document_with_citations(
     return data, usage, citations
 
 
+def window_pool_timeout(n_windows: int, concurrency: int, timeout: float | None) -> float | None:
+    """Wall budget for a windowed extract: per-call timeout times batches, plus slack.
+
+    ``--timeout`` is per window. Collecting every future with that same value
+    kills a 10-page doc at 240s even when each page would finish. Scale by
+    ``ceil(windows / concurrency) + 1`` so pueblo's ~706–800s 11-window run is
+    not killed at exactly 720s when GLM is a few tens of seconds slow.
+    """
+    if timeout is None:
+        return None
+    if n_windows <= 0:
+        return timeout
+    workers = max(1, min(int(concurrency), n_windows))
+    batches = math.ceil(n_windows / workers)
+    return timeout * (batches + WINDOW_POOL_SLACK_BATCHES)
+
+
+def extractbench_file_timeout(
+    n_windows: int,
+    concurrency: int,
+    timeout: float | None,
+    *,
+    floor: float = EXTRACTBENCH_FILE_TIMEOUT_FLOOR,
+) -> float | None:
+    """Per-file ExtractBench cap: at least the window-pool wait, never below ``floor``.
+
+    The runner's 1800s wrap is independent of ``window_pool_timeout``. A 1-page
+    call can still take longer than ``--timeout`` (W14 ~298s at 240s), so keep
+    the 1800s floor; raise it when the pool budget is larger (Veralto / long).
+    """
+    pool = window_pool_timeout(n_windows, concurrency, timeout)
+    if pool is None:
+        return None
+    return max(pool, floor)
+
+
+def bind_inference_timeouts(
+    run: Callable[..., Any],
+    per_file_timeout: float | None,
+    timeout_retries: int = 0,
+) -> Callable[..., Any]:
+    """Force ExtractBench inference to use our file timeout and no timeout retries."""
+
+    def bound(self: object, *args: Any, **kwargs: Any) -> Any:
+        if per_file_timeout is not None:
+            kwargs["per_file_timeout"] = per_file_timeout
+        kwargs["timeout_retries"] = timeout_retries
+        return run(self, *args, **kwargs)
+
+    bound.__wrapped__ = run  # type: ignore[attr-defined]
+    return bound
+
+
+def _bind_extractbench_timeouts(per_file_timeout: float | None, timeout_retries: int = 0) -> None:
+    """Patch ExtractBench's inference CLI so ``cli.run`` cannot 3×1800s a file."""
+    from extract_bench.inference.cli import InferenceCLI
+
+    original = getattr(InferenceCLI.run, "__wrapped__", InferenceCLI.run)
+    InferenceCLI.run = bind_inference_timeouts(original, per_file_timeout, timeout_retries)
+
+
+def _window_source(window: object) -> tuple[bytes, str]:
+    """Encode one parse window as model input. Never send a raw PDF."""
+    if getattr(window, "has_text", lambda: False)():
+        return window.as_prompt_text().encode("utf-8"), "text/plain"
+    image = next((page.image for page in getattr(window, "pages", ()) if page.image), None)
+    if image is not None:
+        return image, "image/png"
+    return window.as_prompt_text().encode("utf-8"), "text/plain"
+
+
 def _extract_parse_windows(
     windows: tuple,
     model: str | object,
@@ -343,13 +424,17 @@ def _extract_parse_windows(
 
     Each window is a single attempt. File-level ExtractBench retries still apply
     to transient errors; a hung window must not burn the 1800s per-file budget
-    three times (pueblo / long on the 6-doc smoke).
+    three times (pueblo / long on the 6-doc smoke). The pool wait is the
+    per-window timeout times concurrent batches, plus one batch of slack, not
+    one 240s wrap around the whole document. Do not ``shutdown(wait=True)``
+    after a pool timeout: that is how long sat until the 96-window file cap
+    with no result.json.
     """
-    sources = [window.as_prompt_text().encode("utf-8") for window in windows]
+    sources = [_window_source(window) for window in windows]
     workers = max(1, min(window_concurrency, len(sources)))
     once = RetryPolicy(max_retries=0)
 
-    def _run(source: bytes) -> tuple[ExtractedDocument, Usage]:
+    def _run(source: bytes, media_type: str) -> tuple[ExtractedDocument, Usage]:
         agent = _build_schema_agent(model, schema, instructions, timeout=timeout)
         with Extractor(
             ExtractedDocument,
@@ -357,28 +442,39 @@ def _extract_parse_windows(
             retry_policy=once,
             max_input_bytes=max_input_bytes,
         ) as extractor:
-            return extractor.extract_with_usage(source, media_type="text/plain")
+            return extractor.extract_with_usage(source, media_type=media_type)
 
-    if workers == 1:
-        pairs = [_run(source) for source in sources]
+    budget = window_pool_timeout(len(sources), workers, timeout)
+    if budget is None:
+        pairs = [_run(source, media_type) for source, media_type in sources]
     else:
-        with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_run, source) for source in sources]
-            try:
-                pairs = [
-                    future.result() if timeout is None else future.result(timeout=timeout)
-                    for future in futures
-                ]
-            except FuturesTimeoutError as exc:
-                for future in futures:
-                    future.cancel()
-                raise ModelError(
-                    f"Parse window timed out after {timeout}s",
-                    retryable=False,
-                ) from exc
+        pairs = _run_window_pool(_run, sources, workers, budget)
     return [as_extracted_dict(part) for part, _usage in pairs], _sum_usage(
         usage for _part, usage in pairs
     )
+
+
+def _run_window_pool(
+    run: Callable[..., tuple[ExtractedDocument, Usage]],
+    sources: list[tuple[bytes, str]],
+    workers: int,
+    budget: float,
+) -> list[tuple[ExtractedDocument, Usage]]:
+    """Run windows concurrently and return as soon as the budget expires."""
+    pool = ThreadPoolExecutor(max_workers=workers)
+    try:
+        futures = [pool.submit(run, source, media_type) for source, media_type in sources]
+        _done, pending = wait(futures, timeout=budget)
+        if pending:
+            for future in futures:
+                future.cancel()
+            raise ModelError(
+                f"Parse window timed out after {budget}s",
+                retryable=False,
+            )
+        return [future.result() for future in futures]
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)
 
 
 def _extractbench_retryable(exc: ModelError) -> bool:
@@ -407,12 +503,19 @@ def _merge_window_payloads(
 def _parse_then_extract_source(
     source: Path | str | bytes, media_type: str | None
 ) -> tuple[Path | str | bytes, str | None, object]:
-    """Load bytes, parse locally, and feed page-indexed text when it exists."""
+    """Load bytes, parse locally, and feed text or page images — never a PDF upload."""
     data, resolved_type = _source_bytes(source, media_type)
     parsed_inputs, parsed = maybe_parsed_inputs(data, resolved_type or "", parse=True)
-    if parsed_inputs is None:
-        return source, media_type or resolved_type, parsed
-    return parsed_inputs[1].encode("utf-8"), "text/plain", parsed
+    if parsed is not None and parsed.has_text() and parsed_inputs is not None:
+        text = parsed_inputs[1]
+        if isinstance(text, str):
+            return text.encode("utf-8"), "text/plain", parsed
+    if parsed is not None and parsed.has_images():
+        image = next(page.image for page in parsed.pages if page.image)
+        return image, "image/png", parsed
+    if parsed is not None and parsed.pages and not parsed.has_text():
+        return parsed.as_prompt_text().encode("utf-8"), "text/plain", parsed
+    return source, media_type or resolved_type, parsed
 
 
 def _source_bytes(source: Path | str | bytes, media_type: str | None) -> tuple[bytes, str | None]:
@@ -543,6 +646,10 @@ def register_openextract_pipeline(
     from extract_bench.schemas.product import ProductType
 
     name = pipeline_name_for_model(model, pipeline_name)
+    file_timeout = extractbench_file_timeout(
+        DEFAULT_FILE_TIMEOUT_WINDOWS, window_concurrency, timeout
+    )
+    _bind_extractbench_timeouts(file_timeout, timeout_retries=0)
     config = {
         "model": model,
         "instructions": instructions,
@@ -667,6 +774,7 @@ def register_openextract_pipeline(
     try:
         spec = get_pipeline(name)
         spec.config.update(config)
+        spec.per_file_timeout = file_timeout
     except ValueError:
         register_pipeline(
             PipelineSpec(
@@ -674,6 +782,7 @@ def register_openextract_pipeline(
                 provider_name="openextract",
                 product_type=ProductType.EXTRACT,
                 config=config,
+                per_file_timeout=file_timeout,
             )
         )
     return name
@@ -703,7 +812,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--timeout",
         type=float,
         default=DEFAULT_CALL_TIMEOUT,
-        help=f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)})",
+        help=(
+            f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)}); "
+            "document wall is timeout × (ceil(windows / concurrency) + 1); "
+            "ExtractBench per-file timeout is max(1800, that budget for a long doc)"
+        ),
     )
     parser.add_argument(
         "--window-concurrency",

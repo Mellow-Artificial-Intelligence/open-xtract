@@ -9,18 +9,28 @@ timing when that is known.
 ## [Unreleased]
 
 ### Changed
+- ExtractBench per-file timeout is ``max(1800, window-pool wait)`` for a
+  long-doc window count, and timeout retries are
+  disabled. Veralto (41) and long (66) are not killed at 1800s × 3.
+- ExtractBench window-pool wait is
+  ``timeout × (ceil(windows / concurrency) + 1)``, not a sharp
+  ``timeout × batches`` wrap. Pueblo's ~706s 11-window run is not killed at
+  720s; a pool timeout returns immediately instead of waiting on cancelled
+  workers until the 96-window file cap (long / no result.json).
+  Window attempts are still not retried.
+- Empty-text / scanned PDFs (Bianco) are rendered to compact grayscale page
+  images (long edge ≤ 768px) locally and never uploaded for OpenRouter
+  document-parse (400 rate-limit). Boxes stay parser-backed; none are
+  invented when the scan has no word spans.
+- OpenRouter usage falls back to provider ``prompt_tokens`` /
+  ``completion_tokens`` when pydantic-ai ``RequestUsage.extract`` leaves
+  zeros (live GLM-5.3-flash / W14). Counts are never invented.
 - Parse-then-extract windows page-indexed PDF text under a 12k-character
   budget (was 80k) and one page per window, and splits a single oversized page so
   each model call fits GLM-class context. Slide decks that fit 80k as one
-  prompt (Veralto) now split. ExtractBench extracts windows in a bounded thread pool
-  (`--window-concurrency`, default 4) with a per-call timeout (`--timeout`,
-  default 240s). Window attempts are not retried; request timeouts and
-  token-limit errors are permanent so ExtractBench does not burn its 1800s
-  per-file limit three times (pueblo / long). Citations are collected from
-  every window before reduce, then missing pages are backfilled from parse
-  values (including ``1,234`` / ``1234.0`` forms) so Bianco-class docs still
-  emit `field_citations` when the model returns an empty cite list. Bounding
-  boxes remain parser-backed only.
+  prompt (Veralto) now split. Citations are collected from every window before
+  reduce, then missing pages are backfilled from parse values (including
+  ``1,234`` / ``1234.0`` forms). Bounding boxes remain parser-backed only.
 - PDF parse takes a process-wide lock. pypdfium2 is not thread-safe; concurrent
   ExtractBench workers no longer crash native PDFium.
 - Usage capture asks OpenRouter for native usage via both `openrouter_usage`

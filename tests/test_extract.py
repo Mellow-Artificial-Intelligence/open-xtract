@@ -1805,6 +1805,118 @@ class TestExtractWithUsage:
         too_deep = {"details": {"details": {"details": {"details": {"details": {}}}}}}
         too_deep["details"]["details"]["details"]["details"]["details"]["prompt_tokens"] = 5
         assert _usage_from_raw(too_deep) == Usage(0, 0, 0)
+        assert _usage_from_raw({"tokens_prompt": 40, "tokens_completion": 2}) == Usage(40, 2, 42)
+
+        class _Dumped:
+            input_tokens = 0
+            output_tokens = 0
+
+            def model_dump(self, exclude_none=True):
+                return {"prompt_tokens": 77, "completion_tokens": 3}
+
+        assert _usage_from_raw(_Dumped()) == Usage(77, 3, 80)
+
+        class _DumpNeedsNoKwargs:
+            def model_dump(self):
+                return {"prompt_tokens": 5, "completion_tokens": 1}
+
+        assert _usage_from_raw(_DumpNeedsNoKwargs()) == Usage(5, 1, 6)
+
+        class _DumpBroken:
+            def model_dump(self, extra):
+                return extra
+
+        assert _usage_from_raw(_DumpBroken()) == Usage(0, 0, 0)
+
+        class _DumpList:
+            def model_dump(self, exclude_none=True):
+                return [1]
+
+        assert _usage_from_raw(_DumpList()) == Usage(0, 0, 0)
+
+        class _DumpNoTokenAliases:
+            def model_dump(self, exclude_none=True):
+                return {"details": {}}
+
+        assert _usage_from_raw(_DumpNoTokenAliases()) == Usage(0, 0, 0)
+
+        class _NestedDump:
+            input_tokens = 0
+            output_tokens = 0
+
+            def model_dump(self, exclude_none=True):
+                return {"details": {"prompt_tokens": 8, "completion_tokens": 1}}
+
+        assert _usage_from_raw(_NestedDump()) == Usage(8, 1, 9)
+
+        class _LiveProviderResponse:
+            @property
+            def usage(self):
+                return SimpleNamespace(input_tokens=0, output_tokens=0, total_tokens=0)
+
+            def all_messages(self):
+                return [
+                    SimpleNamespace(
+                        usage=SimpleNamespace(input_tokens=0, output_tokens=0),
+                        provider_details={},
+                        provider_response=SimpleNamespace(
+                            usage=SimpleNamespace(prompt_tokens=321, completion_tokens=7)
+                        ),
+                    )
+                ]
+
+        assert _usage_from_result(_LiveProviderResponse()) == Usage(321, 7, 328)
+
+        class _EmptyResponse:
+            @property
+            def response(self):
+                raise ValueError("No response found")
+
+        assert _usage_from_result(_EmptyResponse()) == Usage(0, 0, 0)
+
+    def test_openai_usage_fallback_reads_provider_prompt_tokens(self, monkeypatch):
+        from pydantic_ai.models import openai as openai_mod
+
+        import openextract._agent as agent_mod
+
+        class _Mapped:
+            def __init__(self, inp=0, out=0):
+                self.input_tokens = inp
+                self.output_tokens = out
+
+        monkeypatch.setattr(agent_mod, "_OPENAI_USAGE_PATCHED", False)
+        monkeypatch.setattr(openai_mod, "_map_usage", lambda *_a, **_k: _Mapped())
+        agent_mod._ensure_openai_usage_fallback()
+        agent_mod._ensure_openai_usage_fallback()
+        filled = openai_mod._map_usage(
+            SimpleNamespace(usage=SimpleNamespace(prompt_tokens=99, completion_tokens=4)),
+            "openrouter",
+            "https://openrouter.ai/api/v1",
+            "z-ai/glm-5.3-flash",
+        )
+        assert (filled.input_tokens, filled.output_tokens) == (99, 4)
+        empty = openai_mod._map_usage(SimpleNamespace(usage=None), "openrouter", "https://x", "m")
+        assert (empty.input_tokens, empty.output_tokens) == (0, 0)
+
+        monkeypatch.setattr(agent_mod, "_OPENAI_USAGE_PATCHED", False)
+        monkeypatch.setattr(openai_mod, "_map_usage", lambda *_a, **_k: _Mapped(5, 1))
+        agent_mod._ensure_openai_usage_fallback()
+        kept = openai_mod._map_usage(SimpleNamespace(usage=None), "openrouter", "https://x", "m")
+        assert (kept.input_tokens, kept.output_tokens) == (5, 1)
+
+        monkeypatch.setattr(agent_mod, "_OPENAI_USAGE_PATCHED", False)
+        real_import = __import__
+
+        def _boom(name, globals=None, locals=None, fromlist=(), level=0):
+            if name == "pydantic_ai.models" and fromlist and "openai" in fromlist:
+                raise ImportError("no openai extra")
+            return real_import(name, globals, locals, fromlist, level)
+
+        import builtins
+
+        monkeypatch.setattr(builtins, "__import__", _boom)
+        agent_mod._ensure_openai_usage_fallback()
+        assert agent_mod._OPENAI_USAGE_PATCHED is False
 
     def test_propagates_runtime_error_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
