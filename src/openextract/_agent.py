@@ -188,13 +188,19 @@ def _usage_model_settings(
 
 
 def _token_count(raw: object, names: tuple[str, ...]) -> int:
+    """Return the first positive alias, skipping default-zero placeholders.
+
+    pydantic-ai ``RunUsage.input_tokens`` defaults to ``0``. Treating that as
+    a real count hid OpenRouter ``request_tokens`` / ``prompt_tokens`` on the
+    same object (and nested ``details``).
+    """
     if isinstance(raw, dict):
         mapping = cast(dict[str, object], raw)
         values = (mapping.get(name) for name in names)
     else:
         values = (getattr(raw, name, None) for name in names)
     for value in values:
-        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
             return value
     return 0
 

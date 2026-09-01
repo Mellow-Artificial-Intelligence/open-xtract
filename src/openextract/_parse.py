@@ -14,6 +14,8 @@ from ._types import Citation
 _PDF_TYPES = frozenset({"application/pdf", "application/x-pdf"})
 _PAGE_HEADER = "--- Page {page} ---"
 _FUZZY_RATIO = 0.85
+# ~20k tokens of document text, leaving room for schema, instructions, and output.
+DEFAULT_PARSE_WINDOW_CHARS = 80_000
 
 
 @dataclass(frozen=True)
@@ -47,8 +49,7 @@ class ParsedDocument:
 
     def as_prompt_text(self) -> str:
         """Render page markers so the model can cite 1-indexed pages."""
-        blocks = [f"{_PAGE_HEADER.format(page=page.page)}\n{page.text}" for page in self.pages]
-        return "\n\n".join(blocks).strip()
+        return _pages_prompt_text(self.pages)
 
 
 def try_parse_document(data: bytes, media_type: str | None) -> ParsedDocument | None:
@@ -69,6 +70,71 @@ def parsed_run_inputs(parsed: ParsedDocument) -> list[str]:
         "Page boundaries are marked as '--- Page N ---' (1-indexed).",
         parsed.as_prompt_text(),
     ]
+
+
+def _page_block(page: ParsedPage) -> str:
+    return f"{_PAGE_HEADER.format(page=page.page)}\n{page.text}"
+
+
+def _pages_prompt_text(pages: tuple[ParsedPage, ...]) -> str:
+    return "\n\n".join(_page_block(page) for page in pages).strip()
+
+
+def _pages_prompt_len(pages: tuple[ParsedPage, ...]) -> int:
+    if not pages:
+        return 0
+    return sum(len(_page_block(page)) for page in pages) + 2 * (len(pages) - 1)
+
+
+def parse_windows(
+    parsed: ParsedDocument,
+    *,
+    max_chars: int | None = None,
+) -> tuple[ParsedDocument, ...]:
+    """Split ``parsed`` into page-contiguous windows under ``max_chars``.
+
+    A single page larger than the budget is still its own window so parser
+    boxes keep the full page text. Empty documents yield the original parse.
+    """
+    budget = DEFAULT_PARSE_WINDOW_CHARS if max_chars is None else max_chars
+    pages = parsed.pages
+    if not pages or _pages_prompt_len(pages) <= budget:
+        return (parsed,)
+    windows: list[ParsedDocument] = []
+    current: list[ParsedPage] = []
+    current_len = 0
+    for page in pages:
+        block_len = len(_page_block(page))
+        extra = block_len if not current else block_len + 2
+        if current and current_len + extra > budget:
+            windows.append(ParsedDocument(pages=tuple(current)))
+            current = [page]
+            current_len = block_len
+            continue
+        current.append(page)
+        current_len += extra
+    if current:
+        windows.append(ParsedDocument(pages=tuple(current)))
+    return tuple(windows)
+
+
+def parsed_window_inputs(
+    parsed: ParsedDocument | None,
+    fallback_inputs: list,
+    *,
+    max_chars: int | None = None,
+) -> list[list]:
+    """Return per-window run inputs, or ``[fallback_inputs]`` for the fast path.
+
+    One window keeps the original inputs object so callers that patch
+    ``_extract_once`` still see a single call with the prepared prompt.
+    """
+    if parsed is None or not parsed.has_text():
+        return [fallback_inputs]
+    windows = parse_windows(parsed, max_chars=max_chars)
+    if len(windows) == 1:
+        return [fallback_inputs]
+    return [parsed_run_inputs(window) for window in windows]
 
 
 def maybe_parsed_inputs(

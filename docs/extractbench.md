@@ -86,12 +86,15 @@ with `--no-cite`) and maps them onto ExtractBench `FieldCitation`:
 
 The runner **parses PDFs locally** (pypdfium2, `openextract[pdf]` / `openextract[all]`)
 and feeds page-indexed text (`--- Page N ---`) to the model before extraction.
-That is the default path so page and word F1 can move on a 6-document `--test`
-smoke. Boxes are never invented and are never taken from the model: if a parser
-span matches the quote (exact, then simple fuzzy), a normalized COCO
-`[x, y, width, height]` in `[0, 1]` is attached; if nothing matches, `bbox` is
-omitted. Citations without a page cannot become `FieldCitation` (ExtractBench
-requires `page >= 1`) and are dropped at the mapping step.
+Long documents are split into page windows under a character budget, extracted
+per window, and merged — the whole PDF is not dumped as one prompt. That is the
+default path so page and word F1 can move on a 6-document `--test` smoke without
+blowing the model context. Boxes are never invented and are never taken from the
+model: if a parser span matches the quote (exact, then simple fuzzy), a
+normalized COCO `[x, y, width, height]` in `[0, 1]` is attached; if nothing
+matches, `bbox` is omitted. Citations without a page cannot become
+`FieldCitation` (ExtractBench requires `page >= 1`) and are dropped at the
+mapping step.
 
 `--no-cite` still runs parse-then-extract but does not ask for or emit
 `field_citations`. Token `usage` and `cost_usd` come from the provider usage

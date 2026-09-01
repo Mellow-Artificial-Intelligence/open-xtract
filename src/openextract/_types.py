@@ -164,6 +164,18 @@ def total_usage(results: Iterable[ExtractionResult[T]]) -> Usage:
     return Usage(input_tokens, output_tokens, total_tokens)
 
 
+def _sum_usage(usages: Iterable[Usage]) -> Usage:
+    """Sum raw :class:`Usage` values from windowed or multi-call extractions."""
+    input_tokens = 0
+    output_tokens = 0
+    total_tokens = 0
+    for usage in usages:
+        input_tokens += usage.input_tokens
+        output_tokens += usage.output_tokens
+        total_tokens += usage.total_tokens
+    return Usage(input_tokens, output_tokens, total_tokens)
+
+
 def _resolve_item(
     item: ExtractionInputLike,
     global_media_type: str | None,

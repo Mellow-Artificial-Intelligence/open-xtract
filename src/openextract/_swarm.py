@@ -33,7 +33,6 @@ from ._media import _get_media_async, _item_source_label
 from ._parse import maybe_parsed_inputs
 from ._reduce import SwarmReduce, normalize_reduce, reduce_outputs
 from ._remote import run_remote_extraction
-from ._retry import _run_with_retries_async
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
 from ._types import (
     ExtractionInputLike,
@@ -43,6 +42,7 @@ from ._types import (
     _resolve_item,
     total_usage,
 )
+from ._windows import extract_windows_async
 
 if TYPE_CHECKING:
     pass
@@ -193,21 +193,25 @@ async def _run_member(
             else _resolve_run_inputs(file_bytes, file_type, style_inputs)
         )
 
-        async def _once() -> Any:
+        async def _run(window: list) -> tuple[object, Usage]:
             nonlocal attempts
             attempts += 1
-            return await _run_extraction_async(agent, inputs)
+            result = await _run_extraction_async(agent, window)
+            return result.output, _usage_from_result(result)
 
-        result = await _run_with_retries_async(
-            _once,
+        output, usage, citations = await extract_windows_async(
+            _run,
+            inputs,
+            parsed,
+            schema,
+            cite,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
-    output, citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
     return ExtractionResult(
         output=output,
-        usage=_usage_from_result(result),
+        usage=usage,
         attempts=attempts,
         duration=time.perf_counter() - started,
         model=_model_identifier(member.model, agent),
