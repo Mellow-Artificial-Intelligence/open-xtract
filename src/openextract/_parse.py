@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
@@ -499,10 +500,39 @@ def _union_coco(
 
 
 def _citation_from_value(field: str, value: str, parsed: ParsedDocument) -> Citation | None:
-    page, bbox = find_span(parsed, value)
-    if page is None:
-        return None
-    return Citation(field=field, quote=value, page=page, bbox=bbox)
+    """Locate ``value`` in the parse, including numeric display variants.
+
+    Window extract often returns schema numbers (``1234.0``) with an empty
+    citation list. ExtractBench still needs a page, so try thousands-separated
+    and whole-integer forms that appear in the PDF.
+    """
+    for needle in _value_needles(value):
+        page, bbox = find_span(parsed, needle)
+        if page is not None:
+            return Citation(field=field, quote=needle, page=page, bbox=bbox)
+    return None
+
+
+def _value_needles(value: str) -> tuple[str, ...]:
+    """Search texts for a field value, including ``1,234`` / ``1234.0`` forms."""
+    texts = [value]
+    stripped = value.replace(",", "").replace("$", "").replace("£", "").replace("€", "").strip()
+    if stripped and stripped != value:
+        texts.append(stripped)
+    try:
+        number = float(stripped)
+    except ValueError:
+        return tuple(dict.fromkeys(texts))
+    if not math.isfinite(number) or abs(number) >= 1e15:
+        return tuple(dict.fromkeys(texts))
+    if number.is_integer():
+        integer = int(number)
+        texts.append(str(integer))
+        texts.append(f"{integer:,}")
+    else:
+        texts.append(f"{number:.2f}")
+        texts.append(f"{number:,.2f}")
+    return tuple(dict.fromkeys(text for text in texts if text))
 
 
 def _iter_field_values(output: object) -> Iterator[tuple[str, str]]:

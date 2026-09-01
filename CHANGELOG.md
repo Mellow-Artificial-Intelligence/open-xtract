@@ -14,9 +14,13 @@ timing when that is known.
   each model call fits GLM-class context. Slide decks that fit 80k as one
   prompt (Veralto) now split. ExtractBench extracts windows in a bounded thread pool
   (`--window-concurrency`, default 4) with a per-call timeout (`--timeout`,
-  default 240s) and collects citations from every window before reduce, so
-  Bianco-class docs keep page cites. Token-limit errors are permanent and are
-  not retried. Bounding boxes remain parser-backed only.
+  default 240s). Window attempts are not retried; request timeouts and
+  token-limit errors are permanent so ExtractBench does not burn its 1800s
+  per-file limit three times (pueblo / long). Citations are collected from
+  every window before reduce, then missing pages are backfilled from parse
+  values (including ``1,234`` / ``1234.0`` forms) so Bianco-class docs still
+  emit `field_citations` when the model returns an empty cite list. Bounding
+  boxes remain parser-backed only.
 - PDF parse takes a process-wide lock. pypdfium2 is not thread-safe; concurrent
   ExtractBench workers no longer crash native PDFium.
 - Usage capture asks OpenRouter for native usage via both `openrouter_usage`

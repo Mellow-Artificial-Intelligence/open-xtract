@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from openextract import Citation, SchemaValidationError
+from openextract import Citation, ModelError, SchemaValidationError
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -259,6 +259,106 @@ def test_unwrap_cited_document_flat_fallback():
     )
     assert data == {"vendor": "Acme"}
     assert citations[0].page == 1
+
+
+def test_default_windows_split_short_slide_deck(monkeypatch, tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"title": {"type": "string"}},
+        "required": ["title"],
+    }
+    pdf = synthetic_pdf(pages=[f"Slide {index}" for index in range(1, 21)])
+    path = tmp_path / "deck.pdf"
+    path.write_bytes(pdf)
+    calls: list[int] = []
+    original = extractbench.Extractor.extract_with_usage
+
+    def _spy(self, source, *, media_type=None):
+        payload = source if isinstance(source, bytes) else Path(source).read_bytes()
+        calls.append(len(payload))
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _spy)
+    data, _usage, _citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"title": "Slide 1"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+    )
+    assert data["title"] == "Slide 1"
+    assert len(calls) == 20
+
+
+def test_window_reduce_backfills_field_citations_when_model_omits_them(tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}, "total": {"type": "number"}},
+        "required": ["vendor", "total"],
+    }
+    pdf = synthetic_pdf(pages=["Vendor Acme Corp", "Total 1,234"])
+    path = tmp_path / "bianco.pdf"
+    path.write_bytes(pdf)
+    data, _usage, citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(
+            custom_output_args={
+                "output": {"vendor": "Acme Corp", "total": 1234},
+                "citations": [],
+            }
+        ),
+        max_retries=0,
+        cite=True,
+    )
+    assert data == {"vendor": "Acme Corp", "total": 1234}
+    mapped = extractbench.field_citations_for_extractbench(citations)
+    paths = {item["field_path"] for item in mapped}
+    assert "vendor" in paths
+    assert any(item["page"] >= 1 for item in mapped)
+
+
+def test_extractbench_does_not_retry_timeouts():
+    assert extractbench._extractbench_retryable(ModelError("rate limited", retryable=True))
+    assert not extractbench._extractbench_retryable(ModelError("request timeout", retryable=True))
+    assert not extractbench._extractbench_retryable(ModelError("token limit", retryable=False))
+
+
+def test_window_pool_timeout_is_permanent(monkeypatch, tmp_path):
+    import time
+
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["AAAA page one", "BBBB page two"])
+    path = tmp_path / "slow.pdf"
+    path.write_bytes(pdf)
+    original = extractbench.Extractor.extract_with_usage
+
+    def _slow(self, source, *, media_type=None):
+        time.sleep(0.4)
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _slow)
+    with pytest.raises(ModelError, match="timed out") as exc:
+        extractbench.extract_document_with_citations(
+            path,
+            schema,
+            TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+            max_retries=0,
+            cite=True,
+            timeout=0.05,
+            window_concurrency=2,
+        )
+    assert exc.value.retryable is False
 
 
 def test_merge_window_payloads_keeps_later_citations():

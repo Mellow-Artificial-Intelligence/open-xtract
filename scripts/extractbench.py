@@ -21,7 +21,7 @@ import os
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 from pathlib import Path
 from typing import Any
 
@@ -308,7 +308,6 @@ def extract_document_with_citations(
             model,
             schema,
             run_instructions,
-            policy=policy,
             max_input_bytes=max_input_bytes,
             timeout=timeout,
             window_concurrency=window_concurrency,
@@ -335,21 +334,26 @@ def _extract_parse_windows(
     schema: dict[str, Any],
     instructions: str,
     *,
-    policy: RetryPolicy,
     max_input_bytes: int | None,
     timeout: float | None,
     window_concurrency: int,
 ) -> tuple[list[dict[str, Any]], Usage]:
-    """Extract each parse window and sum usage. Citations are unwrapped later."""
+    """Extract each parse window and sum usage. Citations are unwrapped later.
+
+    Each window is a single attempt. File-level ExtractBench retries still apply
+    to transient errors; a hung window must not burn the 1800s per-file budget
+    three times (pueblo / long on the 6-doc smoke).
+    """
     sources = [window.as_prompt_text().encode("utf-8") for window in windows]
     workers = max(1, min(window_concurrency, len(sources)))
+    once = RetryPolicy(max_retries=0)
 
     def _run(source: bytes) -> tuple[ExtractedDocument, Usage]:
         agent = _build_schema_agent(model, schema, instructions, timeout=timeout)
         with Extractor(
             ExtractedDocument,
             agent=agent,
-            retry_policy=policy,
+            retry_policy=once,
             max_input_bytes=max_input_bytes,
         ) as extractor:
             return extractor.extract_with_usage(source, media_type="text/plain")
@@ -358,10 +362,31 @@ def _extract_parse_windows(
         pairs = [_run(source) for source in sources]
     else:
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            pairs = list(pool.map(_run, sources))
+            futures = [pool.submit(_run, source) for source in sources]
+            try:
+                pairs = [
+                    future.result() if timeout is None else future.result(timeout=timeout)
+                    for future in futures
+                ]
+            except FuturesTimeoutError as exc:
+                for future in futures:
+                    future.cancel()
+                raise ModelError(
+                    f"Parse window timed out after {timeout}s",
+                    retryable=False,
+                ) from exc
     return [as_extracted_dict(part) for part, _usage in pairs], _sum_usage(
         usage for _part, usage in pairs
     )
+
+
+def _extractbench_retryable(exc: ModelError) -> bool:
+    """True when ExtractBench should retry the whole file.
+
+    Token-limit and request timeouts are permanent. Retrying them is how
+    pueblo/long spent 1800s three times on the same doomed prompt.
+    """
+    return exc.retryable and "timeout" not in str(exc).lower()
 
 
 def _merge_window_payloads(
@@ -571,7 +596,7 @@ def register_openextract_pipeline(
                 except ProviderNotInstalledError as exc:
                     raise ProviderConfigError(str(exc)) from exc
                 except ModelError as exc:
-                    if exc.retryable:
+                    if _extractbench_retryable(exc):
                         raise ProviderTransientError(str(exc)) from exc
                     raise ProviderPermanentError(str(exc)) from exc
                 except (SchemaValidationError, InputTooLargeError, TypeError) as exc:

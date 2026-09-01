@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Awaitable, Callable, Sequence
 
 from ._citations import split_cited_output
-from ._parse import ParsedDocument, parsed_window_inputs
+from ._parse import ParsedDocument, ground_citations, parsed_window_inputs
 from ._reduce import reduce_outputs
 from ._retry import _run_with_retries_async, _run_with_retries_sync
 from ._types import Citation, T, Usage, _sum_usage
@@ -48,7 +48,7 @@ def extract_windows_sync(
         outputs.append(output)
         usages.append(usage)
         citations.extend(cites)
-    return _fold_windows(outputs, usages, citations)
+    return _finish_windows(outputs, usages, citations, parsed, cite)
 
 
 async def extract_windows_async(
@@ -85,7 +85,21 @@ async def extract_windows_async(
         outputs.append(output)
         usages.append(usage)
         citations.extend(cites)
-    return _fold_windows(outputs, usages, citations)
+    return _finish_windows(outputs, usages, citations, parsed, cite)
+
+
+def _finish_windows(
+    outputs: Sequence[T],
+    usages: Sequence[Usage],
+    citations: list[Citation],
+    parsed: ParsedDocument | None,
+    cite: bool,
+) -> tuple[T, Usage, tuple[Citation, ...]]:
+    """Reduce window values, then backfill cites the model omitted."""
+    output, usage, merged = _fold_windows(outputs, usages, citations)
+    if cite:
+        return output, usage, ground_citations(merged, parsed, output)
+    return output, usage, merged
 
 
 def _fold_windows(

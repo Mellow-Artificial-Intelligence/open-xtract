@@ -90,11 +90,14 @@ Long documents (and oversized pages) are split into windows under a 12k-characte
 / 1-page budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
 and merged — the whole PDF is not dumped as one prompt. Each model call uses
 `--timeout` (default 240s) so a doomed window fails fast instead of burning
-ExtractBench's 1800s per-file limit three times. Citations are collected from
-every window before reduce. Boxes are never invented and are never taken from the
-model: if a parser span matches the quote (exact, then simple fuzzy), a
-normalized COCO `[x, y, width, height]` in `[0, 1]` is attached; if nothing
-matches, `bbox` is omitted. Citations without a page cannot become
+ExtractBench's 1800s per-file limit three times. Window calls are a single
+attempt; request timeouts and token-limit errors are not retried at file
+level. Citations are collected from every window before reduce. When a window
+returns values but no cites, pages are backfilled from the local parse
+(including numeric display variants). Boxes are never invented and are never
+taken from the model: if a parser span matches the quote (exact, then simple
+fuzzy), a normalized COCO `[x, y, width, height]` in `[0, 1]` is attached; if
+nothing matches, `bbox` is omitted. Citations without a page cannot become
 `FieldCitation` (ExtractBench requires `page >= 1`) and are dropped at the
 mapping step.
 

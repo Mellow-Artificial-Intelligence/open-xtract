@@ -30,6 +30,7 @@ from openextract._parse import (
     _split_page,
     _union_coco,
     _union_pdf_boxes,
+    _value_needles,
     _walk_fields,
     _word_spans,
     find_span,
@@ -288,6 +289,25 @@ def test_walk_nested_fields_and_short_quote():
     already = ground_citations((Citation("total", "12.50", 1),), parsed, {"total": "12.50"})
     assert len(already) == 1
     assert _citation_from_value("missing", "zzz", parsed) is None
+    money = ParsedDocument(
+        pages=(
+            _page(
+                "Paid 1,234.00",
+                ParsedSpan("1,234.00", 1, (0.2, 0.1, 0.3, 0.05)),
+            ),
+        )
+    )
+    from_int = ground_citations((), money, {"amount": 1234})
+    from_float = ground_citations((), money, {"amount": 1234.0})
+    assert from_int[0].page == 1 and from_int[0].quote == "1,234"
+    assert from_float[0].page == 1
+    assert "1,234" in _value_needles("1234.0")
+    assert _value_needles("Acme") == ("Acme",)
+    assert _value_needles("inf") == ("inf",)
+    assert _value_needles("nan") == ("nan",)
+    assert "$12" in _value_needles("$12") and "12" in _value_needles("$12")
+    assert _value_needles("1000000000000000") == ("1000000000000000",)
+    assert "12.50" in _value_needles("12.5")
     none_page = _ground_one(Citation("x", "zzz"), parsed)
     assert none_page.page is None and none_page.bbox is None
     assert _find_in_text("abc", "   ") is None
@@ -501,6 +521,13 @@ def test_extract_chunks_large_parse_via_extract_once(monkeypatch, mocker):
     )
     result = extract(_Vendor, model, pdf, media_type="application/pdf", cite=True)
     assert result.vendor == "Acme Corp"
+    plain = extract(
+        _Vendor,
+        TestModel(custom_output_args={"vendor": "Acme Corp"}),
+        pdf,
+        media_type="application/pdf",
+    )
+    assert plain.vendor == "Acme Corp"
     assert spy.call_count >= 2
     for call in spy.call_args_list:
         prompt = call.args[1][1]
