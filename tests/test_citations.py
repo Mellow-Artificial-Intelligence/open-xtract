@@ -116,6 +116,7 @@ class TestSanitize:
         assert citations_from_payload([{"field_path": "vendor", "page": 1}]) == (
             Citation(field="vendor", page=1),
         )
+        assert citations_from_payload([{"field": "../bad"}, object()]) == ()
 
     def test_bbox_edge_cases_are_dropped(self):
         assert (
