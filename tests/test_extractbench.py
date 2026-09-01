@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from openextract import SchemaValidationError
+from openextract import Citation, SchemaValidationError
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -85,6 +85,72 @@ def test_as_extracted_dict_from_passthrough_model():
 def test_as_extracted_dict_rejects_non_objects():
     with pytest.raises(TypeError, match="Expected dict"):
         extractbench.as_extracted_dict("not-json")
+
+
+def test_extract_document_with_citations_maps_extractbench_fields():
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}, "total": {"type": "number"}},
+        "required": ["vendor", "total"],
+    }
+    model = TestModel(
+        custom_output_args={
+            "output": {"vendor": "Acme", "total": 12.5},
+            "citations": [
+                {
+                    "field": "vendor",
+                    "quote": "Acme Co",
+                    "page": 1,
+                    "bbox": [0.1, 0.2, 0.3, 0.04],
+                },
+                {"field": "total", "quote": "12.50"},
+            ],
+        }
+    )
+    data, usage, citations = extractbench.extract_document_with_citations(
+        b"%PDF-fixture",
+        schema,
+        model,
+        media_type="application/pdf",
+        max_retries=0,
+        cite=True,
+    )
+    assert data == {"vendor": "Acme", "total": 12.5}
+    assert usage.input_tokens >= 0
+    assert citations[0] == Citation("vendor", "Acme Co", 1, (0.1, 0.2, 0.3, 0.04))
+    mapped = extractbench.field_citations_for_extractbench(citations)
+    data_only, _usage = extractbench.extract_document(
+        b"%PDF-fixture",
+        schema,
+        model,
+        media_type="application/pdf",
+        max_retries=0,
+        cite=True,
+    )
+    assert data_only == data
+    assert mapped == [
+        {
+            "field_path": "vendor",
+            "page": 1,
+            "bbox": [0.1, 0.2, 0.3, 0.04],
+            "reference_text": "Acme Co",
+        }
+    ]
+
+
+def test_unwrap_cited_document_flat_fallback():
+    data, citations = extractbench._unwrap_cited_document(
+        {"vendor": "Acme", "citations": [{"field": "vendor", "page": 1}]},
+        cite=True,
+    )
+    assert data == {"vendor": "Acme"}
+    assert citations[0].page == 1
+
+
+def test_parse_args_cite_defaults_on():
+    args = extractbench.parse_args(["--model", "openai:gpt-5", "--test"])
+    assert args.cite is True
+    assert extractbench.parse_args(["--model", "openai:gpt-5", "--no-cite"]).cite is False
 
 
 def test_extract_document_with_test_model():

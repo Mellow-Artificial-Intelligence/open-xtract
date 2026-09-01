@@ -28,6 +28,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, ConfigDict
 
 from openextract import (
+    Citation,
     Extractor,
     InputTooLargeError,
     ModelError,
@@ -37,6 +38,12 @@ from openextract import (
     Usage,
 )
 from openextract._agent import _install_hint, _route_model
+from openextract._citations import (
+    citations_from_payload,
+    field_citations_for_extractbench,
+    json_schema_with_citations,
+    with_citation_instructions,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = REPO_ROOT / ".extractbench"
@@ -220,10 +227,46 @@ def extract_document(
     max_retries: int = 2,
     max_input_bytes: int | None = DEFAULT_MAX_INPUT_BYTES,
     additional_properties_false: bool = True,
+    cite: bool = False,
 ) -> tuple[dict[str, Any], Usage]:
     """Extract one document with openextract using an ExtractBench JSON schema."""
+    data, usage, _citations = extract_document_with_citations(
+        source,
+        json_schema,
+        model,
+        instructions=instructions,
+        media_type=media_type,
+        max_retries=max_retries,
+        max_input_bytes=max_input_bytes,
+        additional_properties_false=additional_properties_false,
+        cite=cite,
+    )
+    return data, usage
+
+
+def extract_document_with_citations(
+    source: Path | str | bytes,
+    json_schema: dict[str, Any],
+    model: str | object,
+    *,
+    instructions: str = DEFAULT_INSTRUCTIONS,
+    media_type: str | None = None,
+    max_retries: int = 2,
+    max_input_bytes: int | None = DEFAULT_MAX_INPUT_BYTES,
+    additional_properties_false: bool = True,
+    cite: bool = True,
+) -> tuple[dict[str, Any], Usage, tuple[Citation, ...]]:
+    """Extract one document and return ``(data, usage, citations)``.
+
+    ``cite=True`` (the ExtractBench runner default) wraps the JSON schema with
+    an ``output`` / ``citations`` envelope so the model can return per-field
+    page, quote, and optional normalized bbox evidence.
+    """
     schema = prepare_schema(json_schema, additional_properties_false=additional_properties_false)
-    agent = _build_schema_agent(model, schema, instructions)
+    run_instructions = with_citation_instructions(instructions) if cite else instructions
+    if cite:
+        schema = json_schema_with_citations(schema)
+    agent = _build_schema_agent(model, schema, run_instructions)
     policy = RetryPolicy(max_retries=max_retries)
     with Extractor(
         ExtractedDocument,
@@ -232,7 +275,22 @@ def extract_document(
         max_input_bytes=max_input_bytes,
     ) as extractor:
         output, usage = extractor.extract_with_usage(source, media_type=media_type)
-    return as_extracted_dict(output), usage
+    dumped = as_extracted_dict(output)
+    data, citations = _unwrap_cited_document(dumped, cite=cite)
+    return data, usage, citations
+
+
+def _unwrap_cited_document(
+    dumped: dict[str, Any], *, cite: bool
+) -> tuple[dict[str, Any], tuple[Citation, ...]]:
+    """Split a cited envelope, or treat a flat object as the extraction."""
+    if not cite:
+        return dumped, ()
+    nested = dumped.get("output")
+    citations = citations_from_payload(dumped.get("citations") or [])
+    if isinstance(nested, dict):
+        return nested, citations
+    return {key: value for key, value in dumped.items() if key != "citations"}, citations
 
 
 def _venv_python() -> Path:
@@ -317,6 +375,7 @@ def register_openextract_pipeline(
     additional_properties_false: bool = True,
     input_price_per_1m: float = 0.0,
     output_price_per_1m: float = 0.0,
+    cite: bool = True,
 ) -> str:
     """Register the openextract ExtractBench provider and pipeline; return its name."""
     from extract_bench.inference.pipelines import get_pipeline, register_pipeline
@@ -348,6 +407,7 @@ def register_openextract_pipeline(
         "additional_properties_false": additional_properties_false,
         "input_price_per_1m": input_price_per_1m,
         "output_price_per_1m": output_price_per_1m,
+        "cite": cite,
     }
 
     if "openextract" not in _PROVIDER_REGISTRY:
@@ -372,7 +432,7 @@ def register_openextract_pipeline(
                 cfg = self.base_config
                 started_at = datetime.now()
                 try:
-                    extracted, usage = extract_document(
+                    extracted, usage, citations = extract_document_with_citations(
                         source,
                         schema,
                         cfg["model"],
@@ -382,6 +442,7 @@ def register_openextract_pipeline(
                         additional_properties_false=bool(
                             cfg.get("additional_properties_false", True)
                         ),
+                        cite=bool(cfg.get("cite", True)),
                     )
                 except ProviderNotInstalledError as exc:
                     raise ProviderConfigError(str(exc)) from exc
@@ -400,6 +461,16 @@ def register_openextract_pipeline(
                 ) + out_tok / 1_000_000 * float(cfg.get("output_price_per_1m", 0.0))
                 raw_output = {
                     "data": extracted,
+                    "citations": [
+                        {
+                            "field": citation.field,
+                            "quote": citation.quote,
+                            "page": citation.page,
+                            "bbox": list(citation.bbox) if citation.bbox is not None else None,
+                        }
+                        for citation in citations
+                    ],
+                    "field_citations": field_citations_for_extractbench(citations),
                     "model": cfg["model"],
                     "usage": {
                         "input_tokens": in_tok,
@@ -421,6 +492,7 @@ def register_openextract_pipeline(
 
             def normalize(self, raw_result: RawInferenceResult) -> InferenceResult:
                 extracted = raw_result.raw_output.get("data") or {}
+                field_citations = raw_result.raw_output.get("field_citations") or []
                 return InferenceResult(
                     request=raw_result.request,
                     pipeline_name=raw_result.pipeline_name,
@@ -431,7 +503,7 @@ def register_openextract_pipeline(
                         example_id=raw_result.request.example_id,
                         pipeline_name=raw_result.pipeline_name,
                         extracted_data=extracted,
-                        field_citations=[],
+                        field_citations=field_citations,
                     ),
                     started_at=raw_result.started_at,
                     completed_at=raw_result.completed_at,
@@ -504,6 +576,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="do not close object schemas with additionalProperties: false",
     )
     parser.add_argument(
+        "--cite",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="ask the model for per-field citations (default: on; needed for grounding)",
+    )
+    parser.add_argument(
         "--input-price-per-1m", type=float, default=0.0, help="USD per million input tokens"
     )
     parser.add_argument(
@@ -574,6 +652,7 @@ def main(argv: list[str] | None = None) -> int:
         additional_properties_false=not args.no_additional_properties_false,
         input_price_per_1m=args.input_price_per_1m,
         output_price_per_1m=args.output_price_per_1m,
+        cite=args.cite,
     )
     print(f"Pipeline: {name}")
     print(f"Model:    {model}")

@@ -19,6 +19,7 @@ from ._agent import (
 )
 from ._agents import AgentInput, DefinedAgent, RemoteAgent, SwarmMember, flatten_agent
 from ._batch import _require_no_running_loop
+from ._citations import prepare_cited_run, split_cited_output
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
     _resolve_max_input_bytes,
@@ -142,6 +143,7 @@ async def _run_member(
     max_retries: int,
     retry_backoff: float,
     retry_max_backoff: float,
+    cite: bool,
 ) -> ExtractionResult[T]:
     """Run one swarm agent over already-loaded media and build its result."""
     started = time.perf_counter()
@@ -150,9 +152,10 @@ async def _run_member(
     member_instructions = _agent_instructions(
         instructions if member.instructions is None else member.instructions, index, total
     )
+    run_schema, member_instructions = prepare_cited_run(schema, member_instructions, cite)
     if isinstance(member.model, RemoteAgent):
         output, usage, attempts = await run_remote_extraction(
-            schema,
+            run_schema,
             member.model,
             file_bytes,
             file_type,
@@ -162,6 +165,7 @@ async def _run_member(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
+        output, citations = split_cited_output(output, schema, cite=cite)
         return ExtractionResult(
             output=output,
             usage=usage,
@@ -171,11 +175,12 @@ async def _run_member(
             media_type=media_type,
             source=source_label,
             warnings=(),
+            citations=citations,
         )
     with prepared_style_run(member_style, file_bytes, file_type) as (capabilities, style_inputs):
         with _extraction_errors():
             agent = _build_agent(
-                schema,
+                run_schema,
                 member.model,
                 member_instructions,
                 extra_capabilities=capabilities,
@@ -193,8 +198,9 @@ async def _run_member(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
+    output, citations = split_cited_output(result.output, schema, cite=cite)
     return ExtractionResult(
-        output=cast(T, result.output),
+        output=output,
         usage=_usage_from_result(result),
         attempts=attempts,
         duration=time.perf_counter() - started,
@@ -202,6 +208,7 @@ async def _run_member(
         media_type=media_type,
         source=source_label,
         warnings=(),
+        citations=citations,
     )
 
 
@@ -222,6 +229,7 @@ async def _run_swarm(
     retry_max_backoff: float,
     on_agent_start: Callable[[int, int], None] | None,
     on_agent: Callable[[int, int, ExtractionResult[T] | Exception], None] | None,
+    cite: bool = False,
 ) -> SwarmResult[T]:
     """Load the input once, fan it out across agents, and reduce the outputs."""
     members = resolve_swarm_members(agents, size)
@@ -274,6 +282,7 @@ async def _run_swarm(
                     max_retries=max_retries,
                     retry_backoff=retry_backoff,
                     retry_max_backoff=retry_max_backoff,
+                    cite=cite,
                 )
             except Exception as exc:
                 results[index] = exc
@@ -314,6 +323,7 @@ def extract_swarm(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> T:
     """Run several agents over one input and return the reduced result.
 
@@ -375,6 +385,7 @@ def extract_swarm(
             retry_max_backoff=retry_max_backoff,
             on_agent_start=None,
             on_agent=None,
+            cite=cite,
         ),
     ).output
 
@@ -394,6 +405,7 @@ async def extract_swarm_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> T:
     """Async sibling of :func:`extract_swarm`."""
     result = await _run_swarm(
@@ -412,6 +424,7 @@ async def extract_swarm_async(
         retry_max_backoff=retry_max_backoff,
         on_agent_start=None,
         on_agent=None,
+        cite=cite,
     )
     return result.output
 
@@ -433,6 +446,7 @@ def extract_swarm_with_results(
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
     on_agent_start: Callable[[int, int], None] | None = None,
     on_agent: Callable[[int, int, ExtractionResult[T] | Exception], None] | None = None,
+    cite: bool = False,
 ) -> SwarmResult[T]:
     """Run a swarm and return the reduced output plus per-agent diagnostics.
 
@@ -461,6 +475,7 @@ def extract_swarm_with_results(
             retry_max_backoff=retry_max_backoff,
             on_agent_start=on_agent_start,
             on_agent=on_agent,
+            cite=cite,
         ),
     )
 
@@ -482,6 +497,7 @@ async def extract_swarm_with_results_async(
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
     on_agent_start: Callable[[int, int], None] | None = None,
     on_agent: Callable[[int, int, ExtractionResult[T] | Exception], None] | None = None,
+    cite: bool = False,
 ) -> SwarmResult[T]:
     """Async sibling of :func:`extract_swarm_with_results`."""
     return await _run_swarm(
@@ -500,4 +516,5 @@ async def extract_swarm_with_results_async(
         retry_max_backoff=retry_max_backoff,
         on_agent_start=on_agent_start,
         on_agent=on_agent,
+        cite=cite,
     )

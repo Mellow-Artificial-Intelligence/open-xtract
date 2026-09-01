@@ -43,6 +43,7 @@ from ._swarm import (
     resolve_swarm_members,
 )
 from ._types import (
+    Citation,
     ExtractionInput,
     ExtractionResult,
     RetryPolicy,
@@ -65,6 +66,7 @@ __all__ = [
     "RetryPolicy",
     "ExtractionInput",
     "ExtractionResult",
+    "Citation",
     "ExtractionStyle",
     "DefinedAgent",
     "RemoteAgent",

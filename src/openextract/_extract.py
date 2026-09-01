@@ -36,6 +36,7 @@ from ._batch import (
     extract_many_with_results_async,
     iter_extract_many_async,
 )
+from ._citations import prepare_cited_run, split_cited_output
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
     _max_redirects,
@@ -97,8 +98,10 @@ def _prepare_extraction(
     media_type: str | None,
     max_input_bytes: int,
     style: ExtractionStyle,
+    cite: bool = False,
 ) -> Iterator[tuple[PydanticAgent, list]]:
     """Prepare one extraction while applying the public exception mapping."""
+    run_schema, run_instructions = prepare_cited_run(schema, instructions, cite)
     with _extraction_errors():
         file_bytes, file_type = _get_media(
             input_file,
@@ -108,9 +111,9 @@ def _prepare_extraction(
     with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
         with _extraction_errors():
             agent = _build_agent(
-                schema,
+                run_schema,
                 model,
-                instructions,
+                run_instructions,
                 extra_capabilities=capabilities,
             )
         yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
@@ -125,9 +128,11 @@ async def _prepare_extraction_async(
     media_type: str | None,
     max_input_bytes: int,
     style: ExtractionStyle,
+    cite: bool = False,
     client: httpx.AsyncClient | None = None,
 ) -> AsyncIterator[tuple[PydanticAgent, list]]:
     """Prepare one async extraction while applying public exception mapping."""
+    run_schema, run_instructions = prepare_cited_run(schema, instructions, cite)
     with _extraction_errors():
         file_bytes, file_type = await _get_media_async(
             input_file,
@@ -138,9 +143,9 @@ async def _prepare_extraction_async(
     with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
         with _extraction_errors():
             agent = _build_agent(
-                schema,
+                run_schema,
                 model,
-                instructions,
+                run_instructions,
                 extra_capabilities=capabilities,
             )
         yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
@@ -231,6 +236,7 @@ def extract(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> T:
     """
     Extract structured data from a document, image, audio, or video file using an LLM.
@@ -268,6 +274,9 @@ def extract(
             i.e. exponential backoff with up to 25% jitter.
         retry_max_backoff: Maximum delay in seconds for exponential backoff or
             a provider ``Retry-After`` value. Defaults to 60 seconds.
+        cite: When ``True``, the model is asked for per-field source spans.
+            ``extract`` still returns the schema instance; citations land on
+            :class:`ExtractionResult` from the ``*_with_results`` APIs.
 
     Returns:
         An instance of the schema populated with extracted data.
@@ -300,6 +309,7 @@ def extract(
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
+            cite=cite,
         )
     style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
         style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
@@ -312,9 +322,15 @@ def extract(
         media_type,
         limit,
         style,
+        cite,
     ) as (agent, inputs):
+
+        def _once() -> T:
+            output, _citations = split_cited_output(_extract_once(agent, inputs), schema, cite=cite)
+            return output
+
         return _run_with_retries_sync(
-            lambda: _extract_once(agent, inputs),
+            _once,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
@@ -333,10 +349,11 @@ def extract_with_usage(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> tuple[T, Usage]:
     """Extract structured data and return ``(output, Usage)`` for token accounting.
 
-    Same retry and agent semantics as :func:`extract`. Returns a
+    Same retry, agent, and ``cite`` semantics as :func:`extract`. Returns a
     :class:`Usage` describing the tokens consumed by the successful model call,
     or summed across the agents when an agent fans out into a swarm.
     """
@@ -354,6 +371,7 @@ def extract_with_usage(
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
+            cite=cite,
         )
         return swarm.output, swarm.usage
     style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
@@ -367,11 +385,13 @@ def extract_with_usage(
         media_type,
         limit,
         style,
+        cite,
     ) as (agent, inputs):
 
         def _once() -> tuple[T, Usage]:
             result = _run_extraction(agent, inputs)
-            return cast(T, result.output), _usage_from_result(result)
+            output, _citations = split_cited_output(result.output, schema, cite=cite)
+            return output, _usage_from_result(result)
 
         return _run_with_retries_sync(
             _once,
@@ -393,6 +413,7 @@ async def extract_with_usage_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> tuple[T, Usage]:
     """Async sibling of :func:`extract_with_usage`; returns ``(output, Usage)``."""
     schema, model, input_file = _resolve_agent_call(schema, model, input_file)
@@ -409,6 +430,7 @@ async def extract_with_usage_async(
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
+            cite=cite,
         )
         return swarm.output, swarm.usage
     style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
@@ -422,11 +444,13 @@ async def extract_with_usage_async(
         media_type,
         limit,
         style,
+        cite,
     ) as (agent, inputs):
 
         async def _once() -> tuple[T, Usage]:
             result = await _run_extraction_async(agent, inputs)
-            return cast(T, result.output), _usage_from_result(result)
+            output, _citations = split_cited_output(result.output, schema, cite=cite)
+            return output, _usage_from_result(result)
 
         return await _run_with_retries_async(
             _once,
@@ -448,6 +472,7 @@ async def extract_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> T:
     """Async sibling of :func:`extract`; uses ``Agent.run`` instead of ``run_sync``.
 
@@ -467,6 +492,7 @@ async def extract_async(
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
+            cite=cite,
         )
     style, limit, max_retries, retry_backoff, retry_max_backoff = _oneshot_options(
         style, max_retries, retry_backoff, retry_max_backoff, max_input_bytes
@@ -479,11 +505,13 @@ async def extract_async(
         media_type,
         limit,
         style,
+        cite,
     ) as (agent, inputs):
 
         async def _once() -> T:
             result = await _run_extraction_async(agent, inputs)
-            return cast(T, result.output)
+            output, _citations = split_cited_output(result.output, schema, cite=cite)
+            return output
 
         return await _run_with_retries_async(
             _once,

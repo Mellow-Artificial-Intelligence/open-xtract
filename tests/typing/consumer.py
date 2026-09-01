@@ -13,6 +13,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from openextract import (
+    Citation,
     ExtractionInput,
     ExtractionResult,
     ExtractionStyle,
@@ -68,6 +69,11 @@ search: Invoice = extract(
 output, usage = extract_with_usage(Invoice, "openai:gpt-5", Path("/tmp/x.pdf"))
 _assert_invoice: Invoice = output
 _assert_usage: Usage = usage
+cited: Invoice = extract(Invoice, "openai:gpt-5", Path("/tmp/x.pdf"), cite=True)
+_cite: Citation = Citation("total", "12.50", 1, (0.1, 0.2, 0.3, 0.05))
+_field: dict[str, object] | None = _cite.as_field_citation()
+_ = cited
+_ = _field
 
 # extract_many_with_results returns ExtractionResult[Invoice] (or + Exception).
 results: list[ExtractionResult[Invoice]] = extract_many_with_results(

@@ -137,6 +137,27 @@ invoice, usage = extract_with_usage(
 print(usage.input_tokens, usage.output_tokens, usage.total_tokens)
 ```
 
+## Citations
+
+`cite=True` asks the model for per-field source evidence (a quote, optional
+1-indexed page, optional normalized bounding box). `extract()` still returns
+the schema instance. Read citations from `ExtractionResult.citations` on
+`extract_many_with_results*` / `extract_swarm_with_results*`.
+
+```python
+from openextract import extract_many_with_results
+
+results = extract_many_with_results(
+    schema=Invoice, model="openai:gpt-5", input_files=["bill.pdf"], cite=True
+)
+for citation in results[0].citations:
+    print(citation.field, citation.page, citation.quote)
+```
+
+Default is off: no extra instructions or schema wrap. Citations never retain
+raw media or credentials. See [ExtractBench](extractbench.md) for how these
+map onto grounding scores.
+
 ## Batch
 
 | API | Returns | Order | Use when |
