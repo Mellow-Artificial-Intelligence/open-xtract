@@ -9,13 +9,17 @@ timing when that is known.
 ## [Unreleased]
 
 ### Changed
+- ExtractBench per-file timeout is ``max(1800, timeout × ceil(windows /
+  concurrency))`` for a long-doc window count, and timeout retries are
+  disabled. Veralto (41) and long (66) are not killed at 1800s × 3.
 - ExtractBench window-pool wait is ``timeout × ceil(windows / concurrency)``,
   not one 240s wrap around the whole document. Goshen (10) and pueblo (11)
   can finish; Veralto (41) and long (66) fail only for a real model error.
   Window attempts are still not retried.
-- Empty-text / scanned PDFs (Bianco) are rendered to page images locally and
-  never uploaded for OpenRouter document-parse (400 rate-limit). Boxes stay
-  parser-backed; none are invented when the scan has no word spans.
+- Empty-text / scanned PDFs (Bianco) are rendered to compact grayscale page
+  images (long edge ≤ 768px) locally and never uploaded for OpenRouter
+  document-parse (400 rate-limit). Boxes stay parser-backed; none are
+  invented when the scan has no word spans.
 - OpenRouter usage falls back to provider ``prompt_tokens`` /
   ``completion_tokens`` when pydantic-ai ``RequestUsage.extract`` leaves
   zeros (live GLM-5.3-flash / W14). Counts are never invented.

@@ -25,6 +25,9 @@ _FUZZY_RATIO = 0.85
 # split; an oversized page is still sliced by the char budget.
 DEFAULT_PARSE_WINDOW_CHARS = 12_000
 DEFAULT_PARSE_WINDOW_PAGES = 1
+# Long-edge cap for scanned page rasters. scale=2 letter PNGs were ~400KB and
+# token-limited GLM one page at a time; boxes stay on the PDF page, not pixels.
+DEFAULT_RENDER_MAX_EDGE = 768
 # pypdfium2 / PDFium is not safe across threads in one process.
 _PDFIUM_LOCK = threading.Lock()
 
@@ -312,16 +315,32 @@ def _parse_pdf_page(pdf: Any, index: int) -> ParsedPage:
     )
 
 
+def _render_scale(width: float, height: float, max_edge: int = DEFAULT_RENDER_MAX_EDGE) -> float:
+    """Scale that fits the page in ``max_edge`` pixels without upscaling."""
+    longest = max(width, height)
+    if longest <= 0:
+        return 1.0
+    return min(1.0, max_edge / longest)
+
+
 def _render_page_png(page: Any) -> bytes | None:
-    """Rasterize one PDF page to PNG. Callers must hold ``_PDFIUM_LOCK``."""
+    """Rasterize one PDF page to a compact grayscale PNG.
+
+    Callers must hold ``_PDFIUM_LOCK``.
+    """
     render = getattr(page, "render", None)
     if not callable(render):
         return None
     try:
-        bitmap = render(scale=2, rev_byteorder=True)
+        width, height = _page_size(page)
+        scale = _render_scale(width, height)
+    except Exception:
+        scale = 1.0
+    try:
+        bitmap = render(scale=scale, rev_byteorder=True)
     except TypeError:
         try:
-            bitmap = render(scale=2)
+            bitmap = render(scale=scale)
         except Exception:
             return None
     except Exception:
@@ -362,7 +381,19 @@ def _bitmap_to_png(bitmap: Any) -> bytes | None:
                     packed[j + 3] = src[i + 3]
         else:
             packed[dest : dest + row] = src
-    return _encode_png(width, height, bytes(packed), channels)
+    luma, luma_channels = _luma_pixels(bytes(packed), width, height, channels)
+    return _encode_png(width, height, luma, luma_channels)
+
+
+def _luma_pixels(pixels: bytes, width: int, height: int, channels: int) -> tuple[bytes, int]:
+    """Convert packed RGB(A) to 8-bit grayscale. 1-channel input is returned as-is."""
+    if channels == 1:
+        return pixels, 1
+    out = bytearray(width * height)
+    for index in range(width * height):
+        offset = index * channels
+        out[index] = (pixels[offset] * 77 + pixels[offset + 1] * 150 + pixels[offset + 2] * 29) >> 8
+    return bytes(out), 1
 
 
 def _channels_for_mode(mode: str) -> int:
@@ -394,7 +425,7 @@ def _encode_png(width: int, height: int, pixels: bytes, channels: int) -> bytes:
     return (
         b"\x89PNG\r\n\x1a\n"
         + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0))
-        + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 9))
         + chunk(b"IEND", b"")
     )
 

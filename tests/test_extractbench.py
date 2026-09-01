@@ -337,6 +337,31 @@ def test_window_pool_timeout_scales_with_batches():
     assert extractbench.window_pool_timeout(8, 4, None) is None
 
 
+def test_extractbench_file_timeout_covers_pool_and_keeps_floor():
+    assert extractbench.extractbench_file_timeout(1, 4, 240.0) == 1800.0
+    assert extractbench.extractbench_file_timeout(10, 4, 240.0) == 1800.0
+    assert extractbench.extractbench_file_timeout(41, 4, 240.0) == 2640.0
+    assert extractbench.extractbench_file_timeout(66, 4, 240.0) == 4080.0
+    assert (
+        extractbench.extractbench_file_timeout(extractbench.DEFAULT_FILE_TIMEOUT_WINDOWS, 4, 240.0)
+        == 5760.0
+    )
+    assert extractbench.extractbench_file_timeout(66, 4, None) is None
+
+
+def test_bind_inference_timeouts_disables_timeout_retries():
+    def _run(self, pipeline, **kwargs):
+        return kwargs
+
+    bound = extractbench.bind_inference_timeouts(_run, 4080.0, timeout_retries=0)
+    forced = bound(object(), "openextract", timeout_retries=2, per_file_timeout=1800.0)
+    assert forced["per_file_timeout"] == 4080.0
+    assert forced["timeout_retries"] == 0
+    left = extractbench.bind_inference_timeouts(_run, None, timeout_retries=0)(object(), "x")
+    assert left["timeout_retries"] == 0
+    assert "per_file_timeout" not in left
+
+
 def test_windowed_extract_uses_batch_budget_not_one_timeout(monkeypatch, tmp_path):
     import time
 

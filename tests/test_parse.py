@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from openextract import Citation
 from openextract._parse import (
+    DEFAULT_RENDER_MAX_EDGE,
     ParsedDocument,
     ParsedPage,
     ParsedSpan,
@@ -24,6 +25,7 @@ from openextract._parse import (
     _flush_word,
     _ground_one,
     _iter_field_values,
+    _luma_pixels,
     _normalized_coco,
     _page_size,
     _page_text,
@@ -31,6 +33,7 @@ from openextract._parse import (
     _parse_pdf_page,
     _pdf_box_to_coco,
     _render_page_png,
+    _render_scale,
     _split_page,
     _union_coco,
     _union_pdf_boxes,
@@ -543,6 +546,7 @@ def test_empty_text_pdf_renders_page_images_not_file_upload():
     assert not parsed.has_text()
     assert parsed.has_images()
     assert all(page.image and page.image.startswith(b"\x89PNG") for page in parsed.pages)
+    assert all(page.image and len(page.image) < 20_000 for page in parsed.pages)
     inputs, got = maybe_parsed_inputs(data, "application/pdf", parse=True)
     assert got is parsed or (got is not None and got.has_images())
     assert inputs is not None
@@ -577,6 +581,12 @@ def test_render_and_png_helpers(monkeypatch):
     assert _channels_for_mode("BGR") == 3
     assert _channels_for_mode("BGRA") == 4
     assert _channels_for_mode("nope") == 0
+    assert _render_scale(3300, 2550) == pytest.approx(DEFAULT_RENDER_MAX_EDGE / 3300)
+    assert _render_scale(100, 80) == 1.0
+    assert _render_scale(0, 0) == 1.0
+    assert _luma_pixels(b"\x80", 1, 1, 1) == (b"\x80", 1)
+    assert _luma_pixels(b"\xff\xff\xff", 1, 1, 3)[1] == 1
+    assert _luma_pixels(b"\x10\x20\x30\x40", 1, 1, 4)[1] == 1
     png = _encode_png(1, 1, b"\xff\x00\x00", 3)
     assert png.startswith(b"\x89PNG")
     assert _render_page_png(SimpleNamespace()) is None
@@ -634,6 +644,18 @@ def test_render_and_png_helpers(monkeypatch):
 
     assert _render_page_png(_Page()).startswith(b"\x89PNG")
     assert bitmap.closed is True
+
+    class _SizedPage:
+        def get_size(self):
+            return 2550.0, 3300.0
+
+        def render(self, scale=1, **_kwargs):
+            assert scale == pytest.approx(DEFAULT_RENDER_MAX_EDGE / 3300)
+            return SimpleNamespace(
+                width=1, height=1, mode="RGB", n_channels=3, stride=3, buffer=b"\x10\x20\x30"
+            )
+
+    assert _render_page_png(_SizedPage()).startswith(b"\x89PNG")
 
 
 def test_maybe_parsed_inputs_headers_when_scan_has_no_image(monkeypatch):

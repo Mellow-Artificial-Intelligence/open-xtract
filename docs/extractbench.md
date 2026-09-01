@@ -90,9 +90,13 @@ Long documents (and oversized pages) are split into windows under a 12k-characte
 / 1-page budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
 and merged — the whole PDF is not dumped as one prompt. `--timeout` (default 240s)
 is per window; the document wall budget is `timeout × ceil(windows / concurrency)`
-so a 10-page file is not killed at a single 240s wrap. Window calls are a single
+so a 10-page file is not killed at a single 240s wrap. ExtractBench's per-file
+timeout is raised to at least that budget for a long document (never a hard
+1800s below the pool wait) and per-file timeout retries are off, so Veralto /
+long are not run 3×1800s. Window calls are a single
 attempt; request timeouts and token-limit errors are not retried at file
-level. Scanned / empty-text PDFs are rendered to page images locally and are
+level. Scanned / empty-text PDFs are rendered to compact grayscale page images
+(long edge ≤ 768px) locally and are
 never uploaded for provider document-parse. Citations are collected from
 every window before reduce. When a window
 returns values but no cites, pages are backfilled from the local parse

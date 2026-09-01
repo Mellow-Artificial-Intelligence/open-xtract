@@ -22,6 +22,7 @@ import os
 import re
 import subprocess
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
@@ -72,6 +73,11 @@ DEFAULT_INSTRUCTIONS = (
 DEFAULT_MAX_INPUT_BYTES = 500 * 1024 * 1024
 DEFAULT_CALL_TIMEOUT = 240.0
 DEFAULT_WINDOW_CONCURRENCY = 4
+# ExtractBench InferenceRunner wraps each file at 1800s and retries twice.
+# Window-pool wait for Veralto (41) / long (66) is above that, so the file
+# cap must be ≥ pool budget. 96 windows covers the 6-doc long split with headroom.
+EXTRACTBENCH_FILE_TIMEOUT_FLOOR = 1800.0
+DEFAULT_FILE_TIMEOUT_WINDOWS = 96
 _REF_PREFIXES = ("#/$defs/", "#/definitions/")
 
 
@@ -345,6 +351,50 @@ def window_pool_timeout(n_windows: int, concurrency: int, timeout: float | None)
     return timeout * math.ceil(n_windows / workers)
 
 
+def extractbench_file_timeout(
+    n_windows: int,
+    concurrency: int,
+    timeout: float | None,
+    *,
+    floor: float = EXTRACTBENCH_FILE_TIMEOUT_FLOOR,
+) -> float | None:
+    """Per-file ExtractBench cap: at least the window-pool wait, never below ``floor``.
+
+    The runner's 1800s wrap is independent of ``window_pool_timeout``. A 1-page
+    call can still take longer than ``--timeout`` (W14 ~298s at 240s), so keep
+    the 1800s floor; raise it when the pool budget is larger (Veralto / long).
+    """
+    pool = window_pool_timeout(n_windows, concurrency, timeout)
+    if pool is None:
+        return None
+    return max(pool, floor)
+
+
+def bind_inference_timeouts(
+    run: Callable[..., Any],
+    per_file_timeout: float | None,
+    timeout_retries: int = 0,
+) -> Callable[..., Any]:
+    """Force ExtractBench inference to use our file timeout and no timeout retries."""
+
+    def bound(self: object, *args: Any, **kwargs: Any) -> Any:
+        if per_file_timeout is not None:
+            kwargs["per_file_timeout"] = per_file_timeout
+        kwargs["timeout_retries"] = timeout_retries
+        return run(self, *args, **kwargs)
+
+    bound.__wrapped__ = run  # type: ignore[attr-defined]
+    return bound
+
+
+def _bind_extractbench_timeouts(per_file_timeout: float | None, timeout_retries: int = 0) -> None:
+    """Patch ExtractBench's inference CLI so ``cli.run`` cannot 3×1800s a file."""
+    from extract_bench.inference.cli import InferenceCLI
+
+    original = getattr(InferenceCLI.run, "__wrapped__", InferenceCLI.run)
+    InferenceCLI.run = bind_inference_timeouts(original, per_file_timeout, timeout_retries)
+
+
 def _window_source(window: object) -> tuple[bytes, str]:
     """Encode one parse window as model input. Never send a raw PDF."""
     if getattr(window, "has_text", lambda: False)():
@@ -576,6 +626,10 @@ def register_openextract_pipeline(
     from extract_bench.schemas.product import ProductType
 
     name = pipeline_name_for_model(model, pipeline_name)
+    file_timeout = extractbench_file_timeout(
+        DEFAULT_FILE_TIMEOUT_WINDOWS, window_concurrency, timeout
+    )
+    _bind_extractbench_timeouts(file_timeout, timeout_retries=0)
     config = {
         "model": model,
         "instructions": instructions,
@@ -700,6 +754,7 @@ def register_openextract_pipeline(
     try:
         spec = get_pipeline(name)
         spec.config.update(config)
+        spec.per_file_timeout = file_timeout
     except ValueError:
         register_pipeline(
             PipelineSpec(
@@ -707,6 +762,7 @@ def register_openextract_pipeline(
                 provider_name="openextract",
                 product_type=ProductType.EXTRACT,
                 config=config,
+                per_file_timeout=file_timeout,
             )
         )
     return name
@@ -738,7 +794,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_CALL_TIMEOUT,
         help=(
             f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)}); "
-            "document wall budget is timeout × ceil(windows / concurrency)"
+            "document wall budget is timeout × ceil(windows / concurrency); "
+            "ExtractBench per-file timeout is max(1800, that budget for a long doc)"
         ),
     )
     parser.add_argument(
