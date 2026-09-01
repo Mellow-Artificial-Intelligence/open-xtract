@@ -63,6 +63,7 @@ from ._media import (
     _read_url_with_client,
     _safe_source_context,
 )
+from ._parse import ParsedDocument, maybe_parsed_inputs
 from ._retry import _retry_delay, _run_with_retries_async, _run_with_retries_sync
 from ._session import AsyncExtractor, Extractor
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
@@ -99,7 +100,7 @@ def _prepare_extraction(
     max_input_bytes: int,
     style: ExtractionStyle,
     cite: bool = False,
-) -> Iterator[tuple[PydanticAgent, list]]:
+) -> Iterator[tuple[PydanticAgent, list, ParsedDocument | None]]:
     """Prepare one extraction while applying the public exception mapping."""
     run_schema, run_instructions = prepare_cited_run(schema, instructions, cite)
     with _extraction_errors():
@@ -108,6 +109,7 @@ def _prepare_extraction(
             media_type=media_type,
             max_input_bytes=max_input_bytes,
         )
+    parsed_inputs, parsed = maybe_parsed_inputs(file_bytes, file_type, parse=cite)
     with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
         with _extraction_errors():
             agent = _build_agent(
@@ -116,7 +118,12 @@ def _prepare_extraction(
                 run_instructions,
                 extra_capabilities=capabilities,
             )
-        yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
+        inputs = (
+            parsed_inputs
+            if parsed_inputs is not None and style_inputs is None
+            else _resolve_run_inputs(file_bytes, file_type, style_inputs)
+        )
+        yield agent, inputs, parsed
 
 
 @asynccontextmanager
@@ -130,7 +137,7 @@ async def _prepare_extraction_async(
     style: ExtractionStyle,
     cite: bool = False,
     client: httpx.AsyncClient | None = None,
-) -> AsyncIterator[tuple[PydanticAgent, list]]:
+) -> AsyncIterator[tuple[PydanticAgent, list, ParsedDocument | None]]:
     """Prepare one async extraction while applying public exception mapping."""
     run_schema, run_instructions = prepare_cited_run(schema, instructions, cite)
     with _extraction_errors():
@@ -140,6 +147,7 @@ async def _prepare_extraction_async(
             media_type=media_type,
             max_input_bytes=max_input_bytes,
         )
+    parsed_inputs, parsed = maybe_parsed_inputs(file_bytes, file_type, parse=cite)
     with prepared_style_run(style, file_bytes, file_type) as (capabilities, style_inputs):
         with _extraction_errors():
             agent = _build_agent(
@@ -148,7 +156,12 @@ async def _prepare_extraction_async(
                 run_instructions,
                 extra_capabilities=capabilities,
             )
-        yield agent, _resolve_run_inputs(file_bytes, file_type, style_inputs)
+        inputs = (
+            parsed_inputs
+            if parsed_inputs is not None and style_inputs is None
+            else _resolve_run_inputs(file_bytes, file_type, style_inputs)
+        )
+        yield agent, inputs, parsed
 
 
 def _extract_once(
@@ -275,8 +288,9 @@ def extract(
         retry_max_backoff: Maximum delay in seconds for exponential backoff or
             a provider ``Retry-After`` value. Defaults to 60 seconds.
         cite: When ``True``, the model is asked for per-field source spans.
-            ``extract`` still returns the schema instance; citations land on
-            :class:`ExtractionResult` from the ``*_with_results`` APIs.
+            PDFs are parsed locally first; boxes come from parser spans, not
+            the model. ``extract`` still returns the schema instance; citations
+            land on :class:`ExtractionResult` from the ``*_with_results`` APIs.
 
     Returns:
         An instance of the schema populated with extracted data.
@@ -323,10 +337,12 @@ def extract(
         limit,
         style,
         cite,
-    ) as (agent, inputs):
+    ) as (agent, inputs, parsed):
 
         def _once() -> T:
-            output, _citations = split_cited_output(_extract_once(agent, inputs), schema, cite=cite)
+            output, _citations = split_cited_output(
+                _extract_once(agent, inputs), schema, cite=cite, parsed=parsed
+            )
             return output
 
         return _run_with_retries_sync(
@@ -386,11 +402,11 @@ def extract_with_usage(
         limit,
         style,
         cite,
-    ) as (agent, inputs):
+    ) as (agent, inputs, parsed):
 
         def _once() -> tuple[T, Usage]:
             result = _run_extraction(agent, inputs)
-            output, _citations = split_cited_output(result.output, schema, cite=cite)
+            output, _citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
             return output, _usage_from_result(result)
 
         return _run_with_retries_sync(
@@ -445,11 +461,11 @@ async def extract_with_usage_async(
         limit,
         style,
         cite,
-    ) as (agent, inputs):
+    ) as (agent, inputs, parsed):
 
         async def _once() -> tuple[T, Usage]:
             result = await _run_extraction_async(agent, inputs)
-            output, _citations = split_cited_output(result.output, schema, cite=cite)
+            output, _citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
             return output, _usage_from_result(result)
 
         return await _run_with_retries_async(
@@ -506,11 +522,11 @@ async def extract_async(
         limit,
         style,
         cite,
-    ) as (agent, inputs):
+    ) as (agent, inputs, parsed):
 
         async def _once() -> T:
             result = await _run_extraction_async(agent, inputs)
-            output, _citations = split_cited_output(result.output, schema, cite=cite)
+            output, _citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
             return output
 
         return await _run_with_retries_async(

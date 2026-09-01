@@ -30,6 +30,7 @@ from ._config import (
 )
 from ._errors import _extraction_errors
 from ._media import _get_media_async, _item_source_label
+from ._parse import maybe_parsed_inputs
 from ._reduce import SwarmReduce, normalize_reduce, reduce_outputs
 from ._remote import run_remote_extraction
 from ._retry import _run_with_retries_async
@@ -153,6 +154,7 @@ async def _run_member(
         instructions if member.instructions is None else member.instructions, index, total
     )
     run_schema, member_instructions = prepare_cited_run(schema, member_instructions, cite)
+    parsed_inputs, parsed = maybe_parsed_inputs(file_bytes, file_type, parse=cite)
     if isinstance(member.model, RemoteAgent):
         output, usage, attempts = await run_remote_extraction(
             run_schema,
@@ -165,7 +167,7 @@ async def _run_member(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
-        output, citations = split_cited_output(output, schema, cite=cite)
+        output, citations = split_cited_output(output, schema, cite=cite, parsed=parsed)
         return ExtractionResult(
             output=output,
             usage=usage,
@@ -185,7 +187,11 @@ async def _run_member(
                 member_instructions,
                 extra_capabilities=capabilities,
             )
-        inputs = _resolve_run_inputs(file_bytes, file_type, style_inputs)
+        inputs = (
+            parsed_inputs
+            if parsed_inputs is not None and style_inputs is None
+            else _resolve_run_inputs(file_bytes, file_type, style_inputs)
+        )
 
         async def _once() -> Any:
             nonlocal attempts
@@ -198,7 +204,7 @@ async def _run_member(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
-    output, citations = split_cited_output(result.output, schema, cite=cite)
+    output, citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
     return ExtractionResult(
         output=output,
         usage=_usage_from_result(result),

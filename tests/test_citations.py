@@ -104,10 +104,14 @@ class TestSanitize:
         assert zero_page is not None and zero_page.page is None
 
     def test_draft_and_citation_round_trip(self):
-        draft = CitationDraft(field="vendor", quote="Acme", page=1, bbox=[0.2, 0.3, 0.1, 0.1])
+        draft = CitationDraft(field="vendor", quote="Acme", page=1)
         citation = sanitize_citation(draft)
-        assert citation == Citation("vendor", "Acme", 1, (0.2, 0.3, 0.1, 0.1))
+        assert citation == Citation("vendor", "Acme", 1, None)
         assert sanitize_citation(citation) == citation
+
+    def test_short_quote_with_page_is_kept(self):
+        citation = sanitize_citation({"field": "quarter", "quote": "Q1", "page": 1})
+        assert citation == Citation("quarter", "Q1", 1, None)
 
     def test_payload_skips_non_sequences(self):
         assert citations_from_payload("vendor") == ()
@@ -152,8 +156,11 @@ class TestSchemaWrap:
             {"type": "object", "properties": {"n": {"type": "string"}}}
         )
         props = wrapped["properties"]["citations"]["items"]["properties"]
-        assert set(props) == {"field", "quote", "page", "bbox"}
-        assert props["bbox"]["minItems"] == 4
+        assert set(props) == {"field", "quote", "page"}
+        assert "bbox" not in props
+        assert wrapped["required"] == ["output", "citations"]
+        assert "bbox" not in CITATION_INSTRUCTIONS
+        assert "MUST return a citation" in CITATION_INSTRUCTIONS
 
     def test_split_default_returns_raw(self):
         person = Person(name="Ada", age=36)
@@ -244,7 +251,7 @@ class TestExtractCite:
         assert result.source == "page.pdf"
         assert result.citations[0].quote is not None
         assert "secret" not in result.citations[0].quote
-        assert result.citations[0].bbox == (0.1, 0.2, 0.3, 0.05)
+        assert result.citations[0].bbox is None
         assert result.citations[1].page is None
         mapped = field_citations_for_extractbench(result.citations)
         assert [item["field_path"] for item in mapped] == ["name"]

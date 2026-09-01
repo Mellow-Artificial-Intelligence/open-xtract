@@ -65,8 +65,9 @@ raises `ValueError`; the parameter is optional only so the agent form can shift
 it left. The same applies to the three siblings below.
 
 Extract one input synchronously and return an instance of `schema`.
-`cite=True` asks the model for per-field source spans (page, quote, optional
-normalized bbox). The return type stays the schema instance; citations land on
+`cite=True` asks the model for per-field source spans (page and quote). PDFs
+are parsed locally and boxes come from parser spans, not the model. The return
+type stays the schema instance; citations land on
 [`ExtractionResult`](#extractionresult) from the `*_with_results` APIs.
 
 ### `extract_async(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, cite=False)`
@@ -356,7 +357,7 @@ A frozen dataclass for one field's source evidence. Mapped onto ExtractBench
 | `field` | `str` | Dotted schema path (`vendor`, `lines[0].qty`). |
 | `quote` | `str \| None` | Verbatim source span, when present. |
 | `page` | `int \| None` | 1-indexed page. Required to emit an ExtractBench citation. |
-| `bbox` | `tuple[float, float, float, float] \| None` | Normalized COCO `(x, y, width, height)` in `[0, 1]`. Kept only when the model supplied a normalized box; never invented. |
+| `bbox` | `tuple[float, float, float, float] \| None` | Normalized COCO `(x, y, width, height)` in `[0, 1]`. Kept only when a local parser matched the span; never invented. |
 
 `as_field_citation()` returns `None` when `page` is missing (quote-only
 citations stay on `ExtractionResult` but cannot be scored by ExtractBench).

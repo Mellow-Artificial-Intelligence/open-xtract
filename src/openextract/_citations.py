@@ -8,6 +8,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, Field, create_model
 
+from ._parse import ParsedDocument, ground_citations
 from ._types import Citation, T
 
 _MAX_QUOTE = 2000
@@ -16,27 +17,28 @@ _CREDENTIAL_URL = re.compile(r"https?://[^\s/]*:[^\s/]*@[^\s]+", re.IGNORECASE)
 _DATA_URI = re.compile(r"data:[^\s]+", re.IGNORECASE)
 
 CITATION_INSTRUCTIONS = (
-    "For every extracted field, cite the source evidence that supports it. "
-    "Return citations as a list of objects with field and any of quote, page, bbox. "
+    "For every extracted non-null field you MUST return a citation. "
+    "Return citations as a list of objects with field, quote, and page. "
     "field is a dotted path matching the schema (for example vendor or lines[0].qty). "
     "quote is the exact text span from the source; never invent text. "
-    "page is the 1-indexed page number when the source is paginated. "
-    "bbox is optional: four normalized page-relative COCO numbers "
-    "[x, y, width, height] in the unit interval, only if you can see the "
-    "exact location of the quoted span. Omit bbox when you cannot locate the "
-    "span precisely. Never guess or invent a box. "
-    "Do not include raw file bytes, URLs, credentials, or file paths. "
-    "If a field has no supporting evidence, omit it from citations."
+    "A short quote is valid and must not be omitted. "
+    "page is the 1-indexed page number from the '--- Page N ---' markers when "
+    "present, or the document page when the source is paginated. Always include "
+    "page when page markers exist. "
+    "Do not include bounding boxes; location is resolved locally. "
+    "Do not include raw file bytes, URLs, credentials, or file paths."
 )
 
 
 class CitationDraft(BaseModel):
-    """Structured-output shape the model fills when ``cite=True``."""
+    """Structured-output shape the model fills when ``cite=True``.
+
+    Boxes are not requested from the model; the local parser attaches them.
+    """
 
     field: str
     quote: str | None = None
     page: int | None = None
-    bbox: list[float] | None = None
 
 
 _WRAP_CACHE: dict[type[BaseModel], type[BaseModel]] = {}
@@ -71,19 +73,13 @@ def json_schema_with_citations(schema: dict[str, Any]) -> dict[str, Any]:
                         "field": {"type": "string"},
                         "quote": {"type": "string"},
                         "page": {"type": "integer"},
-                        "bbox": {
-                            "type": "array",
-                            "items": {"type": "number"},
-                            "minItems": 4,
-                            "maxItems": 4,
-                        },
                     },
                     "required": ["field"],
                     "additionalProperties": False,
                 },
             },
         },
-        "required": ["output"],
+        "required": ["output", "citations"],
         "additionalProperties": False,
     }
 
@@ -111,17 +107,21 @@ def split_cited_output(
     schema: type[T],
     *,
     cite: bool,
+    parsed: ParsedDocument | None = None,
 ) -> tuple[T, tuple[Citation, ...]]:
     """Unwrap a cited model payload into ``(schema instance, citations)``.
 
     When ``cite`` is false the raw output is returned unchanged and citations
-    are empty, matching the default extract path.
+    are empty, matching the default extract path. When a local parse is
+    provided, pages are stamped from it and boxes come only from parser spans.
     """
     if not cite:
         return cast(T, raw), ()
     wrapper_type = cited_output_schema(schema)
     wrapper = cast(Any, raw if isinstance(raw, wrapper_type) else wrapper_type.model_validate(raw))
-    return cast(T, wrapper.output), citations_from_payload(wrapper.citations)
+    output = cast(T, wrapper.output)
+    citations = ground_citations(citations_from_payload(wrapper.citations), parsed, output)
+    return output, citations
 
 
 def citations_from_payload(payload: object) -> tuple[Citation, ...]:
@@ -137,15 +137,19 @@ def citations_from_payload(payload: object) -> tuple[Citation, ...]:
 
 
 def sanitize_citation(draft: object) -> Citation | None:
-    """Drop unsafe or unusable citation payloads; never raise on a bad item."""
+    """Drop unsafe or unusable citation payloads; never raise on a bad item.
+
+    Model-supplied boxes are discarded here. Parser grounding attaches a box
+    only when a real span matches. A valid page is enough to keep a citation,
+    including when the quote is short.
+    """
     if isinstance(draft, Citation | CitationDraft):
-        field, quote, page, bbox = draft.field, draft.quote, draft.page, draft.bbox
+        field, quote, page = draft.field, draft.quote, draft.page
     elif isinstance(draft, dict):
         payload = cast(dict[str, Any], draft)
         field = payload.get("field") or payload.get("field_path")
         quote = payload.get("quote", payload.get("reference_text"))
         page = payload.get("page")
-        bbox = payload.get("bbox")
     else:
         return None
     if not isinstance(field, str) or not _FIELD_PATH.fullmatch(field):
@@ -156,10 +160,9 @@ def sanitize_citation(draft: object) -> Citation | None:
         quote = None
     if page is not None and (not isinstance(page, int) or isinstance(page, bool) or page < 1):
         page = None
-    bbox = _sanitize_bbox(bbox)
     if quote is None and page is None:
         return None
-    return Citation(field=field, quote=quote, page=page, bbox=bbox)
+    return Citation(field=field, quote=quote, page=page, bbox=None)
 
 
 def _sanitize_quote(quote: str) -> str:
@@ -170,29 +173,6 @@ def _sanitize_quote(quote: str) -> str:
     if len(text) > _MAX_QUOTE:
         text = text[:_MAX_QUOTE]
     return text
-
-
-def _sanitize_bbox(bbox: object) -> tuple[float, float, float, float] | None:
-    """Keep a model-supplied normalized COCO box; never invent or rescale one."""
-    if isinstance(bbox, tuple):
-        bbox = list(bbox)
-    if not isinstance(bbox, list) or len(bbox) != 4:
-        return None
-    values: list[float] = []
-    for item in bbox:
-        if isinstance(item, bool) or not isinstance(item, int | float):
-            return None
-        values.append(float(item))
-    x, y, width, height = values
-    # ExtractBench boxes are page-normalized. Pixel-space numbers cannot be
-    # converted without page dimensions, so drop them rather than guess.
-    if width <= 0 or height <= 0:
-        return None
-    if any(value < 0 or value > 1 for value in (x, y, width, height)):
-        return None
-    if x + width > 1.0001 or y + height > 1.0001:
-        return None
-    return (x, y, width, height)
 
 
 def field_citations_for_extractbench(

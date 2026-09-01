@@ -25,6 +25,7 @@ from ._citations import prepare_cited_run, split_cited_output
 from ._config import _resolve_max_input_bytes, _url_fetch_timeout, _validate_timeout
 from ._errors import _extraction_errors
 from ._media import _get_media, _get_media_async
+from ._parse import ParsedDocument, maybe_parsed_inputs
 from ._retry import _run_with_retries_async, _run_with_retries_sync
 from ._styles import (
     ExtractionStyle,
@@ -132,12 +133,16 @@ class _ExtractorSession[T: BaseModel]:
         with _extraction_errors():
             return self._schema.model_validate(output)
 
-    def _output_from_run(self, result: Any) -> T:
-        output, _citations = split_cited_output(result.output, self._schema, cite=self._cite)
+    def _output_from_run(self, result: Any, parsed: ParsedDocument | None = None) -> T:
+        output, _citations = split_cited_output(
+            result.output, self._schema, cite=self._cite, parsed=parsed
+        )
         return self._validate_output(result.output if not self._cite else output)
 
-    def _output_and_usage(self, result: Any) -> tuple[T, Usage]:
-        return self._output_from_run(result), _usage_from_result(result)
+    def _output_and_usage(
+        self, result: Any, parsed: ParsedDocument | None = None
+    ) -> tuple[T, Usage]:
+        return self._output_from_run(result, parsed), _usage_from_result(result)
 
     # -- lifecycle bookkeeping shared by the sync and async sessions ---------
 
@@ -218,14 +223,20 @@ class _ExtractorSession[T: BaseModel]:
     @contextmanager
     def _session_agent_inputs(
         self, file_bytes: bytes, file_type: str
-    ) -> Iterator[tuple[PydanticAgent, list]]:
+    ) -> Iterator[tuple[PydanticAgent, list, ParsedDocument | None]]:
         """Pair the session agent with per-call run inputs for one extraction."""
         assert self._agent is not None
+        parsed_inputs, parsed = maybe_parsed_inputs(file_bytes, file_type, parse=self._cite)
         if self._style is ExtractionStyle.DIRECT:
-            yield self._agent, _build_run_inputs(file_bytes, file_type)
+            inputs = (
+                parsed_inputs
+                if parsed_inputs is not None
+                else _build_run_inputs(file_bytes, file_type)
+            )
+            yield self._agent, inputs, parsed
             return
         with self._style_document(file_bytes, file_type) as inputs:
-            yield self._agent, inputs
+            yield self._agent, inputs, parsed
 
 
 class Extractor(_ExtractorSession[T]):
@@ -315,8 +326,8 @@ class Extractor(_ExtractorSession[T]):
         self,
         input_file: ExtractionInputLike,
         media_type: str | None,
-    ) -> Iterator[tuple[PydanticAgent, list]]:
-        """Resolve media and yield ``(agent, inputs)`` for one session call."""
+    ) -> Iterator[tuple[PydanticAgent, list, ParsedDocument | None]]:
+        """Resolve media and yield ``(agent, inputs, parsed)`` for one session call."""
         client = self._ensure_sync_open()
         with _extraction_errors():
             file_bytes, file_type = _get_media(
@@ -332,12 +343,12 @@ class Extractor(_ExtractorSession[T]):
         self,
         input_file: ExtractionInputLike,
         media_type: str | None,
-        project: Callable[[Any], R],
+        project: Callable[..., R],
     ) -> R:
         """Run one retrying extraction and map the raw result through ``project``."""
-        with self._prepare_session_extraction(input_file, media_type) as (agent, inputs):
+        with self._prepare_session_extraction(input_file, media_type) as (agent, inputs, parsed):
             return _run_with_retries_sync(
-                lambda: project(self._run_agent(agent, inputs)),
+                lambda: project(self._run_agent(agent, inputs), parsed),
                 max_retries=self._retry_policy.max_retries,
                 retry_backoff=self._retry_policy.backoff,
                 retry_max_backoff=self._retry_policy.max_backoff,
@@ -429,8 +440,8 @@ class AsyncExtractor(_ExtractorSession[T]):
         self,
         input_file: ExtractionInputLike,
         media_type: str | None,
-    ) -> AsyncIterator[tuple[PydanticAgent, list]]:
-        """Resolve media and yield ``(agent, inputs)`` for one session call."""
+    ) -> AsyncIterator[tuple[PydanticAgent, list, ParsedDocument | None]]:
+        """Resolve media and yield ``(agent, inputs, parsed)`` for one session call."""
         client = self._ensure_async_open()
         with _extraction_errors():
             file_bytes, file_type = await _get_media_async(
@@ -446,13 +457,17 @@ class AsyncExtractor(_ExtractorSession[T]):
         self,
         input_file: ExtractionInputLike,
         media_type: str | None,
-        project: Callable[[Any], R],
+        project: Callable[..., R],
     ) -> R:
         """Async counterpart to :meth:`Extractor._extract_projected`."""
-        async with self._prepare_session_extraction(input_file, media_type) as (agent, inputs):
+        async with self._prepare_session_extraction(input_file, media_type) as (
+            agent,
+            inputs,
+            parsed,
+        ):
 
             async def _once() -> R:
-                return project(await _run_extraction_async(agent, inputs))
+                return project(await _run_extraction_async(agent, inputs), parsed)
 
             return await _run_with_retries_async(
                 _once,

@@ -27,6 +27,7 @@ from ._config import (
 )
 from ._errors import _extraction_errors
 from ._media import _get_media_async, _item_source_label
+from ._parse import maybe_parsed_inputs
 from ._retry import _run_with_retries_async
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
 from ._types import ExtractionInputLike, ExtractionResult, T, _resolve_item
@@ -186,11 +187,18 @@ async def _iter_extractions(
                         media_type=item_media_type,
                         max_input_bytes=options.max_input_bytes,
                     )
+                parsed_inputs, parsed = maybe_parsed_inputs(
+                    file_bytes, file_type, parse=options.cite
+                )
                 with prepared_style_run(options.style, file_bytes, file_type) as (
                     capabilities,
                     style_inputs,
                 ):
-                    inputs = _resolve_run_inputs(file_bytes, file_type, style_inputs)
+                    inputs = (
+                        parsed_inputs
+                        if parsed_inputs is not None and style_inputs is None
+                        else _resolve_run_inputs(file_bytes, file_type, style_inputs)
+                    )
                     if shared_agent is None:
                         with _extraction_errors():
                             run_agent = _build_agent(
@@ -222,7 +230,7 @@ async def _iter_extractions(
                 if options.rich:
                     raw_result = cast(Any, value)
                     output, citations = split_cited_output(
-                        raw_result.output, schema, cite=options.cite
+                        raw_result.output, schema, cite=options.cite, parsed=parsed
                     )
                     return ExtractionResult(
                         output=output,
@@ -235,7 +243,9 @@ async def _iter_extractions(
                         warnings=(),
                         citations=citations,
                     )
-                output, _citations = split_cited_output(value, schema, cite=options.cite)
+                output, _citations = split_cited_output(
+                    value, schema, cite=options.cite, parsed=parsed
+                )
                 return output
             except Exception:
                 if not options.return_exceptions:
