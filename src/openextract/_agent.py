@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, cast
 
 from ._config import _validate_timeout
@@ -235,7 +235,8 @@ def _token_count(raw: object, names: tuple[str, ...]) -> int:
 
 def _nested_usage_container(raw: object, key: str) -> object:
     if isinstance(raw, dict):
-        return raw.get(key)
+        mapping = cast(dict[str, object], raw)
+        return mapping.get(key)
     return getattr(raw, key, None)
 
 
@@ -268,8 +269,9 @@ def _usage_from_raw_depth(raw: object, depth: int) -> Usage:
 def _maybe_call(value: object) -> object:
     if not callable(value):
         return value
+    invoke = cast(Callable[[], object], value)
     try:
-        return value()
+        return invoke()
     except TypeError:
         return value
 

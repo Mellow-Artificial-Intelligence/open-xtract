@@ -394,6 +394,11 @@ def test_parse_windows_splits_and_caps_large_multipage():
     assert all(page.page == 1 for window in sliced for page in window.pages)
     empty = _page("", page=1)
     assert _split_page(empty, 1) == (empty,)
+    lined = _page("aaaa\nbbbb\ncccc\ndddd\neeee", page=3)
+    lined_slices = _split_page(lined, 20)
+    assert len(lined_slices) >= 2
+    assert all(slice_page.page == 3 for slice_page in lined_slices)
+    assert "".join(slice_page.text for slice_page in lined_slices) == lined.text
     fallback = ["keep-me"]
     assert parsed_window_inputs(None, fallback) == [fallback]
     assert parsed_window_inputs(None, fallback)[0] is fallback
