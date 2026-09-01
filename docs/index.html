@@ -281,10 +281,10 @@ title: openextract
           <div class="flex items-baseline justify-between mb-8 sm:mb-10 flex-wrap gap-3">
             <div>
               <p class="font-mono text-[11px] text-black/40 uppercase tracking-wider mb-2">What&rsquo;s new</p>
-              <h2 class="text-2xl sm:text-3xl font-bold text-black/90">In v0.11.0</h2>
-              <p class="text-sm text-black/40 mt-2">The latest PyPI release: <span class="font-mono">v0.11.0</span>.</p>
+              <h2 class="text-2xl sm:text-3xl font-bold text-black/90">In v0.12.0</h2>
+              <p class="text-sm text-black/40 mt-2">The latest PyPI release: <span class="font-mono">v0.12.0</span>.</p>
             </div>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0110---2026-08-20" class="font-mono text-xs text-black/40 hover:text-black/90 transition-colors inline-flex items-center gap-1.5">
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0120---2026-08-31" class="font-mono text-xs text-black/40 hover:text-black/90 transition-colors inline-flex items-center gap-1.5">
               Full changelog <i data-lucide="arrow-up-right" class="w-3 h-3"></i>
             </a>
           </div>
@@ -293,61 +293,59 @@ title: openextract
             <div class="p-6 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="network" class="w-4 h-4 text-black/40"></i>
+                  <i data-lucide="quote" class="w-4 h-4 text-black/40"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">Swarms</span>
+                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">Citations</span>
               </div>
-              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Swarms and agents</h3>
+              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Opt-in field citations</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                <code class="font-mono text-black/90 text-xs">extract_swarm</code> runs several agents over one input and reduces their outputs; <code class="font-mono text-black/90 text-xs">define_agent</code> packages a specialist you can import, compose, or serve over HTTP.
+                <code class="font-mono text-black/90 text-xs">cite=True</code> asks the model for per-field source spans. <code class="font-mono text-black/90 text-xs">extract()</code> still returns the schema instance; citations land on <code class="font-mono text-black/90 text-xs">ExtractionResult.citations</code>.
               </p>
               <div class="flex flex-wrap gap-1.5">
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">extract_swarm</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">define_agent</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">cite=True</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">Citation</span>
               </div>
             </div>
 
             <div class="p-6 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="search" class="w-4 h-4 text-black/40"></i>
+                  <i data-lucide="target" class="w-4 h-4 text-black/40"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">Styles</span>
+                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">ExtractBench</span>
               </div>
-              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Direct, search, or code</h3>
+              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Grounding that can score</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                Send media in one shot, grep a text document with file tools, or let the model write Python against it.
+                The ExtractBench runner now emits real <code class="font-mono text-black/90 text-xs">field_citations</code> (on by default; <code class="font-mono text-black/90 text-xs">--no-cite</code> to disable) so page- and word-level grounding can score.
               </p>
               <div class="flex flex-wrap gap-1.5">
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">direct</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">search</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">code</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">field_citations</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">--no-cite</span>
               </div>
             </div>
 
             <div class="p-6 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="terminal" class="w-4 h-4 text-black/40"></i>
+                  <i data-lucide="gauge" class="w-4 h-4 text-black/40"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">CLI</span>
+                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">CI</span>
               </div>
-              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Batch-ready CLI</h3>
+              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Faster CI</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                Incremental <code class="font-mono text-black/90 text-xs">--output jsonl</code>, <code class="font-mono text-black/90 text-xs">--manifest</code> per-input media types, progress on stderr, and <code class="font-mono text-black/90 text-xs">--swarm</code> / <code class="font-mono text-black/90 text-xs">--agent</code> from the shell.
+                Lint, test, and package start immediately. Tests run under <code class="font-mono text-black/90 text-xs">pytest -n auto</code>, and coverage is enforced in the same process.
               </p>
               <div class="flex flex-wrap gap-1.5">
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">jsonl</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">manifest</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">swarm</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">detect-jobs</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">pytest-xdist</span>
               </div>
             </div>
           </div>
 
           <p class="font-mono text-xs text-black/40">
-            Also in v0.11.0: reusable <code>Extractor</code> sessions, typed input/result contracts, 50&nbsp;MiB input caps, ExtractBench for any model.
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0100---2026-08-01" class="hover:text-black/90 transition-colors">v0.10.0</a>
-            shipped non-blocking async I/O and transient-only retries.
+            Also in v0.12.0: docs PR builds no longer queue behind the <code>pages</code> concurrency group.
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0110---2026-08-20" class="hover:text-black/90 transition-colors">v0.11.0</a>
+            shipped swarms, importable agents, extraction styles, and a batch-ready CLI.
           </p>
         </div>
       </section>
