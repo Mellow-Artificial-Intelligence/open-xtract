@@ -9,15 +9,24 @@ timing when that is known.
 ## [Unreleased]
 
 ### Changed
-- Parse-then-extract now chunks page-indexed PDF text by a character budget
-  instead of dumping the whole document into one prompt. Each window is
-  extracted and merged with the existing reduce strategy. A single window still
-  uses the one-shot `_extract_once` path so existing retry tests keep working.
-  ExtractBench uses the same windowed path; `--cite` stays on by default.
-  Bounding boxes remain parser-backed only.
-- Usage capture skips default-zero `input_tokens` so OpenRouter
-  `request_tokens` / `prompt_tokens` (including nested `details`) populate
-  `extract_with_usage` instead of reporting `0` tokens / `$0`.
+- Parse-then-extract windows page-indexed PDF text under a 12k-character
+  budget (was 80k) and one page per window, and splits a single oversized page so
+  each model call fits GLM-class context. Slide decks that fit 80k as one
+  prompt (Veralto) now split. ExtractBench extracts windows in a bounded thread pool
+  (`--window-concurrency`, default 4) with a per-call timeout (`--timeout`,
+  default 240s). Window attempts are not retried; request timeouts and
+  token-limit errors are permanent so ExtractBench does not burn its 1800s
+  per-file limit three times (pueblo / long). Citations are collected from
+  every window before reduce, then missing pages are backfilled from parse
+  values (including ``1,234`` / ``1234.0`` forms) so Bianco-class docs still
+  emit `field_citations` when the model returns an empty cite list. Bounding
+  boxes remain parser-backed only.
+- PDF parse takes a process-wide lock. pypdfium2 is not thread-safe; concurrent
+  ExtractBench workers no longer crash native PDFium.
+- Usage capture asks OpenRouter for native usage via both `openrouter_usage`
+  and `extra_body.usage`, then reads `prompt_tokens` / `native_tokens_*` from
+  `result.usage`, nested `details`, `response`, and `all_messages`. Default-zero
+  pydantic-ai `input_tokens` is still skipped. Counts are never invented.
 
 ## [0.12.0] - 2026-08-31
 

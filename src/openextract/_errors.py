@@ -46,6 +46,18 @@ _PERMANENT_ERROR_NAMES = (
     "unprocessable",
     "notfound",
     "accessdenied",
+    "tokenlimit",
+    "contextwindow",
+    "contextlength",
+    "maximumcontext",
+)
+_TOKEN_LIMIT_MARKERS = (
+    "token limit",
+    "context window",
+    "context length",
+    "maximum context",
+    "prompt is too long",
+    "exceeded before any response",
 )
 
 # Exact (module, class) signatures for provider/model error bases we classify
@@ -216,6 +228,12 @@ def _is_transient_model_exception(exc: BaseException, status_code: int | None) -
     return any(name in error_name for name in _TRANSIENT_ERROR_NAMES)
 
 
+def _is_token_limit_error(exc: BaseException) -> bool:
+    """True when the provider or pydantic-ai rejected the prompt as too large."""
+    message = str(exc).lower()
+    return any(marker in message for marker in _TOKEN_LIMIT_MARKERS)
+
+
 def _map_exception(exc: BaseException) -> ExtractionError:
     """Translate a low-level exception into the appropriate ExtractionError subclass."""
     if isinstance(exc, httpx.HTTPStatusError):
@@ -224,6 +242,13 @@ def _map_exception(exc: BaseException) -> ExtractionError:
         return UrlFetchError(f"Failed to fetch URL: {exc}")
     if isinstance(exc, ValidationError):
         return SchemaValidationError(f"Model output did not match schema: {exc}")
+    if _is_token_limit_error(exc):
+        return ModelError(
+            f"Model token limit exceeded: {exc}",
+            provider=_model_provider(exc),
+            status_code=_model_status_code(exc),
+            retryable=False,
+        )
     if _is_model_exception(exc):
         status_code = _model_status_code(exc)
         return ModelError(

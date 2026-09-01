@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import TYPE_CHECKING, cast
 
 from ._config import _validate_timeout
@@ -165,6 +165,8 @@ _INPUT_TOKEN_KEYS = (
     "prompt_tokens",
     "inputTokens",
     "promptTokens",
+    "native_tokens_prompt",
+    "native_tokens_input",
 )
 _OUTPUT_TOKEN_KEYS = (
     "output_tokens",
@@ -172,27 +174,52 @@ _OUTPUT_TOKEN_KEYS = (
     "completion_tokens",
     "outputTokens",
     "completionTokens",
+    "native_tokens_completion",
+    "native_tokens_output",
 )
-_TOTAL_TOKEN_KEYS = ("total_tokens", "totalTokens")
+_TOTAL_TOKEN_KEYS = ("total_tokens", "totalTokens", "native_tokens_total")
+_USAGE_NEST_KEYS = ("details", "usage", "provider_details", "extra", "raw", "body")
 
 
 def _usage_model_settings(
     model: str | Model, model_settings: ModelSettings | None
 ) -> ModelSettings | None:
-    """Ask OpenRouter to include native usage so token counts are not zero."""
+    """Ask OpenRouter to include native usage so token counts are not zero.
+
+    ``openrouter_usage`` is the pydantic-ai setting. ``extra_body.usage`` is
+    the raw OpenRouter request field, used when the model wrapper does not
+    translate ``openrouter_usage`` (the live GLM-5.3-flash miss).
+    """
     if not (isinstance(model, str) and model.startswith("openrouter")):
         return model_settings
     merged = dict(model_settings) if model_settings is not None else {}
     merged.setdefault("openrouter_usage", {"include": True})
+    extra = dict(merged["extra_body"]) if isinstance(merged.get("extra_body"), dict) else {}
+    extra.setdefault("usage", {"include": True})
+    merged["extra_body"] = extra
     return cast("ModelSettings", merged)
+
+
+def _positive_int(value: object) -> int:
+    """Return a real positive token count, or ``0``."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int) and value > 0:
+        return value
+    if isinstance(value, float) and value.is_integer() and value > 0:
+        return int(value)
+    if isinstance(value, str) and value.isdigit():
+        parsed = int(value)
+        return parsed if parsed > 0 else 0
+    return 0
 
 
 def _token_count(raw: object, names: tuple[str, ...]) -> int:
     """Return the first positive alias, skipping default-zero placeholders.
 
-    pydantic-ai ``RunUsage.input_tokens`` defaults to ``0``. Treating that as
-    a real count hid OpenRouter ``request_tokens`` / ``prompt_tokens`` on the
-    same object (and nested ``details``).
+    pydantic-ai ``RunUsage.input_tokens`` defaults to ``0``, and its deprecated
+    ``request_tokens`` property just aliases that zero. Live OpenRouter counts
+    may sit on ``prompt_tokens``, ``native_tokens_*``, or a nested container.
     """
     if isinstance(raw, dict):
         mapping = cast(dict[str, object], raw)
@@ -200,14 +227,26 @@ def _token_count(raw: object, names: tuple[str, ...]) -> int:
     else:
         values = (getattr(raw, name, None) for name in names)
     for value in values:
-        if isinstance(value, int) and not isinstance(value, bool) and value > 0:
-            return value
+        count = _positive_int(value)
+        if count:
+            return count
     return 0
+
+
+def _nested_usage_container(raw: object, key: str) -> object:
+    if isinstance(raw, dict):
+        mapping = cast(dict[str, object], raw)
+        return mapping.get(key)
+    return getattr(raw, key, None)
 
 
 def _usage_from_raw(raw: object) -> Usage:
     """Read token counts from a provider or pydantic-ai usage object."""
-    if raw is None:
+    return _usage_from_raw_depth(raw, 0)
+
+
+def _usage_from_raw_depth(raw: object, depth: int) -> Usage:
+    if raw is None or depth > 4:
         return Usage(0, 0, 0)
     if isinstance(raw, Usage):
         return raw
@@ -215,18 +254,26 @@ def _usage_from_raw(raw: object) -> Usage:
     output_tokens = _token_count(raw, _OUTPUT_TOKEN_KEYS)
     total_tokens = _token_count(raw, _TOTAL_TOKEN_KEYS)
     if input_tokens == 0 and output_tokens == 0:
-        details = (
-            cast(dict[str, object], raw).get("details")
-            if isinstance(raw, dict)
-            else getattr(raw, "details", None)
-        )
-        if details is not None:
-            input_tokens = _token_count(details, _INPUT_TOKEN_KEYS)
-            output_tokens = _token_count(details, _OUTPUT_TOKEN_KEYS)
-            total_tokens = total_tokens or _token_count(details, _TOTAL_TOKEN_KEYS)
+        for key in _USAGE_NEST_KEYS:
+            nested = _nested_usage_container(raw, key)
+            if nested is None or nested is raw:
+                continue
+            found = _usage_from_raw_depth(nested, depth + 1)
+            if found.input_tokens or found.output_tokens or found.total_tokens:
+                return found
     if total_tokens == 0:
         total_tokens = input_tokens + output_tokens
     return Usage(input_tokens, output_tokens, total_tokens)
+
+
+def _maybe_call(value: object) -> object:
+    if not callable(value):
+        return value
+    invoke = cast(Callable[[], object], value)
+    try:
+        return invoke()
+    except TypeError:
+        return value
 
 
 def _extract_usage_object(result: object) -> object:
@@ -238,26 +285,35 @@ def _extract_usage_object(result: object) -> object:
     if usage is not None and descriptor is not None and not callable(descriptor):
         return usage
     if callable(usage):
-        try:
-            return usage()
-        except TypeError:
-            return usage
+        return _maybe_call(usage)
     if usage is not None:
         return usage
     return result
 
 
-def _usage_from_result(result) -> Usage:
-    """Build a ``Usage`` from a pydantic-ai run result or provider usage object."""
-    usage = _usage_from_raw(_extract_usage_object(result))
-    if usage.input_tokens or usage.output_tokens or usage.total_tokens:
-        return usage
+def _usage_candidates(result: object) -> list[object]:
+    """Collect usage-bearing objects from a pydantic-ai run result."""
+    found: list[object] = [_extract_usage_object(result)]
     response = getattr(result, "response", None)
     descriptor = getattr(type(result), "response", None)
-    if response is None or descriptor is None or callable(descriptor):
-        return usage
-    nested = getattr(response, "usage", None)
-    return _usage_from_raw(nested) if nested is not None else usage
+    if response is not None and descriptor is not None and not callable(descriptor):
+        found.append(getattr(response, "usage", None))
+        found.append(getattr(response, "provider_details", None))
+    messages = _maybe_call(getattr(result, "all_messages", None))
+    if isinstance(messages, list):
+        for message in messages:
+            found.append(getattr(message, "usage", None))
+            found.append(getattr(message, "provider_details", None))
+    return found
+
+
+def _usage_from_result(result) -> Usage:
+    """Build a ``Usage`` from a pydantic-ai run result or provider usage object."""
+    for candidate in _usage_candidates(result):
+        usage = _usage_from_raw(candidate)
+        if usage.input_tokens or usage.output_tokens or usage.total_tokens:
+            return usage
+    return Usage(0, 0, 0)
 
 
 def _model_identifier(model: str | Model, agent: object) -> str | None:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -14,8 +16,15 @@ from ._types import Citation
 _PDF_TYPES = frozenset({"application/pdf", "application/x-pdf"})
 _PAGE_HEADER = "--- Page {page} ---"
 _FUZZY_RATIO = 0.85
-# ~20k tokens of document text, leaving room for schema, instructions, and output.
-DEFAULT_PARSE_WINDOW_CHARS = 80_000
+# ~3k tokens of document text. GLM-class context still needs room for a large
+# ExtractBench schema, citation envelope, and output. Oversized pages are split.
+# Slide decks can sit under the char budget and still blow context as one prompt
+# (Veralto was a single 80k window). One page per window forces those decks to
+# split; an oversized page is still sliced by the char budget.
+DEFAULT_PARSE_WINDOW_CHARS = 12_000
+DEFAULT_PARSE_WINDOW_PAGES = 1
+# pypdfium2 / PDFium is not safe across threads in one process.
+_PDFIUM_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -90,23 +99,30 @@ def parse_windows(
     parsed: ParsedDocument,
     *,
     max_chars: int | None = None,
+    max_pages: int | None = None,
 ) -> tuple[ParsedDocument, ...]:
     """Split ``parsed`` into page-contiguous windows under ``max_chars``.
 
-    A single page larger than the budget is still its own window so parser
-    boxes keep the full page text. Empty documents yield the original parse.
+    A page larger than the budget is sliced so each model call stays inside
+    GLM-class context. Slices keep the original page number and parser spans;
+    boxes are still resolved against the full parse, never invented. Decks that
+    fit the character budget still split once they exceed ``max_pages``
+    (default one page, so a Veralto-class deck cannot stay one prompt). Empty
+    documents yield the original parse.
     """
     budget = DEFAULT_PARSE_WINDOW_CHARS if max_chars is None else max_chars
+    page_cap = DEFAULT_PARSE_WINDOW_PAGES if max_pages is None else max_pages
     pages = parsed.pages
-    if not pages or _pages_prompt_len(pages) <= budget:
+    if not pages or (_pages_prompt_len(pages) <= budget and len(pages) <= page_cap):
         return (parsed,)
+    slices = tuple(slice_page for page in pages for slice_page in _split_page(page, budget))
     windows: list[ParsedDocument] = []
     current: list[ParsedPage] = []
     current_len = 0
-    for page in pages:
+    for page in slices:
         block_len = len(_page_block(page))
         extra = block_len if not current else block_len + 2
-        if current and current_len + extra > budget:
+        if current and (current_len + extra > budget or len(current) >= page_cap):
             windows.append(ParsedDocument(pages=tuple(current)))
             current = [page]
             current_len = block_len
@@ -117,11 +133,43 @@ def parse_windows(
     return tuple(windows)
 
 
+def _split_page(page: ParsedPage, budget: int) -> tuple[ParsedPage, ...]:
+    """Slice one page so each ``--- Page N ---`` block fits ``budget``."""
+    block_len = len(_page_block(page))
+    if block_len <= budget:
+        return (page,)
+    header_len = len(_PAGE_HEADER.format(page=page.page)) + 1
+    body_budget = max(1, budget - header_len)
+    text = page.text
+    chunks: list[ParsedPage] = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + body_budget)
+        if end < len(text):
+            break_at = text.rfind("\n", start, end)
+            if break_at <= start:
+                break_at = text.rfind(" ", start, end)
+            if break_at > start:
+                end = break_at + 1
+        chunks.append(
+            ParsedPage(
+                page=page.page,
+                text=text[start:end],
+                width=page.width,
+                height=page.height,
+                spans=page.spans,
+            )
+        )
+        start = end
+    return tuple(chunks) or (page,)
+
+
 def parsed_window_inputs(
     parsed: ParsedDocument | None,
     fallback_inputs: list,
     *,
     max_chars: int | None = None,
+    max_pages: int | None = None,
 ) -> list[list]:
     """Return per-window run inputs, or ``[fallback_inputs]`` for the fast path.
 
@@ -130,7 +178,7 @@ def parsed_window_inputs(
     """
     if parsed is None or not parsed.has_text():
         return [fallback_inputs]
-    windows = parse_windows(parsed, max_chars=max_chars)
+    windows = parse_windows(parsed, max_chars=max_chars, max_pages=max_pages)
     if len(windows) == 1:
         return [fallback_inputs]
     return [parsed_run_inputs(window) for window in windows]
@@ -188,19 +236,20 @@ def _parse_pdf(data: bytes) -> ParsedDocument | None:
         import pypdfium2 as pdfium
     except ImportError:
         return None
-    try:
-        pdf = pdfium.PdfDocument(data)
-    except Exception:
-        return None
-    try:
-        pages = tuple(_parse_pdf_page(pdf, index) for index in range(len(pdf)))
-    except Exception:
-        return None
-    finally:
-        close = getattr(pdf, "close", None)
-        if callable(close):
-            close()
-    return ParsedDocument(pages=pages) if pages else None
+    with _PDFIUM_LOCK:
+        try:
+            pdf = pdfium.PdfDocument(data)
+        except Exception:
+            return None
+        try:
+            pages = tuple(_parse_pdf_page(pdf, index) for index in range(len(pdf)))
+        except Exception:
+            return None
+        finally:
+            close = getattr(pdf, "close", None)
+            if callable(close):
+                close()
+        return ParsedDocument(pages=pages) if pages else None
 
 
 def _parse_pdf_page(pdf: Any, index: int) -> ParsedPage:
@@ -451,10 +500,39 @@ def _union_coco(
 
 
 def _citation_from_value(field: str, value: str, parsed: ParsedDocument) -> Citation | None:
-    page, bbox = find_span(parsed, value)
-    if page is None:
-        return None
-    return Citation(field=field, quote=value, page=page, bbox=bbox)
+    """Locate ``value`` in the parse, including numeric display variants.
+
+    Window extract often returns schema numbers (``1234.0``) with an empty
+    citation list. ExtractBench still needs a page, so try thousands-separated
+    and whole-integer forms that appear in the PDF.
+    """
+    for needle in _value_needles(value):
+        page, bbox = find_span(parsed, needle)
+        if page is not None:
+            return Citation(field=field, quote=needle, page=page, bbox=bbox)
+    return None
+
+
+def _value_needles(value: str) -> tuple[str, ...]:
+    """Search texts for a field value, including ``1,234`` / ``1234.0`` forms."""
+    texts = [value]
+    stripped = value.replace(",", "").replace("$", "").replace("£", "").replace("€", "").strip()
+    if stripped and stripped != value:
+        texts.append(stripped)
+    try:
+        number = float(stripped)
+    except ValueError:
+        return tuple(dict.fromkeys(texts))
+    if not math.isfinite(number) or abs(number) >= 1e15:
+        return tuple(dict.fromkeys(texts))
+    if number.is_integer():
+        integer = int(number)
+        texts.append(str(integer))
+        texts.append(f"{integer:,}")
+    else:
+        texts.append(f"{number:.2f}")
+        texts.append(f"{number:,.2f}")
+    return tuple(dict.fromkeys(text for text in texts if text))
 
 
 def _iter_field_values(output: object) -> Iterator[tuple[str, str]]:

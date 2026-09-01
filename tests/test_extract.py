@@ -1304,6 +1304,15 @@ class TestExtract:
         assert mapped.provider is None
         assert mapped.retryable is False
 
+    def test_token_limit_is_permanent_even_without_model_signature(self):
+        mapped = _map_exception(
+            RuntimeError(
+                "Model token limit (provider default) exceeded before any response was generated."
+            )
+        )
+        assert isinstance(mapped, ModelError)
+        assert mapped.retryable is False
+
     def test_model_error_constructor_remains_backwards_compatible(self):
         error = ModelError("flaky")
 
@@ -1748,7 +1757,54 @@ class TestExtractWithUsage:
         assert _usage_model_settings("openai:gpt-5", None) is None
         settings = _usage_model_settings("openrouter:anthropic/claude-sonnet-4", {"temperature": 0})
         assert settings["openrouter_usage"] == {"include": True}
+        assert settings["extra_body"]["usage"] == {"include": True}
         assert settings["temperature"] == 0
+        merged = _usage_model_settings(
+            "openrouter:z-ai/glm-5.3-flash", {"extra_body": {"provider": {"sort": "price"}}}
+        )
+        assert merged["extra_body"]["usage"] == {"include": True}
+        assert merged["extra_body"]["provider"] == {"sort": "price"}
+        replaced = _usage_model_settings("openrouter:x", {"extra_body": "nope"})
+        assert replaced["extra_body"]["usage"] == {"include": True}
+
+        class _ZeroRunUsage:
+            input_tokens = 0
+            output_tokens = 0
+
+            @property
+            def request_tokens(self):
+                return self.input_tokens
+
+            @property
+            def total_tokens(self):
+                return 0
+
+            details = {}
+
+        class _LiveOpenRouterResult:
+            @property
+            def usage(self):
+                return _ZeroRunUsage()
+
+            def all_messages(self):
+                return [
+                    SimpleNamespace(
+                        usage=None,
+                        provider_details={
+                            "native_tokens_prompt": 640,
+                            "native_tokens_completion": 16,
+                        },
+                    )
+                ]
+
+        assert _usage_from_result(_LiveOpenRouterResult()) == Usage(640, 16, 656)
+        nested_usage = {"usage": {"prompt_tokens": "99", "completion_tokens": 2.0}}
+        assert _usage_from_raw(nested_usage) == Usage(99, 2, 101)
+        assert _usage_from_raw({"prompt_tokens": True}) == Usage(0, 0, 0)
+        assert _usage_from_raw({"completion_tokens": "nope"}) == Usage(0, 0, 0)
+        too_deep = {"details": {"details": {"details": {"details": {"details": {}}}}}}
+        too_deep["details"]["details"]["details"]["details"]["details"]["prompt_tokens"] = 5
+        assert _usage_from_raw(too_deep) == Usage(0, 0, 0)
 
     def test_propagates_runtime_error_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
