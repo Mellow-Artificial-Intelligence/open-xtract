@@ -120,9 +120,7 @@ def split_cited_output(
     if not cite:
         return cast(T, raw), ()
     wrapper_type = cited_output_schema(schema)
-    wrapper = cast(
-        Any, raw if isinstance(raw, wrapper_type) else wrapper_type.model_validate(raw)
-    )
+    wrapper = cast(Any, raw if isinstance(raw, wrapper_type) else wrapper_type.model_validate(raw))
     return cast(T, wrapper.output), citations_from_payload(wrapper.citations)
 
 
