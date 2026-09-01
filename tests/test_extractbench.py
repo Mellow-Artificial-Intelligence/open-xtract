@@ -329,22 +329,31 @@ def test_extractbench_does_not_retry_timeouts():
 
 
 def test_window_pool_timeout_scales_with_batches():
-    assert extractbench.window_pool_timeout(10, 4, 240.0) == 720.0
-    assert extractbench.window_pool_timeout(11, 4, 240.0) == 720.0
-    assert extractbench.window_pool_timeout(41, 4, 240.0) == 2640.0
-    assert extractbench.window_pool_timeout(1, 4, 240.0) == 240.0
+    assert extractbench.window_pool_timeout(10, 4, 240.0) == 960.0
+    assert extractbench.window_pool_timeout(11, 4, 240.0) == 960.0
+    assert extractbench.window_pool_timeout(41, 4, 240.0) == 2880.0
+    assert extractbench.window_pool_timeout(66, 4, 240.0) == 4320.0
+    assert extractbench.window_pool_timeout(1, 4, 240.0) == 480.0
     assert extractbench.window_pool_timeout(0, 4, 240.0) == 240.0
     assert extractbench.window_pool_timeout(8, 4, None) is None
+
+
+def test_window_pool_timeout_has_slack_for_pueblo():
+    """Pueblo finished in 705.8s then died at a sharp 720s; 800s must fit."""
+    pueblo = extractbench.window_pool_timeout(11, 4, 240.0)
+    assert pueblo is not None
+    assert pueblo >= 800.0
+    assert pueblo > 240.0 * 3
 
 
 def test_extractbench_file_timeout_covers_pool_and_keeps_floor():
     assert extractbench.extractbench_file_timeout(1, 4, 240.0) == 1800.0
     assert extractbench.extractbench_file_timeout(10, 4, 240.0) == 1800.0
-    assert extractbench.extractbench_file_timeout(41, 4, 240.0) == 2640.0
-    assert extractbench.extractbench_file_timeout(66, 4, 240.0) == 4080.0
+    assert extractbench.extractbench_file_timeout(41, 4, 240.0) == 2880.0
+    assert extractbench.extractbench_file_timeout(66, 4, 240.0) == 4320.0
     assert (
         extractbench.extractbench_file_timeout(extractbench.DEFAULT_FILE_TIMEOUT_WINDOWS, 4, 240.0)
-        == 5760.0
+        == 6000.0
     )
     assert extractbench.extractbench_file_timeout(66, 4, None) is None
 
@@ -509,6 +518,40 @@ def test_window_pool_timeout_is_permanent(monkeypatch, tmp_path):
             window_concurrency=2,
         )
     assert exc.value.retryable is False
+
+
+def test_window_pool_timeout_does_not_wait_on_cancelled_workers(monkeypatch, tmp_path):
+    import time
+
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["AAAA page one", "BBBB page two"])
+    path = tmp_path / "hang.pdf"
+    path.write_bytes(pdf)
+    original = extractbench.Extractor.extract_with_usage
+
+    def _hang(self, source, *, media_type=None):
+        time.sleep(2.0)
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _hang)
+    started = time.monotonic()
+    with pytest.raises(ModelError, match="timed out"):
+        extractbench.extract_document_with_citations(
+            path,
+            schema,
+            TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+            max_retries=0,
+            cite=True,
+            timeout=0.05,
+            window_concurrency=2,
+        )
+    assert time.monotonic() - started < 1.0
 
 
 def test_merge_window_payloads_keeps_later_citations():

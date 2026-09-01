@@ -9,12 +9,14 @@ timing when that is known.
 ## [Unreleased]
 
 ### Changed
-- ExtractBench per-file timeout is ``max(1800, timeout × ceil(windows /
-  concurrency))`` for a long-doc window count, and timeout retries are
+- ExtractBench per-file timeout is ``max(1800, window-pool wait)`` for a
+  long-doc window count, and timeout retries are
   disabled. Veralto (41) and long (66) are not killed at 1800s × 3.
-- ExtractBench window-pool wait is ``timeout × ceil(windows / concurrency)``,
-  not one 240s wrap around the whole document. Goshen (10) and pueblo (11)
-  can finish; Veralto (41) and long (66) fail only for a real model error.
+- ExtractBench window-pool wait is
+  ``timeout × (ceil(windows / concurrency) + 1)``, not a sharp
+  ``timeout × batches`` wrap. Pueblo's ~706s 11-window run is not killed at
+  720s; a pool timeout returns immediately instead of waiting on cancelled
+  workers until the 96-window file cap (long / no result.json).
   Window attempts are still not retried.
 - Empty-text / scanned PDFs (Bianco) are rendered to compact grayscale page
   images (long edge ≤ 768px) locally and never uploaded for OpenRouter
