@@ -18,9 +18,10 @@ _FUZZY_RATIO = 0.85
 # ~3k tokens of document text. GLM-class context still needs room for a large
 # ExtractBench schema, citation envelope, and output. Oversized pages are split.
 # Slide decks can sit under the char budget and still blow context as one prompt
-# (Veralto was a single 80k window), so also cap pages per window.
+# (Veralto was a single 80k window). One page per window forces those decks to
+# split; an oversized page is still sliced by the char budget.
 DEFAULT_PARSE_WINDOW_CHARS = 12_000
-DEFAULT_PARSE_WINDOW_PAGES = 4
+DEFAULT_PARSE_WINDOW_PAGES = 1
 # pypdfium2 / PDFium is not safe across threads in one process.
 _PDFIUM_LOCK = threading.Lock()
 
@@ -104,7 +105,8 @@ def parse_windows(
     A page larger than the budget is sliced so each model call stays inside
     GLM-class context. Slices keep the original page number and parser spans;
     boxes are still resolved against the full parse, never invented. Decks that
-    fit the character budget still split once they exceed ``max_pages``. Empty
+    fit the character budget still split once they exceed ``max_pages``
+    (default one page, so a Veralto-class deck cannot stay one prompt). Empty
     documents yield the original parse.
     """
     budget = DEFAULT_PARSE_WINDOW_CHARS if max_chars is None else max_chars

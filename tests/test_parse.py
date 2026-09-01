@@ -379,11 +379,18 @@ def test_pdf_close_optional(monkeypatch):
 def test_parse_windows_splits_and_caps_large_multipage():
     pages = tuple(_page("x" * 50, page=index) for index in (1, 2, 3, 4))
     parsed = ParsedDocument(pages=pages)
-    assert parse_windows(parsed, max_chars=10_000) == (parsed,)
+    assert parse_windows(parsed, max_chars=10_000, max_pages=10) == (parsed,)
     deck = ParsedDocument(pages=tuple(_page("slide", page=index) for index in range(1, 6)))
     deck_windows = parse_windows(deck, max_chars=10_000)
-    assert len(deck_windows) == 2
+    assert len(deck_windows) == 5
     assert [page.page for window in deck_windows for page in window.pages] == [1, 2, 3, 4, 5]
+    veralto = ParsedDocument(
+        pages=tuple(_page(f"Q4 slide {index} " * 20, page=index) for index in range(1, 21))
+    )
+    assert _pages_prompt_len(veralto.pages) < 80_000
+    veralto_windows = parse_windows(veralto)
+    assert len(veralto_windows) == 20
+    assert all(len(window.pages) == 1 for window in veralto_windows)
     empty = ParsedDocument(pages=())
     assert parse_windows(empty) == (empty,)
     assert _pages_prompt_len(()) == 0
@@ -406,7 +413,7 @@ def test_parse_windows_splits_and_caps_large_multipage():
     fallback = ["keep-me"]
     assert parsed_window_inputs(None, fallback) == [fallback]
     assert parsed_window_inputs(None, fallback)[0] is fallback
-    assert parsed_window_inputs(parsed, fallback, max_chars=10_000)[0] is fallback
+    assert parsed_window_inputs(parsed, fallback, max_chars=10_000, max_pages=10)[0] is fallback
     chunked = parsed_window_inputs(parsed, fallback, max_chars=80)
     assert len(chunked) >= 2
     assert all(len(window[1]) <= 80 or "--- Page " in window[1] for window in chunked)

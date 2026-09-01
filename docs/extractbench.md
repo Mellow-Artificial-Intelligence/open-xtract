@@ -87,7 +87,7 @@ with `--no-cite`) and maps them onto ExtractBench `FieldCitation`:
 The runner **parses PDFs locally** (pypdfium2, `openextract[pdf]` / `openextract[all]`)
 and feeds page-indexed text (`--- Page N ---`) to the model before extraction.
 Long documents (and oversized pages) are split into windows under a 12k-character
-/ 4-page budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
+/ 1-page budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
 and merged — the whole PDF is not dumped as one prompt. Each model call uses
 `--timeout` (default 240s) so a doomed window fails fast instead of burning
 ExtractBench's 1800s per-file limit three times. Citations are collected from

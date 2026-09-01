@@ -10,7 +10,7 @@ timing when that is known.
 
 ### Changed
 - Parse-then-extract windows page-indexed PDF text under a 12k-character
-  budget (was 80k) and at most 4 pages, and splits a single oversized page so
+  budget (was 80k) and one page per window, and splits a single oversized page so
   each model call fits GLM-class context. Slide decks that fit 80k as one
   prompt (Veralto) now split. ExtractBench extracts windows in a bounded thread pool
   (`--window-concurrency`, default 4) with a per-call timeout (`--timeout`,
