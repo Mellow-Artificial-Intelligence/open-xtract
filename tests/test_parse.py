@@ -380,6 +380,10 @@ def test_parse_windows_splits_and_caps_large_multipage():
     pages = tuple(_page("x" * 50, page=index) for index in (1, 2, 3, 4))
     parsed = ParsedDocument(pages=pages)
     assert parse_windows(parsed, max_chars=10_000) == (parsed,)
+    deck = ParsedDocument(pages=tuple(_page("slide", page=index) for index in range(1, 6)))
+    deck_windows = parse_windows(deck, max_chars=10_000)
+    assert len(deck_windows) == 2
+    assert [page.page for window in deck_windows for page in window.pages] == [1, 2, 3, 4, 5]
     empty = ParsedDocument(pages=())
     assert parse_windows(empty) == (empty,)
     assert _pages_prompt_len(()) == 0

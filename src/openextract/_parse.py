@@ -17,7 +17,10 @@ _PAGE_HEADER = "--- Page {page} ---"
 _FUZZY_RATIO = 0.85
 # ~3k tokens of document text. GLM-class context still needs room for a large
 # ExtractBench schema, citation envelope, and output. Oversized pages are split.
+# Slide decks can sit under the char budget and still blow context as one prompt
+# (Veralto was a single 80k window), so also cap pages per window.
 DEFAULT_PARSE_WINDOW_CHARS = 12_000
+DEFAULT_PARSE_WINDOW_PAGES = 4
 # pypdfium2 / PDFium is not safe across threads in one process.
 _PDFIUM_LOCK = threading.Lock()
 
@@ -94,17 +97,20 @@ def parse_windows(
     parsed: ParsedDocument,
     *,
     max_chars: int | None = None,
+    max_pages: int | None = None,
 ) -> tuple[ParsedDocument, ...]:
     """Split ``parsed`` into page-contiguous windows under ``max_chars``.
 
     A page larger than the budget is sliced so each model call stays inside
     GLM-class context. Slices keep the original page number and parser spans;
-    boxes are still resolved against the full parse, never invented. Empty
+    boxes are still resolved against the full parse, never invented. Decks that
+    fit the character budget still split once they exceed ``max_pages``. Empty
     documents yield the original parse.
     """
     budget = DEFAULT_PARSE_WINDOW_CHARS if max_chars is None else max_chars
+    page_cap = DEFAULT_PARSE_WINDOW_PAGES if max_pages is None else max_pages
     pages = parsed.pages
-    if not pages or _pages_prompt_len(pages) <= budget:
+    if not pages or (_pages_prompt_len(pages) <= budget and len(pages) <= page_cap):
         return (parsed,)
     slices = tuple(slice_page for page in pages for slice_page in _split_page(page, budget))
     windows: list[ParsedDocument] = []
@@ -113,7 +119,7 @@ def parse_windows(
     for page in slices:
         block_len = len(_page_block(page))
         extra = block_len if not current else block_len + 2
-        if current and current_len + extra > budget:
+        if current and (current_len + extra > budget or len(current) >= page_cap):
             windows.append(ParsedDocument(pages=tuple(current)))
             current = [page]
             current_len = block_len
@@ -160,6 +166,7 @@ def parsed_window_inputs(
     fallback_inputs: list,
     *,
     max_chars: int | None = None,
+    max_pages: int | None = None,
 ) -> list[list]:
     """Return per-window run inputs, or ``[fallback_inputs]`` for the fast path.
 
@@ -168,7 +175,7 @@ def parsed_window_inputs(
     """
     if parsed is None or not parsed.has_text():
         return [fallback_inputs]
-    windows = parse_windows(parsed, max_chars=max_chars)
+    windows = parse_windows(parsed, max_chars=max_chars, max_pages=max_pages)
     if len(windows) == 1:
         return [fallback_inputs]
     return [parsed_run_inputs(window) for window in windows]
