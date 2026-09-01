@@ -36,7 +36,7 @@ from ._batch import (
     extract_many_with_results_async,
     iter_extract_many_async,
 )
-from ._citations import prepare_cited_run, split_cited_output
+from ._citations import prepare_cited_run
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
     _max_redirects,
@@ -64,7 +64,7 @@ from ._media import (
     _safe_source_context,
 )
 from ._parse import ParsedDocument, maybe_parsed_inputs
-from ._retry import _retry_delay, _run_with_retries_async, _run_with_retries_sync
+from ._retry import _retry_delay
 from ._session import AsyncExtractor, Extractor
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
 from ._swarm import (
@@ -82,6 +82,7 @@ from ._types import (
     _resolve_item,
     total_usage,
 )
+from ._windows import extract_windows_async, extract_windows_sync
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent as PydanticAgent
@@ -339,18 +340,20 @@ def extract(
         cite,
     ) as (agent, inputs, parsed):
 
-        def _once() -> T:
-            output, _citations = split_cited_output(
-                _extract_once(agent, inputs), schema, cite=cite, parsed=parsed
-            )
-            return output
+        def _run(window: list) -> tuple[object, Usage]:
+            return _extract_once(agent, window), Usage(0, 0, 0)
 
-        return _run_with_retries_sync(
-            _once,
+        output, _usage, _citations = extract_windows_sync(
+            _run,
+            inputs,
+            parsed,
+            schema,
+            cite,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
+        return output
 
 
 def extract_with_usage(
@@ -404,17 +407,21 @@ def extract_with_usage(
         cite,
     ) as (agent, inputs, parsed):
 
-        def _once() -> tuple[T, Usage]:
-            result = _run_extraction(agent, inputs)
-            output, _citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
-            return output, _usage_from_result(result)
+        def _run(window: list) -> tuple[object, Usage]:
+            result = _run_extraction(agent, window)
+            return result.output, _usage_from_result(result)
 
-        return _run_with_retries_sync(
-            _once,
+        output, usage, _citations = extract_windows_sync(
+            _run,
+            inputs,
+            parsed,
+            schema,
+            cite,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
+        return output, usage
 
 
 async def extract_with_usage_async(
@@ -463,17 +470,21 @@ async def extract_with_usage_async(
         cite,
     ) as (agent, inputs, parsed):
 
-        async def _once() -> tuple[T, Usage]:
-            result = await _run_extraction_async(agent, inputs)
-            output, _citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
-            return output, _usage_from_result(result)
+        async def _run(window: list) -> tuple[object, Usage]:
+            result = await _run_extraction_async(agent, window)
+            return result.output, _usage_from_result(result)
 
-        return await _run_with_retries_async(
-            _once,
+        output, usage, _citations = await extract_windows_async(
+            _run,
+            inputs,
+            parsed,
+            schema,
+            cite,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
+        return output, usage
 
 
 async def extract_async(
@@ -524,17 +535,21 @@ async def extract_async(
         cite,
     ) as (agent, inputs, parsed):
 
-        async def _once() -> T:
-            result = await _run_extraction_async(agent, inputs)
-            output, _citations = split_cited_output(result.output, schema, cite=cite, parsed=parsed)
-            return output
+        async def _run(window: list) -> tuple[object, Usage]:
+            result = await _run_extraction_async(agent, window)
+            return result.output, Usage(0, 0, 0)
 
-        return await _run_with_retries_async(
-            _once,
+        output, _usage, _citations = await extract_windows_async(
+            _run,
+            inputs,
+            parsed,
+            schema,
+            cite,
             max_retries=max_retries,
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
         )
+        return output
 
 
 __all__ = [

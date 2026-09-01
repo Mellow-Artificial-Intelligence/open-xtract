@@ -23,6 +23,7 @@ from openextract._parse import (
     _normalized_coco,
     _page_size,
     _page_text,
+    _pages_prompt_len,
     _parse_pdf_page,
     _pdf_box_to_coco,
     _union_coco,
@@ -32,7 +33,9 @@ from openextract._parse import (
     find_span,
     ground_citations,
     maybe_parsed_inputs,
+    parse_windows,
     parsed_run_inputs,
+    parsed_window_inputs,
     try_parse_document,
 )
 from tests.pdf_fixture import synthetic_pdf
@@ -369,3 +372,78 @@ def test_pdf_close_optional(monkeypatch):
     parsed = try_parse_document(b"%PDF-1.1", "application/pdf")
     assert parsed is not None
     assert parsed.has_text()
+
+
+def test_parse_windows_splits_and_caps_large_multipage():
+    pages = tuple(_page("x" * 50, page=index) for index in (1, 2, 3, 4))
+    parsed = ParsedDocument(pages=pages)
+    assert parse_windows(parsed, max_chars=10_000) == (parsed,)
+    empty = ParsedDocument(pages=())
+    assert parse_windows(empty) == (empty,)
+    assert _pages_prompt_len(()) == 0
+    windows = parse_windows(parsed, max_chars=80)
+    assert len(windows) >= 2
+    assert all(
+        _pages_prompt_len(window.pages) <= 80 or len(window.pages) == 1 for window in windows
+    )
+    assert [page.page for window in windows for page in window.pages] == [1, 2, 3, 4]
+    oversized = ParsedDocument(pages=(_page("y" * 200, page=1),))
+    assert parse_windows(oversized, max_chars=10) == (oversized,)
+    fallback = ["keep-me"]
+    assert parsed_window_inputs(None, fallback) == [fallback]
+    assert parsed_window_inputs(None, fallback)[0] is fallback
+    assert parsed_window_inputs(parsed, fallback, max_chars=10_000)[0] is fallback
+    chunked = parsed_window_inputs(parsed, fallback, max_chars=80)
+    assert len(chunked) >= 2
+    assert all(len(window[1]) <= 80 or "--- Page " in window[1] for window in chunked)
+
+
+def test_chunk_span_still_gets_parser_box():
+    parsed = ParsedDocument(
+        pages=(
+            _page("noise " * 40, page=1),
+            _page(
+                "Acme Corp",
+                ParsedSpan("Acme", 2, (0.1, 0.2, 0.2, 0.05)),
+                ParsedSpan("Corp", 2, (0.3, 0.2, 0.2, 0.05)),
+                page=2,
+            ),
+        )
+    )
+    windows = parse_windows(parsed, max_chars=40)
+    assert len(windows) >= 2
+    match = next(window for window in windows if "Acme Corp" in window.as_prompt_text())
+    page, bbox = find_span(match, "Acme Corp")
+    assert page == 2
+    assert bbox is not None
+    grounded = ground_citations((Citation("vendor", "Acme Corp", page=2),), parsed)
+    assert grounded[0].bbox is not None
+
+
+def test_extract_chunks_large_parse_via_extract_once(monkeypatch, mocker):
+    from pydantic_ai.models.test import TestModel
+
+    import openextract._extract as extract_mod
+    from openextract import extract
+
+    monkeypatch.setattr("openextract._parse.DEFAULT_PARSE_WINDOW_CHARS", 40)
+
+    class _Vendor(BaseModel):
+        vendor: str
+
+    pdf = synthetic_pdf(pages=["AAAA " * 30, "Acme Corp " + "BBBB " * 30])
+    spy = mocker.spy(extract_mod, "_extract_once")
+    model = TestModel(
+        custom_output_args={
+            "output": {"vendor": "Acme Corp"},
+            "citations": [{"field": "vendor", "quote": "Acme Corp", "page": 2}],
+        }
+    )
+    result = extract(_Vendor, model, pdf, media_type="application/pdf", cite=True)
+    assert result.vendor == "Acme Corp"
+    assert spy.call_count >= 2
+    for call in spy.call_args_list:
+        prompt = call.args[1][1]
+        assert isinstance(prompt, str)
+        assert len(prompt) <= 200
+        assert "--- Page " in prompt

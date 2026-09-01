@@ -6,6 +6,7 @@ from pydantic import BaseModel
 from pydantic_ai.models.test import TestModel
 
 from openextract import (
+    AsyncExtractor,
     Citation,
     ExtractionInput,
     ExtractionResult,
@@ -292,3 +293,61 @@ class TestExtractCite:
         )
         assert output == Person(name="Ada", age=36)
         assert usage.total_tokens >= 0
+
+    def test_large_pdf_is_chunked_across_extract_surfaces(self, monkeypatch):
+        from tests.pdf_fixture import synthetic_pdf
+
+        monkeypatch.setattr("openextract._parse.DEFAULT_PARSE_WINDOW_CHARS", 40)
+        pdf = synthetic_pdf(pages=["AAAA " * 30, "Ada Lovelace " + "BBBB " * 30])
+        model = _cited_model(
+            output={"name": "Ada", "age": 36},
+            citations=[{"field": "name", "quote": "Ada Lovelace", "page": 2}],
+        )
+        assert extract(Person, model, pdf, media_type="application/pdf", cite=True) == Person(
+            name="Ada", age=36
+        )
+        output, usage = extract_with_usage(
+            Person, model, pdf, media_type="application/pdf", cite=True
+        )
+        assert output == Person(name="Ada", age=36)
+        assert usage.total_tokens >= 0
+        results = extract_many_with_results(
+            Person, model, [ExtractionInput(pdf, media_type="application/pdf")], cite=True
+        )
+        assert results[0].output == Person(name="Ada", age=36)
+        assert results[0].citations[0].page == 2
+        swarm = extract_swarm_with_results(
+            Person, model, pdf, media_type="application/pdf", cite=True
+        )
+        assert swarm.output == Person(name="Ada", age=36)
+        with Extractor(Person, model, cite=True) as extractor:
+            session_plain = extractor.extract(pdf, media_type="application/pdf")
+            session_out, session_usage = extractor.extract_with_usage(
+                pdf, media_type="application/pdf"
+            )
+        assert session_plain == Person(name="Ada", age=36)
+        assert session_out == Person(name="Ada", age=36)
+        assert session_usage.total_tokens >= 0
+
+    async def test_async_surfaces_chunk_large_pdf(self, monkeypatch):
+        from tests.pdf_fixture import synthetic_pdf
+
+        monkeypatch.setattr("openextract._parse.DEFAULT_PARSE_WINDOW_CHARS", 40)
+        pdf = synthetic_pdf(pages=["AAAA " * 30, "Ada Lovelace " + "BBBB " * 30])
+        model = _cited_model(
+            output={"name": "Ada", "age": 36},
+            citations=[{"field": "name", "quote": "Ada Lovelace", "page": 2}],
+        )
+        assert await extract_async(
+            Person, model, pdf, media_type="application/pdf", cite=True
+        ) == Person(name="Ada", age=36)
+        output, usage = await extract_with_usage_async(
+            Person, model, pdf, media_type="application/pdf", cite=True
+        )
+        assert output == Person(name="Ada", age=36)
+        assert usage.total_tokens >= 0
+        async with AsyncExtractor(Person, model, cite=True) as extractor:
+            session_out = await extractor.extract(pdf, media_type="application/pdf")
+            session_pair = await extractor.extract_with_usage(pdf, media_type="application/pdf")
+        assert session_out == Person(name="Ada", age=36)
+        assert session_pair[0] == Person(name="Ada", age=36)

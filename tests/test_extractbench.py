@@ -194,6 +194,47 @@ def test_extract_document_parser_boxes_and_no_cite(tmp_path):
     assert kept_type == "application/pdf"
 
 
+def test_extract_document_chunks_large_parse_and_keeps_boxes(monkeypatch, tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    monkeypatch.setattr("openextract._parse.DEFAULT_PARSE_WINDOW_CHARS", 40)
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["AAAA " * 30, "Acme Corp " + "BBBB " * 30])
+    path = tmp_path / "long.pdf"
+    path.write_bytes(pdf)
+    calls: list[int] = []
+    original = extractbench.Extractor.extract_with_usage
+
+    def _spy(self, source, *, media_type=None):
+        payload = source if isinstance(source, bytes) else Path(source).read_bytes()
+        calls.append(len(payload))
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _spy)
+    data, usage, citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(
+            custom_output_args={
+                "output": {"vendor": "Acme Corp"},
+                "citations": [{"field": "vendor", "quote": "Acme Corp", "page": 2}],
+            }
+        ),
+        max_retries=0,
+        cite=True,
+    )
+    assert data["vendor"] == "Acme Corp"
+    assert usage.input_tokens >= 0
+    assert len(calls) >= 2
+    assert all(size < 500 for size in calls)
+    assert citations[0].page == 2
+    assert citations[0].bbox is not None
+
+
 def test_unwrap_cited_document_flat_fallback():
     data, citations = extractbench._unwrap_cited_document(
         {"vendor": "Acme", "citations": [{"field": "vendor", "page": 1}]},

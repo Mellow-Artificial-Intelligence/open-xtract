@@ -17,7 +17,7 @@ from ._agent import (
     _run_extraction_async,
     _usage_from_result,
 )
-from ._citations import prepare_cited_run, split_cited_output
+from ._citations import prepare_cited_run
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
     _resolve_max_input_bytes,
@@ -28,9 +28,9 @@ from ._config import (
 from ._errors import _extraction_errors
 from ._media import _get_media_async, _item_source_label
 from ._parse import maybe_parsed_inputs
-from ._retry import _run_with_retries_async
 from ._styles import ExtractionStyle, normalize_style, prepared_style_run
-from ._types import ExtractionInputLike, ExtractionResult, T, _resolve_item
+from ._types import ExtractionInputLike, ExtractionResult, T, Usage, _resolve_item
+from ._windows import extract_windows_async
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent as PydanticAgent
@@ -109,7 +109,7 @@ async def _run_with_shared_agent(
 async def _run_with_shared_agent_result(
     agent: PydanticAgent,
     inputs: list,
-) -> object:
+) -> Any:
     """Run prepared inputs through a shared ``Agent`` and return the raw result.
 
     The raw pydantic-ai result exposes ``.output`` and ``.usage()`` so the rich
@@ -210,7 +210,7 @@ async def _iter_extractions(
                     else:
                         run_agent = shared_agent
 
-                    async def _once() -> object:
+                    async def _run(window: list) -> tuple[object, Usage]:
                         nonlocal attempts
                         attempts += 1
                         # A sibling may have failed while this item was being prepared
@@ -218,23 +218,25 @@ async def _iter_extractions(
                         if stop.is_set():
                             raise asyncio.CancelledError
                         if options.rich:
-                            return await _run_with_shared_agent_result(run_agent, inputs)
-                        return await _run_with_shared_agent(run_agent, inputs)
+                            result = await _run_with_shared_agent_result(run_agent, window)
+                            return result.output, _usage_from_result(result)
+                        output = await _run_with_shared_agent(run_agent, window)
+                        return output, Usage(0, 0, 0)
 
-                    value = await _run_with_retries_async(
-                        _once,
+                    output, usage, citations = await extract_windows_async(
+                        _run,
+                        inputs,
+                        parsed,
+                        schema,
+                        options.cite,
                         max_retries=options.max_retries,
                         retry_backoff=options.retry_backoff,
                         retry_max_backoff=options.retry_max_backoff,
                     )
                 if options.rich:
-                    raw_result = cast(Any, value)
-                    output, citations = split_cited_output(
-                        raw_result.output, schema, cite=options.cite, parsed=parsed
-                    )
                     return ExtractionResult(
                         output=output,
-                        usage=_usage_from_result(raw_result),
+                        usage=usage,
                         attempts=attempts,
                         duration=time.perf_counter() - started,
                         model=_model_identifier(model, run_agent),
@@ -243,9 +245,6 @@ async def _iter_extractions(
                         warnings=(),
                         citations=citations,
                     )
-                output, _citations = split_cited_output(
-                    value, schema, cite=options.cite, parsed=parsed
-                )
                 return output
             except Exception:
                 if not options.return_exceptions:

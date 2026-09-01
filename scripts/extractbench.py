@@ -36,6 +36,7 @@ from openextract import (
     RetryPolicy,
     SchemaValidationError,
     Usage,
+    reduce_outputs,
 )
 from openextract._agent import _install_hint, _route_model, _usage_model_settings
 from openextract._citations import (
@@ -45,7 +46,8 @@ from openextract._citations import (
     with_citation_instructions,
 )
 from openextract._media import _get_media_type
-from openextract._parse import ground_citations, maybe_parsed_inputs
+from openextract._parse import ground_citations, maybe_parsed_inputs, parse_windows
+from openextract._types import _sum_usage
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = REPO_ROOT / ".extractbench"
@@ -268,8 +270,9 @@ def extract_document_with_citations(
 
     ``cite=True`` (the ExtractBench runner default) wraps the JSON schema with
     an ``output`` / ``citations`` envelope so the model can return per-field
-    page and quote evidence. PDFs are parsed locally first; boxes come from
-    parser spans, never from the model.
+    page and quote evidence. PDFs are parsed locally first and sent as
+    page-indexed windows so large documents do not blow the model context.
+    Boxes come from parser spans, never from the model.
     """
     schema = prepare_schema(json_schema, additional_properties_false=additional_properties_false)
     run_instructions = with_citation_instructions(instructions) if cite else instructions
@@ -278,13 +281,27 @@ def extract_document_with_citations(
     run_source, run_media_type, parsed = _parse_then_extract_source(source, media_type)
     agent = _build_schema_agent(model, schema, run_instructions)
     policy = RetryPolicy(max_retries=max_retries)
+    windows = parse_windows(parsed) if parsed is not None and parsed.has_text() else ()
     with Extractor(
         ExtractedDocument,
         agent=agent,
         retry_policy=policy,
         max_input_bytes=max_input_bytes,
     ) as extractor:
-        output, usage = extractor.extract_with_usage(run_source, media_type=run_media_type)
+        if len(windows) > 1:
+            parts: list[ExtractedDocument] = []
+            usages: list[Usage] = []
+            for window in windows:
+                part, part_usage = extractor.extract_with_usage(
+                    window.as_prompt_text().encode("utf-8"),
+                    media_type="text/plain",
+                )
+                parts.append(part)
+                usages.append(part_usage)
+            output = reduce_outputs(parts)
+            usage = _sum_usage(usages)
+        else:
+            output, usage = extractor.extract_with_usage(run_source, media_type=run_media_type)
     dumped = as_extracted_dict(output)
     data, citations = _unwrap_cited_document(dumped, cite=cite)
     if cite:

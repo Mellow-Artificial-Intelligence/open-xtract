@@ -1654,6 +1654,30 @@ class TestExtractWithUsage:
 
         assert usage == Usage(input_tokens=0, output_tokens=0, total_tokens=0)
 
+    def test_zero_input_tokens_do_not_hide_provider_aliases(self, tmp_path, mocker):
+        local = tmp_path / "input.txt"
+        local.write_bytes(b"hello")
+        expected = _Person(name="Ada", age=36)
+        usage_obj = SimpleNamespace(
+            input_tokens=0,
+            output_tokens=0,
+            total_tokens=0,
+            request_tokens=1280,
+            prompt_tokens=1280,
+            response_tokens=64,
+            completion_tokens=64,
+        )
+        _make_agent_mock(mocker, output=expected, usage=usage_obj)
+
+        output, usage = extract_with_usage(
+            schema=_Person,
+            model="openai:gpt-5",
+            input_file=str(local),
+        )
+
+        assert output is expected
+        assert usage == Usage(input_tokens=1280, output_tokens=64, total_tokens=1344)
+
     def test_none_usage_fields_default_to_zero(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
@@ -1688,6 +1712,15 @@ class TestExtractWithUsage:
         assert _usage_from_raw(
             {"details": {"prompt_tokens": 4, "completion_tokens": 5, "totalTokens": 9}}
         ) == Usage(4, 5, 9)
+        assert _usage_from_raw(
+            SimpleNamespace(
+                input_tokens=0,
+                output_tokens=0,
+                total_tokens=0,
+                request_tokens=1280,
+                response_tokens=64,
+            )
+        ) == Usage(1280, 64, 1344)
 
         class _Result:
             @property

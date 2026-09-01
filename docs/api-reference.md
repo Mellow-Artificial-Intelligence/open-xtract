@@ -66,9 +66,10 @@ it left. The same applies to the three siblings below.
 
 Extract one input synchronously and return an instance of `schema`.
 `cite=True` asks the model for per-field source spans (page and quote). PDFs
-are parsed locally and boxes come from parser spans, not the model. The return
-type stays the schema instance; citations land on
-[`ExtractionResult`](#extractionresult) from the `*_with_results` APIs.
+are parsed locally; long documents are extracted in page windows and merged.
+Boxes come from parser spans, not the model. The return type stays the schema
+instance; citations land on [`ExtractionResult`](#extractionresult) from the
+`*_with_results` APIs.
 
 ### `extract_async(schema, model, input_file=None, instructions=None, *, style='direct', media_type=None, max_input_bytes=None, max_retries=0, retry_backoff=1.0, retry_max_backoff=60.0, cite=False)`
 

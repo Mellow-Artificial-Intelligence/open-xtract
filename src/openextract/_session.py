@@ -9,7 +9,7 @@ import threading
 from collections.abc import AsyncIterator, Callable, Iterator
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 from pydantic import BaseModel
@@ -25,7 +25,7 @@ from ._citations import prepare_cited_run, split_cited_output
 from ._config import _resolve_max_input_bytes, _url_fetch_timeout, _validate_timeout
 from ._errors import _extraction_errors
 from ._media import _get_media, _get_media_async
-from ._parse import ParsedDocument, maybe_parsed_inputs
+from ._parse import ParsedDocument, maybe_parsed_inputs, parsed_window_inputs
 from ._retry import _run_with_retries_async, _run_with_retries_sync
 from ._styles import (
     ExtractionStyle,
@@ -35,6 +35,7 @@ from ._styles import (
     style_run_inputs,
 )
 from ._types import ExtractionInputLike, RetryPolicy, T, Usage
+from ._windows import extract_windows_async, extract_windows_sync
 
 if TYPE_CHECKING:
     from pydantic_ai import Agent as PydanticAgent
@@ -344,15 +345,38 @@ class Extractor(_ExtractorSession[T]):
         input_file: ExtractionInputLike,
         media_type: str | None,
         project: Callable[..., R],
+        *,
+        with_usage: bool = False,
     ) -> R:
         """Run one retrying extraction and map the raw result through ``project``."""
         with self._prepare_session_extraction(input_file, media_type) as (agent, inputs, parsed):
-            return _run_with_retries_sync(
-                lambda: project(self._run_agent(agent, inputs), parsed),
+            windows = parsed_window_inputs(parsed, inputs)
+            if len(windows) == 1:
+                return _run_with_retries_sync(
+                    lambda: project(self._run_agent(agent, windows[0]), parsed),
+                    max_retries=self._retry_policy.max_retries,
+                    retry_backoff=self._retry_policy.backoff,
+                    retry_max_backoff=self._retry_policy.max_backoff,
+                )
+
+            def _run(window: list) -> tuple[object, Usage]:
+                result = self._run_agent(agent, window)
+                return result.output, _usage_from_result(result)
+
+            output, usage, _citations = extract_windows_sync(
+                _run,
+                inputs,
+                parsed,
+                self._schema,
+                self._cite,
                 max_retries=self._retry_policy.max_retries,
                 retry_backoff=self._retry_policy.backoff,
                 retry_max_backoff=self._retry_policy.max_backoff,
             )
+            validated = self._validate_output(output)
+            if with_usage:
+                return cast(R, (validated, usage))
+            return cast(R, validated)
 
     def extract(
         self,
@@ -370,7 +394,9 @@ class Extractor(_ExtractorSession[T]):
         media_type: str | None = None,
     ) -> tuple[T, Usage]:
         """Extract one input and return its successful-call token usage."""
-        return self._extract_projected(input_file, media_type, self._output_and_usage)
+        return self._extract_projected(
+            input_file, media_type, self._output_and_usage, with_usage=True
+        )
 
 
 class AsyncExtractor(_ExtractorSession[T]):
@@ -458,6 +484,8 @@ class AsyncExtractor(_ExtractorSession[T]):
         input_file: ExtractionInputLike,
         media_type: str | None,
         project: Callable[..., R],
+        *,
+        with_usage: bool = False,
     ) -> R:
         """Async counterpart to :meth:`Extractor._extract_projected`."""
         async with self._prepare_session_extraction(input_file, media_type) as (
@@ -465,16 +493,37 @@ class AsyncExtractor(_ExtractorSession[T]):
             inputs,
             parsed,
         ):
+            windows = parsed_window_inputs(parsed, inputs)
+            if len(windows) == 1:
 
-            async def _once() -> R:
-                return project(await _run_extraction_async(agent, inputs), parsed)
+                async def _once() -> R:
+                    return project(await _run_extraction_async(agent, windows[0]), parsed)
 
-            return await _run_with_retries_async(
-                _once,
+                return await _run_with_retries_async(
+                    _once,
+                    max_retries=self._retry_policy.max_retries,
+                    retry_backoff=self._retry_policy.backoff,
+                    retry_max_backoff=self._retry_policy.max_backoff,
+                )
+
+            async def _run(window: list) -> tuple[object, Usage]:
+                result = await _run_extraction_async(agent, window)
+                return result.output, _usage_from_result(result)
+
+            output, usage, _citations = await extract_windows_async(
+                _run,
+                inputs,
+                parsed,
+                self._schema,
+                self._cite,
                 max_retries=self._retry_policy.max_retries,
                 retry_backoff=self._retry_policy.backoff,
                 retry_max_backoff=self._retry_policy.max_backoff,
             )
+            validated = self._validate_output(output)
+            if with_usage:
+                return cast(R, (validated, usage))
+            return cast(R, validated)
 
     async def extract(
         self,
@@ -492,4 +541,6 @@ class AsyncExtractor(_ExtractorSession[T]):
         media_type: str | None = None,
     ) -> tuple[T, Usage]:
         """Extract one input and return its successful-call token usage."""
-        return await self._extract_projected(input_file, media_type, self._output_and_usage)
+        return await self._extract_projected(
+            input_file, media_type, self._output_and_usage, with_usage=True
+        )
