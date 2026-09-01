@@ -321,9 +321,11 @@ class TestExtractCite:
         )
         assert swarm.output == Person(name="Ada", age=36)
         with Extractor(Person, model, cite=True) as extractor:
+            session_plain = extractor.extract(pdf, media_type="application/pdf")
             session_out, session_usage = extractor.extract_with_usage(
                 pdf, media_type="application/pdf"
             )
+        assert session_plain == Person(name="Ada", age=36)
         assert session_out == Person(name="Ada", age=36)
         assert session_usage.total_tokens >= 0
 

@@ -113,8 +113,7 @@ def parse_windows(
             continue
         current.append(page)
         current_len += extra
-    if current:
-        windows.append(ParsedDocument(pages=tuple(current)))
+    windows.append(ParsedDocument(pages=tuple(current)))
     return tuple(windows)
 
 

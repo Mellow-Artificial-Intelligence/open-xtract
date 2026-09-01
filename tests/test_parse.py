@@ -380,6 +380,7 @@ def test_parse_windows_splits_and_caps_large_multipage():
     assert parse_windows(parsed, max_chars=10_000) == (parsed,)
     empty = ParsedDocument(pages=())
     assert parse_windows(empty) == (empty,)
+    assert _pages_prompt_len(()) == 0
     windows = parse_windows(parsed, max_chars=80)
     assert len(windows) >= 2
     assert all(
