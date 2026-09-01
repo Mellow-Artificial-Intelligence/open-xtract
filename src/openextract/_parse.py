@@ -1,9 +1,11 @@
-"""Local parse-then-extract: page text and parser-backed boxes."""
+"""Local parse-then-extract: page text, page images, and parser-backed boxes."""
 
 from __future__ import annotations
 
 import math
+import struct
 import threading
+import zlib
 from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -45,6 +47,7 @@ class ParsedPage:
     width: float
     height: float
     spans: tuple[ParsedSpan, ...]
+    image: bytes | None = None
 
 
 @dataclass(frozen=True)
@@ -55,6 +58,9 @@ class ParsedDocument:
 
     def has_text(self) -> bool:
         return any(page.text.strip() for page in self.pages)
+
+    def has_images(self) -> bool:
+        return any(page.image for page in self.pages)
 
     def as_prompt_text(self) -> str:
         """Render page markers so the model can cite 1-indexed pages."""
@@ -79,6 +85,25 @@ def parsed_run_inputs(parsed: ParsedDocument) -> list[str]:
         "Page boundaries are marked as '--- Page N ---' (1-indexed).",
         parsed.as_prompt_text(),
     ]
+
+
+def parsed_image_inputs(parsed: ParsedDocument) -> list:
+    """Prompt inputs that send locally rendered page images, never the PDF.
+
+    ``BinaryContent`` is imported here so ``import openextract`` stays
+    pydantic-ai-free (see ``test_package_import_defers_pydantic_ai_runtime``).
+    """
+    from pydantic_ai import BinaryContent
+
+    parts: list = [
+        "Extract the requested information from this document. "
+        "Page images follow in 1-indexed order, marked as '--- Page N ---'."
+    ]
+    for page in parsed.pages:
+        parts.append(_PAGE_HEADER.format(page=page.page))
+        if page.image:
+            parts.append(BinaryContent(data=page.image, media_type="image/png"))
+    return parts
 
 
 def _page_block(page: ParsedPage) -> str:
@@ -158,6 +183,7 @@ def _split_page(page: ParsedPage, budget: int) -> tuple[ParsedPage, ...]:
                 width=page.width,
                 height=page.height,
                 spans=page.spans,
+                image=page.image,
             )
         )
         start = end
@@ -176,8 +202,13 @@ def parsed_window_inputs(
     One window keeps the original inputs object so callers that patch
     ``_extract_once`` still see a single call with the prepared prompt.
     """
-    if parsed is None or not parsed.has_text():
+    if parsed is None or not parsed.pages:
         return [fallback_inputs]
+    if not parsed.has_text():
+        windows = parse_windows(parsed, max_chars=max_chars, max_pages=max_pages)
+        if parsed.has_images():
+            return [parsed_image_inputs(window) for window in windows]
+        return [parsed_run_inputs(window) for window in windows]
     windows = parse_windows(parsed, max_chars=max_chars, max_pages=max_pages)
     if len(windows) == 1:
         return [fallback_inputs]
@@ -189,10 +220,22 @@ def maybe_parsed_inputs(
     file_type: str,
     *,
     parse: bool,
-) -> tuple[list[str] | None, ParsedDocument | None]:
-    """Return page-indexed prompt inputs when a local parse has text."""
+) -> tuple[list | None, ParsedDocument | None]:
+    """Return page-indexed prompt inputs when a local parse can replace the file.
+
+    Text PDFs become page-marked strings. Scanned / empty-text PDFs become
+    locally rendered page images (or page headers if render failed). Never
+    returns ``None`` inputs for a paginated parse — that would upload the PDF
+    to the provider's document-parse engine.
+    """
     parsed = try_parse_document(file_bytes, file_type) if parse else None
-    if parsed is not None and parsed.has_text():
+    if parsed is None:
+        return None, None
+    if parsed.has_text():
+        return parsed_run_inputs(parsed), parsed
+    if parsed.has_images():
+        return parsed_image_inputs(parsed), parsed
+    if parsed.pages:
         return parsed_run_inputs(parsed), parsed
     return None, parsed
 
@@ -263,7 +306,97 @@ def _parse_pdf_page(pdf: Any, index: int) -> ParsedPage:
         close = getattr(textpage, "close", None)
         if callable(close):
             close()
-    return ParsedPage(page=index + 1, text=text, width=width, height=height, spans=spans)
+    image = None if text.strip() else _render_page_png(page)
+    return ParsedPage(
+        page=index + 1, text=text, width=width, height=height, spans=spans, image=image
+    )
+
+
+def _render_page_png(page: Any) -> bytes | None:
+    """Rasterize one PDF page to PNG. Callers must hold ``_PDFIUM_LOCK``."""
+    render = getattr(page, "render", None)
+    if not callable(render):
+        return None
+    try:
+        bitmap = render(scale=2, rev_byteorder=True)
+    except TypeError:
+        try:
+            bitmap = render(scale=2)
+        except Exception:
+            return None
+    except Exception:
+        return None
+    try:
+        return _bitmap_to_png(bitmap)
+    finally:
+        close = getattr(bitmap, "close", None)
+        if callable(close):
+            close()
+
+
+def _bitmap_to_png(bitmap: Any) -> bytes | None:
+    width = int(getattr(bitmap, "width", 0) or 0)
+    height = int(getattr(bitmap, "height", 0) or 0)
+    mode = str(getattr(bitmap, "mode", "") or "")
+    channels = int(getattr(bitmap, "n_channels", 0) or 0) or _channels_for_mode(mode)
+    stride = int(getattr(bitmap, "stride", 0) or 0)
+    buffer = getattr(bitmap, "buffer", None)
+    if width <= 0 or height <= 0 or buffer is None or channels not in {1, 3, 4}:
+        return None
+    if stride < width * channels:
+        return None
+    raw = bytes(buffer)
+    row = width * channels
+    packed = bytearray(height * row)
+    swap = mode.startswith("BGR")
+    for y in range(height):
+        src = raw[y * stride : y * stride + row]
+        dest = y * row
+        if swap and channels >= 3:
+            for x in range(width):
+                i, j = x * channels, dest + x * channels
+                packed[j] = src[i + 2]
+                packed[j + 1] = src[i + 1]
+                packed[j + 2] = src[i]
+                if channels == 4:
+                    packed[j + 3] = src[i + 3]
+        else:
+            packed[dest : dest + row] = src
+    return _encode_png(width, height, bytes(packed), channels)
+
+
+def _channels_for_mode(mode: str) -> int:
+    if mode in {"L", "gray", "GRAY"}:
+        return 1
+    if mode in {"RGB", "BGR"}:
+        return 3
+    if mode in {"RGBA", "BGRA", "RGBx", "BGRx"}:
+        return 4
+    return 0
+
+
+def _encode_png(width: int, height: int, pixels: bytes, channels: int) -> bytes:
+    color_type = {1: 0, 3: 2, 4: 6}[channels]
+    raw = bytearray()
+    row = width * channels
+    for y in range(height):
+        raw.append(0)
+        raw.extend(pixels[y * row : (y + 1) * row])
+
+    def chunk(tag: bytes, data: bytes) -> bytes:
+        return (
+            struct.pack(">I", len(data))
+            + tag
+            + data
+            + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+        )
+
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, color_type, 0, 0, 0))
+        + chunk(b"IDAT", zlib.compress(bytes(raw), 6))
+        + chunk(b"IEND", b"")
+    )
 
 
 def _page_size(page: Any) -> tuple[float, float]:

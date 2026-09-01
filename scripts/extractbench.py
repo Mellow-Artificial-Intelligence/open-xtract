@@ -17,12 +17,12 @@ from __future__ import annotations
 
 import argparse
 import copy
+import math
 import os
 import re
 import subprocess
 import sys
-from concurrent.futures import ThreadPoolExecutor
-from concurrent.futures import TimeoutError as FuturesTimeoutError
+from concurrent.futures import ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 
@@ -302,10 +302,11 @@ def extract_document_with_citations(
         schema = json_schema_with_citations(schema)
     run_source, run_media_type, parsed = _parse_then_extract_source(source, media_type)
     policy = RetryPolicy(max_retries=max_retries)
-    windows = parse_windows(parsed) if parsed is not None and parsed.has_text() else ()
-    if len(windows) > 1:
+    windows = parse_windows(parsed) if parsed is not None and parsed.pages else ()
+    scanned = parsed is not None and parsed.pages and not parsed.has_text()
+    if len(windows) > 1 or scanned:
         payloads, usage = _extract_parse_windows(
-            windows,
+            windows or (parsed,),
             model,
             schema,
             run_instructions,
@@ -329,6 +330,31 @@ def extract_document_with_citations(
     return data, usage, citations
 
 
+def window_pool_timeout(n_windows: int, concurrency: int, timeout: float | None) -> float | None:
+    """Wall budget for a windowed extract: per-call timeout times batches.
+
+    ``--timeout`` is per window. Collecting every future with that same value
+    kills a 10-page doc at 240s even when each page would finish. Scale by
+    ``ceil(windows / concurrency)`` so Goshen / pueblo / Veralto can complete.
+    """
+    if timeout is None:
+        return None
+    if n_windows <= 0:
+        return timeout
+    workers = max(1, min(int(concurrency), n_windows))
+    return timeout * math.ceil(n_windows / workers)
+
+
+def _window_source(window: object) -> tuple[bytes, str]:
+    """Encode one parse window as model input. Never send a raw PDF."""
+    if getattr(window, "has_text", lambda: False)():
+        return window.as_prompt_text().encode("utf-8"), "text/plain"
+    image = next((page.image for page in getattr(window, "pages", ()) if page.image), None)
+    if image is not None:
+        return image, "image/png"
+    return window.as_prompt_text().encode("utf-8"), "text/plain"
+
+
 def _extract_parse_windows(
     windows: tuple,
     model: str | object,
@@ -343,13 +369,15 @@ def _extract_parse_windows(
 
     Each window is a single attempt. File-level ExtractBench retries still apply
     to transient errors; a hung window must not burn the 1800s per-file budget
-    three times (pueblo / long on the 6-doc smoke).
+    three times (pueblo / long on the 6-doc smoke). The pool wait is the
+    per-window timeout times the number of concurrent batches, not one 240s
+    wrap around the whole document.
     """
-    sources = [window.as_prompt_text().encode("utf-8") for window in windows]
+    sources = [_window_source(window) for window in windows]
     workers = max(1, min(window_concurrency, len(sources)))
     once = RetryPolicy(max_retries=0)
 
-    def _run(source: bytes) -> tuple[ExtractedDocument, Usage]:
+    def _run(source: bytes, media_type: str) -> tuple[ExtractedDocument, Usage]:
         agent = _build_schema_agent(model, schema, instructions, timeout=timeout)
         with Extractor(
             ExtractedDocument,
@@ -357,25 +385,23 @@ def _extract_parse_windows(
             retry_policy=once,
             max_input_bytes=max_input_bytes,
         ) as extractor:
-            return extractor.extract_with_usage(source, media_type="text/plain")
+            return extractor.extract_with_usage(source, media_type=media_type)
 
     if workers == 1:
-        pairs = [_run(source) for source in sources]
+        pairs = [_run(source, media_type) for source, media_type in sources]
     else:
+        budget = window_pool_timeout(len(sources), workers, timeout)
         with ThreadPoolExecutor(max_workers=workers) as pool:
-            futures = [pool.submit(_run, source) for source in sources]
-            try:
-                pairs = [
-                    future.result() if timeout is None else future.result(timeout=timeout)
-                    for future in futures
-                ]
-            except FuturesTimeoutError as exc:
+            futures = [pool.submit(_run, source, media_type) for source, media_type in sources]
+            _done, pending = wait(futures, timeout=budget)
+            if pending:
                 for future in futures:
                     future.cancel()
                 raise ModelError(
-                    f"Parse window timed out after {timeout}s",
+                    f"Parse window timed out after {budget}s",
                     retryable=False,
-                ) from exc
+                )
+            pairs = [future.result() for future in futures]
     return [as_extracted_dict(part) for part, _usage in pairs], _sum_usage(
         usage for _part, usage in pairs
     )
@@ -407,12 +433,19 @@ def _merge_window_payloads(
 def _parse_then_extract_source(
     source: Path | str | bytes, media_type: str | None
 ) -> tuple[Path | str | bytes, str | None, object]:
-    """Load bytes, parse locally, and feed page-indexed text when it exists."""
+    """Load bytes, parse locally, and feed text or page images — never a PDF upload."""
     data, resolved_type = _source_bytes(source, media_type)
     parsed_inputs, parsed = maybe_parsed_inputs(data, resolved_type or "", parse=True)
-    if parsed_inputs is None:
-        return source, media_type or resolved_type, parsed
-    return parsed_inputs[1].encode("utf-8"), "text/plain", parsed
+    if parsed is not None and parsed.has_text() and parsed_inputs is not None:
+        text = parsed_inputs[1]
+        if isinstance(text, str):
+            return text.encode("utf-8"), "text/plain", parsed
+    if parsed is not None and parsed.has_images():
+        image = next(page.image for page in parsed.pages if page.image)
+        return image, "image/png", parsed
+    if parsed is not None and parsed.pages and not parsed.has_text():
+        return parsed.as_prompt_text().encode("utf-8"), "text/plain", parsed
+    return source, media_type or resolved_type, parsed
 
 
 def _source_bytes(source: Path | str | bytes, media_type: str | None) -> tuple[bytes, str | None]:
@@ -703,7 +736,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--timeout",
         type=float,
         default=DEFAULT_CALL_TIMEOUT,
-        help=f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)})",
+        help=(
+            f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)}); "
+            "document wall budget is timeout × ceil(windows / concurrency)"
+        ),
     )
     parser.add_argument(
         "--window-concurrency",

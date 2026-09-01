@@ -88,11 +88,13 @@ The runner **parses PDFs locally** (pypdfium2, `openextract[pdf]` / `openextract
 and feeds page-indexed text (`--- Page N ---`) to the model before extraction.
 Long documents (and oversized pages) are split into windows under a 12k-character
 / 1-page budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
-and merged — the whole PDF is not dumped as one prompt. Each model call uses
-`--timeout` (default 240s) so a doomed window fails fast instead of burning
-ExtractBench's 1800s per-file limit three times. Window calls are a single
+and merged — the whole PDF is not dumped as one prompt. `--timeout` (default 240s)
+is per window; the document wall budget is `timeout × ceil(windows / concurrency)`
+so a 10-page file is not killed at a single 240s wrap. Window calls are a single
 attempt; request timeouts and token-limit errors are not retried at file
-level. Citations are collected from every window before reduce. When a window
+level. Scanned / empty-text PDFs are rendered to page images locally and are
+never uploaded for provider document-parse. Citations are collected from
+every window before reduce. When a window
 returns values but no cites, pages are backfilled from the local parse
 (including numeric display variants). Boxes are never invented and are never
 taken from the model: if a parser span matches the quote (exact, then simple

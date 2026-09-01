@@ -113,6 +113,7 @@ def _build_agent(
             output_type = NativeOutput(schema)
         capabilities, compatibility_kwargs = _instrumentation_capabilities(instrument)
         capabilities = [*capabilities, *extra_capabilities]
+        _ensure_openai_usage_fallback()
         routed_model = _route_model(model) if isinstance(model, str) else model
         agent_kwargs: dict[str, object] = {
             "instructions": instructions,
@@ -167,6 +168,7 @@ _INPUT_TOKEN_KEYS = (
     "promptTokens",
     "native_tokens_prompt",
     "native_tokens_input",
+    "tokens_prompt",
 )
 _OUTPUT_TOKEN_KEYS = (
     "output_tokens",
@@ -176,9 +178,51 @@ _OUTPUT_TOKEN_KEYS = (
     "completionTokens",
     "native_tokens_completion",
     "native_tokens_output",
+    "tokens_completion",
 )
-_TOTAL_TOKEN_KEYS = ("total_tokens", "totalTokens", "native_tokens_total")
-_USAGE_NEST_KEYS = ("details", "usage", "provider_details", "extra", "raw", "body")
+_TOTAL_TOKEN_KEYS = ("total_tokens", "totalTokens", "native_tokens_total", "tokens_total")
+_USAGE_NEST_KEYS = (
+    "details",
+    "usage",
+    "provider_details",
+    "provider_response",
+    "request_usage",
+    "extra",
+    "raw",
+    "body",
+)
+_OPENAI_USAGE_PATCHED = False
+
+
+def _ensure_openai_usage_fallback() -> None:
+    """Copy provider ``prompt_tokens`` when genai-prices extract leaves zeros.
+
+    pydantic-ai ``RequestUsage.extract`` drops OpenRouter ``prompt_tokens`` /
+    ``completion_tokens`` unless genai-prices recognizes the model. Live
+    GLM-5.3-flash then records 0/0/0 even though the provider sent counts.
+    """
+    global _OPENAI_USAGE_PATCHED
+    if _OPENAI_USAGE_PATCHED:
+        return
+    try:
+        from pydantic_ai.models import openai as openai_mod
+    except ImportError:
+        return
+    original = openai_mod._map_usage
+
+    def _map_usage_with_fallback(response, provider, provider_url, model):  # noqa: ANN001
+        mapped = original(response, provider, provider_url, model)
+        if mapped.input_tokens or mapped.output_tokens:
+            return mapped
+        found = _usage_from_raw(getattr(response, "usage", None))
+        if not (found.input_tokens or found.output_tokens):
+            return mapped
+        mapped.input_tokens = found.input_tokens
+        mapped.output_tokens = found.output_tokens
+        return mapped
+
+    openai_mod._map_usage = _map_usage_with_fallback  # ty: ignore[invalid-assignment]
+    _OPENAI_USAGE_PATCHED = True
 
 
 def _usage_model_settings(
@@ -192,6 +236,7 @@ def _usage_model_settings(
     """
     if not (isinstance(model, str) and model.startswith("openrouter")):
         return model_settings
+    _ensure_openai_usage_fallback()
     merged = dict(model_settings) if model_settings is not None else {}
     merged.setdefault("openrouter_usage", {"include": True})
     extra = dict(merged["extra_body"]) if isinstance(merged.get("extra_body"), dict) else {}
@@ -250,9 +295,14 @@ def _usage_from_raw_depth(raw: object, depth: int) -> Usage:
         return Usage(0, 0, 0)
     if isinstance(raw, Usage):
         return raw
+    dumped = _maybe_model_dump(raw)
     input_tokens = _token_count(raw, _INPUT_TOKEN_KEYS)
     output_tokens = _token_count(raw, _OUTPUT_TOKEN_KEYS)
     total_tokens = _token_count(raw, _TOTAL_TOKEN_KEYS)
+    if input_tokens == 0 and output_tokens == 0 and dumped is not None:
+        input_tokens = _token_count(dumped, _INPUT_TOKEN_KEYS)
+        output_tokens = _token_count(dumped, _OUTPUT_TOKEN_KEYS)
+        total_tokens = _token_count(dumped, _TOTAL_TOKEN_KEYS)
     if input_tokens == 0 and output_tokens == 0:
         for key in _USAGE_NEST_KEYS:
             nested = _nested_usage_container(raw, key)
@@ -261,9 +311,27 @@ def _usage_from_raw_depth(raw: object, depth: int) -> Usage:
             found = _usage_from_raw_depth(nested, depth + 1)
             if found.input_tokens or found.output_tokens or found.total_tokens:
                 return found
+        if dumped is not None:
+            found = _usage_from_raw_depth(dumped, depth + 1)
+            if found.input_tokens or found.output_tokens or found.total_tokens:
+                return found
     if total_tokens == 0:
         total_tokens = input_tokens + output_tokens
     return Usage(input_tokens, output_tokens, total_tokens)
+
+
+def _maybe_model_dump(raw: object) -> dict[str, object] | None:
+    dumper = getattr(raw, "model_dump", None)
+    if not callable(dumper):
+        return None
+    try:
+        dumped = dumper(exclude_none=True)
+    except TypeError:
+        try:
+            dumped = dumper()
+        except TypeError:
+            return None
+    return dumped if isinstance(dumped, dict) else None
 
 
 def _maybe_call(value: object) -> object:
@@ -291,19 +359,31 @@ def _extract_usage_object(result: object) -> object:
     return result
 
 
+def _message_usage_parts(message: object) -> list[object]:
+    return [
+        getattr(message, "usage", None),
+        getattr(message, "provider_details", None),
+        getattr(message, "provider_response", None),
+    ]
+
+
 def _usage_candidates(result: object) -> list[object]:
     """Collect usage-bearing objects from a pydantic-ai run result."""
     found: list[object] = [_extract_usage_object(result)]
-    response = getattr(result, "response", None)
-    descriptor = getattr(type(result), "response", None)
-    if response is not None and descriptor is not None and not callable(descriptor):
+    found.append(getattr(result, "provider_response", None))
+    try:
+        response = _maybe_call(getattr(result, "response", None))
+    except (ValueError, AttributeError):
+        response = None
+    if response is not None and response is not result:
         found.append(getattr(response, "usage", None))
         found.append(getattr(response, "provider_details", None))
-    messages = _maybe_call(getattr(result, "all_messages", None))
-    if isinstance(messages, list):
-        for message in messages:
-            found.append(getattr(message, "usage", None))
-            found.append(getattr(message, "provider_details", None))
+        found.append(getattr(response, "provider_response", None))
+    for getter in ("all_messages", "new_messages"):
+        messages = _maybe_call(getattr(result, getter, None))
+        if isinstance(messages, list):
+            for message in messages:
+                found.extend(_message_usage_parts(message))
     return found
 
 

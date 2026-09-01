@@ -328,6 +328,131 @@ def test_extractbench_does_not_retry_timeouts():
     assert not extractbench._extractbench_retryable(ModelError("token limit", retryable=False))
 
 
+def test_window_pool_timeout_scales_with_batches():
+    assert extractbench.window_pool_timeout(10, 4, 240.0) == 720.0
+    assert extractbench.window_pool_timeout(11, 4, 240.0) == 720.0
+    assert extractbench.window_pool_timeout(41, 4, 240.0) == 2640.0
+    assert extractbench.window_pool_timeout(1, 4, 240.0) == 240.0
+    assert extractbench.window_pool_timeout(0, 4, 240.0) == 240.0
+    assert extractbench.window_pool_timeout(8, 4, None) is None
+
+
+def test_windowed_extract_uses_batch_budget_not_one_timeout(monkeypatch, tmp_path):
+    import time
+
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["page one", "page two", "page three"])
+    path = tmp_path / "goshen.pdf"
+    path.write_bytes(pdf)
+    original = extractbench.Extractor.extract_with_usage
+
+    def _slow(self, source, *, media_type=None):
+        time.sleep(0.12)
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _slow)
+    data, usage, _citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+        timeout=0.2,
+        window_concurrency=2,
+    )
+    assert data["vendor"] == "Acme"
+    assert usage.input_tokens >= 0
+
+
+def test_scanned_pdf_does_not_upload_original(monkeypatch, tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["", ""])
+    path = tmp_path / "bianco.pdf"
+    path.write_bytes(pdf)
+    media_types: list[str | None] = []
+    original = extractbench.Extractor.extract_with_usage
+
+    def _spy(self, source, *, media_type=None):
+        media_types.append(media_type)
+        payload = source if isinstance(source, bytes) else Path(source).read_bytes()
+        assert not payload.startswith(b"%PDF")
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _spy)
+    data, usage, citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+    )
+    assert data["vendor"] == "Acme"
+    assert usage.input_tokens >= 0
+    assert media_types
+    assert all(kind == "image/png" for kind in media_types)
+    assert all(citation.bbox is None for citation in citations)
+    source, media_type, parsed = extractbench._parse_then_extract_source(pdf, "application/pdf")
+    assert media_type == "image/png"
+    assert isinstance(source, bytes) and source.startswith(b"\x89PNG")
+    assert parsed is not None and not parsed.has_text()
+
+
+def test_extractbench_records_provider_usage(monkeypatch, tmp_path):
+    from openextract import Usage
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    path = tmp_path / "w14.pdf"
+    path.write_bytes(synthetic_pdf("W14"))
+
+    def _usage(self, source, *, media_type=None):
+        return extractbench.ExtractedDocument.model_validate(
+            {"output": {"vendor": "Acme"}, "citations": []}
+        ), Usage(1280, 64, 1344)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _usage)
+    data, usage, _citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+    )
+    assert data["vendor"] == "Acme"
+    assert usage == Usage(1280, 64, 1344)
+
+
+def test_window_source_prefers_image_then_headers():
+    from openextract._parse import ParsedDocument, ParsedPage
+
+    text = ParsedDocument(pages=(ParsedPage(1, "Hello", 1, 1, ()),))
+    assert extractbench._window_source(text)[1] == "text/plain"
+    image = ParsedDocument(pages=(ParsedPage(1, "", 1, 1, (), image=b"\x89PNG-img"),))
+    payload, media_type = extractbench._window_source(image)
+    assert media_type == "image/png"
+    assert payload == b"\x89PNG-img"
+    headers = ParsedDocument(pages=(ParsedPage(1, "", 1, 1, ()),))
+    payload, media_type = extractbench._window_source(headers)
+    assert media_type == "text/plain"
+    assert b"--- Page 1 ---" in payload
+
+
 def test_window_pool_timeout_is_permanent(monkeypatch, tmp_path):
     import time
 
