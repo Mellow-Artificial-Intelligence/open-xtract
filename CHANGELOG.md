@@ -8,6 +8,23 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Added
+- Parse-then-extract for PDFs: when `cite=True` (and in the ExtractBench runner)
+  the document is parsed locally with `pypdfium2` (`openextract[pdf]`, also in
+  `openextract[all]`) into page-indexed text before the model call. Citations
+  are stamped with the 1-indexed parse page. Bounding boxes are attached only
+  when a parser word/span matches the quote (exact, then simple fuzzy); they
+  are never invented and never taken from the model.
+- Provider token usage is read from pydantic-ai / OpenRouter usage objects
+  (`input_tokens` / `request_tokens` / nested `details`, plus OpenRouter
+  `usage.include`) so `extract_with_usage` and ExtractBench `cost_usd` are
+  populated.
+
+### Changed
+- Citation prompts no longer ask the model for `bbox`. A short quote with a
+  valid page is kept. ExtractBench `--cite` stays default on; `--no-cite` still
+  disables citations while keeping parse-then-extract.
+
 ## [0.12.0] - 2026-08-31
 
 ### Added

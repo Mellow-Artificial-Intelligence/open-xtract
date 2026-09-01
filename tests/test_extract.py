@@ -1669,6 +1669,54 @@ class TestExtractWithUsage:
 
         assert usage == Usage(input_tokens=0, output_tokens=0, total_tokens=0)
 
+    def test_provider_usage_aliases_and_nested_response(self):
+        from openextract._agent import (
+            _extract_usage_object,
+            _usage_from_raw,
+            _usage_from_result,
+            _usage_model_settings,
+        )
+
+        class _OpenRouterUsage:
+            request_tokens = 11
+            response_tokens = 7
+            total_tokens = 0
+
+        assert _usage_from_raw(_OpenRouterUsage()) == Usage(11, 7, 18)
+        assert _usage_from_raw(Usage(1, 2, 3)) == Usage(1, 2, 3)
+        assert _usage_from_raw(None) == Usage(0, 0, 0)
+        assert _usage_from_raw(
+            {"details": {"prompt_tokens": 4, "completion_tokens": 5, "totalTokens": 9}}
+        ) == Usage(4, 5, 9)
+
+        class _Result:
+            @property
+            def usage(self):
+                return SimpleNamespace(input_tokens=0, output_tokens=0, total_tokens=0)
+
+            @property
+            def response(self):
+                return SimpleNamespace(usage=SimpleNamespace(input_tokens=21, output_tokens=3))
+
+        assert _usage_from_result(_Result()) == Usage(21, 3, 24)
+        assert _usage_from_raw(
+            SimpleNamespace(details=SimpleNamespace(prompt_tokens=8, completion_tokens=1))
+        ) == Usage(8, 1, 9)
+
+        class _NeedsArg:
+            def usage(self, extra):
+                return extra
+
+        assert _usage_from_result(_NeedsArg()) == Usage(0, 0, 0)
+        held = SimpleNamespace(request_tokens=2, response_tokens=3, total_tokens=5)
+        assert _extract_usage_object(SimpleNamespace(usage=held)) == held
+        assert _extract_usage_object(None) is None
+        assert _usage_from_result(SimpleNamespace()) == Usage(0, 0, 0)
+        assert _usage_model_settings("openai:gpt-5", None) is None
+        settings = _usage_model_settings("openrouter:anthropic/claude-sonnet-4", {"temperature": 0})
+        assert settings["openrouter_usage"] == {"include": True}
+        assert settings["temperature"] == 0
+
     def test_propagates_runtime_error_as_extraction_error(self, tmp_path, mocker):
         local = tmp_path / "input.txt"
         local.write_bytes(b"hello")
@@ -1763,7 +1811,7 @@ class TestExtractRetry:
         expected = _Person(name="Grace", age=85)
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1788,7 +1836,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1806,7 +1854,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         expected = _Person(name="Grace", age=85)
         once = mocker.patch(
@@ -1831,7 +1879,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1857,7 +1905,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -1880,7 +1928,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         mocker.patch(
             "openextract._extract._extract_once",
@@ -1907,7 +1955,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         mocker.patch(
             "openextract._extract._extract_once",
@@ -1930,7 +1978,7 @@ class TestExtractRetry:
         expected = _Person(name="Grace", age=85)
         mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         mocker.patch(
             "openextract._extract._extract_once",
@@ -1954,7 +2002,7 @@ class TestExtractRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         once = mocker.patch(
             "openextract._extract._extract_once",
@@ -2014,7 +2062,7 @@ class TestExtractWithUsageRetry:
         sleep_mock = mocker.patch("openextract._retry.time.sleep")
         prepare = mocker.patch(
             "openextract._extract._prepare_extraction",
-            return_value=nullcontext((MagicMock(), ["prepared"])),
+            return_value=nullcontext((MagicMock(), ["prepared"], None)),
         )
         expected = _Person(name="Ada", age=36)
         usage = MagicMock(input_tokens=1, output_tokens=2, total_tokens=3)

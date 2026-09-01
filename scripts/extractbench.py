@@ -37,13 +37,15 @@ from openextract import (
     SchemaValidationError,
     Usage,
 )
-from openextract._agent import _install_hint, _route_model
+from openextract._agent import _install_hint, _route_model, _usage_model_settings
 from openextract._citations import (
     citations_from_payload,
     field_citations_for_extractbench,
     json_schema_with_citations,
     with_citation_instructions,
 )
+from openextract._media import _get_media_type
+from openextract._parse import ground_citations, maybe_parsed_inputs
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 CACHE_DIR = REPO_ROOT / ".extractbench"
@@ -203,8 +205,14 @@ def _build_schema_agent(model: str | object, schema: dict[str, Any], instruction
 
     output_type = _output_type_for_schema(schema, model)
     routed = _route_model(model) if isinstance(model, str) else model
+    settings = _usage_model_settings(model, None) if isinstance(model, str) else None
     try:
-        return Agent(routed, output_type=output_type, instructions=instructions)
+        return Agent(
+            routed,
+            output_type=output_type,
+            instructions=instructions,
+            model_settings=settings,
+        )
     except ImportError as exc:
         if isinstance(model, str):
             message = (
@@ -260,12 +268,14 @@ def extract_document_with_citations(
 
     ``cite=True`` (the ExtractBench runner default) wraps the JSON schema with
     an ``output`` / ``citations`` envelope so the model can return per-field
-    page, quote, and optional normalized bbox evidence.
+    page and quote evidence. PDFs are parsed locally first; boxes come from
+    parser spans, never from the model.
     """
     schema = prepare_schema(json_schema, additional_properties_false=additional_properties_false)
     run_instructions = with_citation_instructions(instructions) if cite else instructions
     if cite:
         schema = json_schema_with_citations(schema)
+    run_source, run_media_type, parsed = _parse_then_extract_source(source, media_type)
     agent = _build_schema_agent(model, schema, run_instructions)
     policy = RetryPolicy(max_retries=max_retries)
     with Extractor(
@@ -274,10 +284,30 @@ def extract_document_with_citations(
         retry_policy=policy,
         max_input_bytes=max_input_bytes,
     ) as extractor:
-        output, usage = extractor.extract_with_usage(source, media_type=media_type)
+        output, usage = extractor.extract_with_usage(run_source, media_type=run_media_type)
     dumped = as_extracted_dict(output)
     data, citations = _unwrap_cited_document(dumped, cite=cite)
+    if cite:
+        citations = ground_citations(citations, parsed, data)
     return data, usage, citations
+
+
+def _parse_then_extract_source(
+    source: Path | str | bytes, media_type: str | None
+) -> tuple[Path | str | bytes, str | None, object]:
+    """Load bytes, parse locally, and feed page-indexed text when it exists."""
+    data, resolved_type = _source_bytes(source, media_type)
+    parsed_inputs, parsed = maybe_parsed_inputs(data, resolved_type or "", parse=True)
+    if parsed_inputs is None:
+        return source, media_type or resolved_type, parsed
+    return parsed_inputs[1].encode("utf-8"), "text/plain", parsed
+
+
+def _source_bytes(source: Path | str | bytes, media_type: str | None) -> tuple[bytes, str | None]:
+    if isinstance(source, bytes):
+        return source, media_type
+    path = Path(source)
+    return path.read_bytes(), media_type or _get_media_type(str(path))
 
 
 def _unwrap_cited_document(

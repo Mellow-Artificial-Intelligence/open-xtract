@@ -66,16 +66,17 @@ class Citation:
     Produced when ``cite=True`` is passed to an extract API. Shaped to map
     onto ExtractBench ``FieldCitation`` (``field_path``, ``page``, ``bbox``,
     ``reference_text``). Never holds raw media, credentials, query strings,
-    fragments, or provider internals. Boxes are kept only when the model
-    supplied a normalized COCO span; they are never invented.
+    fragments, or provider internals. Boxes are attached only when a local
+    parser matched the quoted span; they are never invented or taken from
+    the model.
 
     Attributes:
         field: Dotted schema path (for example ``vendor`` or ``lines[0].qty``).
         quote: Verbatim text span from the source, when present.
         page: 1-indexed page number when the source is paginated.
         bbox: Normalized COCO ``(x, y, width, height)`` in ``[0, 1]`` when
-            the model located the span. ``None`` for page- or quote-only
-            citations (page-level grounding can still score).
+            the parser located the span. ``None`` when no span matches
+            (page-level grounding can still score).
     """
 
     field: str
@@ -88,7 +89,7 @@ class Citation:
 
         ExtractBench requires ``page >= 1``. A quote-only citation is kept on
         :class:`ExtractionResult` but cannot be scored there. ``bbox`` is
-        omitted unless the model supplied a normalized box.
+        omitted unless a local parser supplied a normalized box.
         """
         if self.page is None:
             return None

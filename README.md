@@ -44,7 +44,7 @@ Or with pip:
 pip install openextract
 ```
 
-Model calls require a provider SDK. Install the extra for the provider you use, for example `openextract[openai]`, `openextract[anthropic]`, or `openextract[all]` for every supported provider. Agentic `search` and `code` styles need [`pydantic-ai-harness`](https://pydantic.dev/docs/ai/harness/) (`pip install pydantic-ai-harness` / `pip install 'pydantic-ai-harness[codemode]'`). The base package ships `pydantic-ai-slim` without provider SDKs pre-installed. If the requested provider SDK is missing, `openextract` raises `ProviderNotInstalledError` with a provider-specific `pip install 'openextract[...]'` command when the model prefix is known.
+Model calls require a provider SDK. Install the extra for the provider you use, for example `openextract[openai]`, `openextract[anthropic]`, or `openextract[all]` for every supported provider. Local PDF parse-then-extract (page text and word boxes for citations) needs `openextract[pdf]` or `openextract[all]`. Agentic `search` and `code` styles need [`pydantic-ai-harness`](https://pydantic.dev/docs/ai/harness/) (`pip install pydantic-ai-harness` / `pip install 'pydantic-ai-harness[codemode]'`). The base package ships `pydantic-ai-slim` without provider SDKs pre-installed. If the requested provider SDK is missing, `openextract` raises `ProviderNotInstalledError` with a provider-specific `pip install 'openextract[...]'` command when the model prefix is known.
 
 Requires Python 3.12+.
 

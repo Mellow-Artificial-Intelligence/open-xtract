@@ -117,7 +117,7 @@ def _build_agent(
         agent_kwargs: dict[str, object] = {
             "instructions": instructions,
             "output_type": output_type,
-            "model_settings": model_settings,
+            "model_settings": _usage_model_settings(model, model_settings),
             **compatibility_kwargs,
         }
         if capabilities:
@@ -159,19 +159,99 @@ def _resolve_run_inputs(
     return style_inputs
 
 
+_INPUT_TOKEN_KEYS = (
+    "input_tokens",
+    "request_tokens",
+    "prompt_tokens",
+    "inputTokens",
+    "promptTokens",
+)
+_OUTPUT_TOKEN_KEYS = (
+    "output_tokens",
+    "response_tokens",
+    "completion_tokens",
+    "outputTokens",
+    "completionTokens",
+)
+_TOTAL_TOKEN_KEYS = ("total_tokens", "totalTokens")
+
+
+def _usage_model_settings(
+    model: str | Model, model_settings: ModelSettings | None
+) -> ModelSettings | None:
+    """Ask OpenRouter to include native usage so token counts are not zero."""
+    if not (isinstance(model, str) and model.startswith("openrouter")):
+        return model_settings
+    merged = dict(model_settings) if model_settings is not None else {}
+    merged.setdefault("openrouter_usage", {"include": True})
+    return cast("ModelSettings", merged)
+
+
+def _token_count(raw: object, names: tuple[str, ...]) -> int:
+    if isinstance(raw, dict):
+        mapping = cast(dict[str, object], raw)
+        values = (mapping.get(name) for name in names)
+    else:
+        values = (getattr(raw, name, None) for name in names)
+    for value in values:
+        if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
+            return value
+    return 0
+
+
+def _usage_from_raw(raw: object) -> Usage:
+    """Read token counts from a provider or pydantic-ai usage object."""
+    if raw is None:
+        return Usage(0, 0, 0)
+    if isinstance(raw, Usage):
+        return raw
+    input_tokens = _token_count(raw, _INPUT_TOKEN_KEYS)
+    output_tokens = _token_count(raw, _OUTPUT_TOKEN_KEYS)
+    total_tokens = _token_count(raw, _TOTAL_TOKEN_KEYS)
+    if input_tokens == 0 and output_tokens == 0:
+        details = (
+            cast(dict[str, object], raw).get("details")
+            if isinstance(raw, dict)
+            else getattr(raw, "details", None)
+        )
+        if details is not None:
+            input_tokens = _token_count(details, _INPUT_TOKEN_KEYS)
+            output_tokens = _token_count(details, _OUTPUT_TOKEN_KEYS)
+            total_tokens = total_tokens or _token_count(details, _TOTAL_TOKEN_KEYS)
+    if total_tokens == 0:
+        total_tokens = input_tokens + output_tokens
+    return Usage(input_tokens, output_tokens, total_tokens)
+
+
+def _extract_usage_object(result: object) -> object:
+    """Unwrap ``result.usage`` whether it is a property, method, or mapping."""
+    if result is None:
+        return None
+    usage = getattr(result, "usage", None)
+    descriptor = getattr(type(result), "usage", None)
+    if usage is not None and descriptor is not None and not callable(descriptor):
+        return usage
+    if callable(usage):
+        try:
+            return usage()
+        except TypeError:
+            return usage
+    if usage is not None:
+        return usage
+    return result
+
+
 def _usage_from_result(result) -> Usage:
-    """Build a ``Usage`` from a pydantic-ai run result."""
-    usage_descriptor = getattr(type(result), "usage", None)
-    raw = (
-        result.usage
-        if usage_descriptor is not None and not callable(usage_descriptor)
-        else result.usage()
-    )
-    return Usage(
-        input_tokens=getattr(raw, "input_tokens", 0) or 0,
-        output_tokens=getattr(raw, "output_tokens", 0) or 0,
-        total_tokens=getattr(raw, "total_tokens", 0) or 0,
-    )
+    """Build a ``Usage`` from a pydantic-ai run result or provider usage object."""
+    usage = _usage_from_raw(_extract_usage_object(result))
+    if usage.input_tokens or usage.output_tokens or usage.total_tokens:
+        return usage
+    response = getattr(result, "response", None)
+    descriptor = getattr(type(result), "response", None)
+    if response is None or descriptor is None or callable(descriptor):
+        return usage
+    nested = getattr(response, "usage", None)
+    return _usage_from_raw(nested) if nested is not None else usage
 
 
 def _model_identifier(model: str | Model, agent: object) -> str | None:

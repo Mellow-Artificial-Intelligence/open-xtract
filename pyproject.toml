@@ -37,8 +37,10 @@ mistral = ["pydantic-ai-slim[mistral]>=1.37.0"]
 openrouter = ["pydantic-ai-slim[openrouter]>=1.37.0"]
 xai = ["pydantic-ai-slim[xai]>=1.37.0"]
 logfire = ["pydantic-ai-slim[logfire]>=1.37.0"]
+pdf = ["pypdfium2>=4.30.0"]
 all = [
     "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,mistral,openai,openrouter,xai]>=1.37.0",
+    "pypdfium2>=4.30.0",
 ]
 
 [project.scripts]
@@ -68,6 +70,7 @@ dev = [
     "ruff>=0.14.10",
     "ty>=0.0.35",
     "pydantic-ai-slim[anthropic,bedrock,cohere,google,groq,huggingface,logfire,mistral,openai,openrouter,xai]>=1.37.0",
+    "pypdfium2>=4.30.0",
 ]
 
 [tool.ty]

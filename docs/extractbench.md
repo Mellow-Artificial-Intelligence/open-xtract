@@ -80,14 +80,22 @@ with `--no-cite`) and maps them onto ExtractBench `FieldCitation`:
 | ExtractBench field | openextract `Citation` | When it scores |
 | --- | --- | --- |
 | `field_path` | `field` | Always, when a citation is emitted |
-| `page` | `page` | **Page-level** grounding, when the model returns a 1-indexed page |
-| `reference_text` | `quote` | Evidence text; not required to score |
-| `bbox` | `bbox` | **Word-level** grounding (IoU 0.5), only when the model supplies a normalized COCO `[x, y, width, height]` in `[0, 1]` |
+| `page` | `page` | **Page-level** grounding, stamped from the local parse index when the quote is found |
+| `reference_text` | `quote` | Evidence text; not required to score. Short quotes are kept |
+| `bbox` | `bbox` | **Word-level** grounding (IoU 0.5), only when the local parser has a matching word/span box |
 
-Boxes are never invented. A page- or quote-only citation is still emitted so
-page-level grounding can score; word-level F1 stays 0 unless the model actually
-located the span. Citations without a page cannot become `FieldCitation`
-(ExtractBench requires `page >= 1`) and are dropped at the mapping step.
+The runner **parses PDFs locally** (pypdfium2, `openextract[pdf]` / `openextract[all]`)
+and feeds page-indexed text (`--- Page N ---`) to the model before extraction.
+That is the default path so page and word F1 can move on a 6-document `--test`
+smoke. Boxes are never invented and are never taken from the model: if a parser
+span matches the quote (exact, then simple fuzzy), a normalized COCO
+`[x, y, width, height]` in `[0, 1]` is attached; if nothing matches, `bbox` is
+omitted. Citations without a page cannot become `FieldCitation` (ExtractBench
+requires `page >= 1`) and are dropped at the mapping step.
+
+`--no-cite` still runs parse-then-extract but does not ask for or emit
+`field_citations`. Token `usage` and `cost_usd` come from the provider usage
+object captured by `extract_with_usage`.
 
 `--test` is 6 documents and is the right first run (cents on a hosted API). A
 full run is 370 documents / 4,869 pages and is metered API usage.

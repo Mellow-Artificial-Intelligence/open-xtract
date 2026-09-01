@@ -316,7 +316,7 @@ title: openextract
               </div>
               <h3 class="font-mono text-base font-medium text-black/90 mb-2">Grounding that can score</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                The ExtractBench runner now emits real <code class="font-mono text-black/90 text-xs">field_citations</code> (on by default; <code class="font-mono text-black/90 text-xs">--no-cite</code> to disable) so page- and word-level grounding can score.
+                The ExtractBench runner parses PDFs locally, emits real <code class="font-mono text-black/90 text-xs">field_citations</code> (on by default; <code class="font-mono text-black/90 text-xs">--no-cite</code> to disable), and attaches parser-backed boxes so page- and word-level grounding can score.
               </p>
               <div class="flex flex-wrap gap-1.5">
                 <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">field_citations</span>

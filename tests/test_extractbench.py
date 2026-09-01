@@ -117,7 +117,7 @@ def test_extract_document_with_citations_maps_extractbench_fields():
     )
     assert data == {"vendor": "Acme", "total": 12.5}
     assert usage.input_tokens >= 0
-    assert citations[0] == Citation("vendor", "Acme Co", 1, (0.1, 0.2, 0.3, 0.04))
+    assert citations[0] == Citation("vendor", "Acme Co", 1, None)
     mapped = extractbench.field_citations_for_extractbench(citations)
     data_only, _usage = extractbench.extract_document(
         b"%PDF-fixture",
@@ -132,10 +132,66 @@ def test_extract_document_with_citations_maps_extractbench_fields():
         {
             "field_path": "vendor",
             "page": 1,
-            "bbox": [0.1, 0.2, 0.3, 0.04],
+            "bbox": None,
             "reference_text": "Acme Co",
         }
     ]
+
+
+def test_extract_document_parser_boxes_and_no_cite(tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf("Acme Corp")
+    path = tmp_path / "acme.pdf"
+    path.write_bytes(pdf)
+    cited_model = TestModel(
+        custom_output_args={
+            "output": {"vendor": "Acme"},
+            "citations": [
+                {"field": "vendor", "quote": "Acme Corp", "page": 3},
+                {"field": "other", "quote": "not-in-document", "page": 1},
+            ],
+        }
+    )
+    data, usage, citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        cited_model,
+        max_retries=0,
+        cite=True,
+    )
+    assert data["vendor"] == "Acme"
+    assert usage.input_tokens >= 0
+    assert citations[0].page == 1
+    assert citations[0].bbox is not None
+    assert citations[1].bbox is None
+    mapped = extractbench.field_citations_for_extractbench(citations)
+    assert mapped[0]["page"] == 1
+    assert mapped[0]["bbox"] == list(citations[0].bbox)
+
+    plain, _usage = extractbench.extract_document(
+        pdf,
+        schema,
+        TestModel(custom_output_args={"vendor": "Acme"}),
+        media_type="application/pdf",
+        max_retries=0,
+        cite=False,
+    )
+    assert plain["vendor"] == "Acme"
+    source, media_type, parsed = extractbench._parse_then_extract_source(pdf, "application/pdf")
+    assert media_type == "text/plain"
+    assert b"--- Page 1 ---" in source
+    assert parsed is not None
+    kept, kept_type, _parsed = extractbench._parse_then_extract_source(
+        b"%PDF-not-a-pdf", "application/pdf"
+    )
+    assert kept == b"%PDF-not-a-pdf"
+    assert kept_type == "application/pdf"
 
 
 def test_unwrap_cited_document_flat_fallback():
