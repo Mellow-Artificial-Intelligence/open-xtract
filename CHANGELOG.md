@@ -8,6 +8,8 @@ timing when that is known.
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-31
+
 ### Added
 - Opt-in per-field provenance: `cite=True` on extract APIs, sessions, batch, and
   swarms asks the model for source spans without changing `extract()`'s return
@@ -283,7 +285,8 @@ timing when that is known.
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.8.0...v0.9.0
