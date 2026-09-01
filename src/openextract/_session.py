@@ -21,6 +21,7 @@ from ._agent import (
     _session_model_settings,
     _usage_from_result,
 )
+from ._citations import prepare_cited_run, split_cited_output
 from ._config import _resolve_max_input_bytes, _url_fetch_timeout, _validate_timeout
 from ._errors import _extraction_errors
 from ._media import _get_media, _get_media_async
@@ -64,6 +65,7 @@ class _ExtractorSession[T: BaseModel]:
         retry_policy: RetryPolicy | None = None,
         max_input_bytes: int | None = None,
         url_timeout: float | None = None,
+        cite: bool = False,
     ) -> None:
         resolved_style = normalize_style(style)
         if agent is not None:
@@ -78,17 +80,21 @@ class _ExtractorSession[T: BaseModel]:
                 raise ValueError("instrument must be configured on an injected agent.")
             if resolved_style is not ExtractionStyle.DIRECT:
                 raise ValueError("style other than 'direct' cannot be used with an injected agent.")
+            if cite:
+                raise ValueError("cite cannot be used with an injected agent.")
             configured_agent = agent
             session_settings = None
+            run_schema, run_instructions = schema, instructions
         else:
             if model is None:
                 raise TypeError("model is required unless agent is provided.")
             session_settings = _session_model_settings(model_settings, timeout)
+            run_schema, run_instructions = prepare_cited_run(schema, instructions, cite)
             if resolved_style is ExtractionStyle.DIRECT:
                 configured_agent = _build_agent(
-                    schema,
+                    run_schema,
                     model,
-                    instructions,
+                    run_instructions,
                     model_settings=session_settings,
                     instrument=instrument,
                 )
@@ -101,6 +107,9 @@ class _ExtractorSession[T: BaseModel]:
             raise TypeError("retry_policy must be a RetryPolicy instance.")
 
         self._schema = schema
+        self._cite = cite
+        self._run_schema = run_schema
+        self._run_instructions = run_instructions
         self._model = model
         self._instructions = instructions
         self._style = resolved_style
@@ -124,7 +133,8 @@ class _ExtractorSession[T: BaseModel]:
             return self._schema.model_validate(output)
 
     def _output_from_run(self, result: Any) -> T:
-        return self._validate_output(result.output)
+        output, _citations = split_cited_output(result.output, self._schema, cite=self._cite)
+        return self._validate_output(result.output if not self._cite else output)
 
     def _output_and_usage(self, result: Any) -> tuple[T, Usage]:
         return self._output_from_run(result), _usage_from_result(result)
@@ -169,9 +179,9 @@ class _ExtractorSession[T: BaseModel]:
         self._style_workspace = tempfile.TemporaryDirectory(prefix="openextract-")
         with _extraction_errors():
             self._agent = _build_agent(
-                self._schema,
+                self._run_schema,
                 self._model,
-                self._instructions,
+                self._run_instructions,
                 model_settings=self._model_settings,
                 instrument=self._instrument,
                 extra_capabilities=style_capabilities(

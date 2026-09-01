@@ -296,6 +296,8 @@ def test_session_constructor_rejects_ambiguous_configuration():
         Extractor(Person, agent=agent, instrument=True)
     with pytest.raises(TypeError, match="RetryPolicy"):
         Extractor(Person, "test", retry_policy=object())  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="cite cannot be used"):
+        Extractor(Person, agent=agent, cite=True)
 
 
 @pytest.mark.parametrize(

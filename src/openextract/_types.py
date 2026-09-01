@@ -60,6 +60,47 @@ class Usage:
 
 
 @dataclass(frozen=True)
+class Citation:
+    """A sanitized source span supporting one extracted field.
+
+    Produced when ``cite=True`` is passed to an extract API. Shaped to map
+    onto ExtractBench ``FieldCitation`` (``field_path``, ``page``, ``bbox``,
+    ``reference_text``). Never holds raw media, credentials, query strings,
+    fragments, or provider internals. Boxes are kept only when the model
+    supplied a normalized COCO span; they are never invented.
+
+    Attributes:
+        field: Dotted schema path (for example ``vendor`` or ``lines[0].qty``).
+        quote: Verbatim text span from the source, when present.
+        page: 1-indexed page number when the source is paginated.
+        bbox: Normalized COCO ``(x, y, width, height)`` in ``[0, 1]`` when
+            the model located the span. ``None`` for page- or quote-only
+            citations (page-level grounding can still score).
+    """
+
+    field: str
+    quote: str | None = None
+    page: int | None = None
+    bbox: tuple[float, float, float, float] | None = None
+
+    def as_field_citation(self) -> dict[str, object] | None:
+        """ExtractBench ``FieldCitation`` payload, or ``None`` without a page.
+
+        ExtractBench requires ``page >= 1``. A quote-only citation is kept on
+        :class:`ExtractionResult` but cannot be scored there. ``bbox`` is
+        omitted unless the model supplied a normalized box.
+        """
+        if self.page is None:
+            return None
+        return {
+            "field_path": self.field,
+            "page": self.page,
+            "bbox": list(self.bbox) if self.bbox is not None else None,
+            "reference_text": self.quote,
+        }
+
+
+@dataclass(frozen=True)
 class ExtractionResult[T]:
     """Diagnostics-rich result of one extraction.
 
@@ -79,6 +120,7 @@ class ExtractionResult[T]:
             credential/query-stripped path/URL context); ``None`` for unnamed
             bytes/file-like inputs.
         warnings: Extensible, currently empty diagnostics channel.
+        citations: Per-field source spans when ``cite=True``; empty otherwise.
     """
 
     output: T
@@ -89,6 +131,7 @@ class ExtractionResult[T]:
     media_type: str | None
     source: str | None
     warnings: tuple[str, ...] = ()
+    citations: tuple[Citation, ...] = ()
 
 
 @dataclass(frozen=True)

@@ -17,6 +17,7 @@ from ._agent import (
     _run_extraction_async,
     _usage_from_result,
 )
+from ._citations import prepare_cited_run, split_cited_output
 from ._config import (
     _DEFAULT_RETRY_MAX_BACKOFF,
     _resolve_max_input_bytes,
@@ -54,6 +55,7 @@ class _BatchOptions:
     retry_backoff: float
     retry_max_backoff: float
     rich: bool
+    cite: bool
 
     @classmethod
     def resolve(
@@ -69,6 +71,7 @@ class _BatchOptions:
         retry_backoff: float,
         retry_max_backoff: float,
         rich: bool,
+        cite: bool = False,
     ) -> _BatchOptions:
         """Validate and normalize the public batch arguments."""
         _validate_retry_options(max_retries, retry_backoff, retry_max_backoff)
@@ -84,6 +87,7 @@ class _BatchOptions:
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
             rich=rich,
+            cite=cite,
         )
 
 
@@ -154,8 +158,9 @@ async def _iter_extractions(
     # between runs and stays inside this event loop, so this is safe. Search and
     # code styles bind capabilities to a per-item workspace, so those items
     # each get their own agent.
+    run_schema, run_instructions = prepare_cited_run(schema, options.instructions, options.cite)
     shared_agent = (
-        _build_agent(schema, model, options.instructions)
+        _build_agent(run_schema, model, run_instructions)
         if options.style is ExtractionStyle.DIRECT
         else None
     )
@@ -189,9 +194,9 @@ async def _iter_extractions(
                     if shared_agent is None:
                         with _extraction_errors():
                             run_agent = _build_agent(
-                                schema,
+                                run_schema,
                                 model,
-                                options.instructions,
+                                run_instructions,
                                 extra_capabilities=capabilities,
                             )
                     else:
@@ -216,8 +221,11 @@ async def _iter_extractions(
                     )
                 if options.rich:
                     raw_result = cast(Any, value)
+                    output, citations = split_cited_output(
+                        raw_result.output, schema, cite=options.cite
+                    )
                     return ExtractionResult(
-                        output=cast(T, raw_result.output),
+                        output=output,
                         usage=_usage_from_result(raw_result),
                         attempts=attempts,
                         duration=time.perf_counter() - started,
@@ -225,8 +233,10 @@ async def _iter_extractions(
                         media_type=item_media_type,
                         source=_item_source_label(source, name),
                         warnings=(),
+                        citations=citations,
                     )
-                return value
+                output, _citations = split_cited_output(value, schema, cite=options.cite)
+                return output
             except Exception:
                 if not options.return_exceptions:
                     stop.set()
@@ -334,6 +344,7 @@ def extract_many(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[T]: ...
 
 
@@ -352,6 +363,7 @@ def extract_many(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[T | Exception]: ...
 
 
@@ -370,6 +382,7 @@ def extract_many(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[T | Exception]: ...
 
 
@@ -387,6 +400,7 @@ def extract_many(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list:
     """Run :func:`extract` over many inputs concurrently from sync code.
 
@@ -413,6 +427,9 @@ def extract_many(
             :func:`extract`).
         retry_backoff: Base backoff seconds between per-item retries.
         retry_max_backoff: Maximum per-item retry delay in seconds.
+        cite: When ``True``, request per-field citations. Bare batch APIs still
+            return schema instances; ``extract_many_with_results*`` attach them
+            to :class:`ExtractionResult.citations`.
 
     Returns:
         A list of results (or exceptions, when ``return_exceptions=True``) in
@@ -439,6 +456,7 @@ def extract_many(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
             rich=False,
+            cite=cite,
         ),
         name="extract_many",
     )
@@ -459,6 +477,7 @@ async def extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[T]: ...
 
 
@@ -477,6 +496,7 @@ async def extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[T | Exception]: ...
 
 
@@ -495,6 +515,7 @@ async def extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[T | Exception]: ...
 
 
@@ -512,6 +533,7 @@ async def extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list:
     """Async sibling of :func:`extract_many`."""
     return await _gather_extractions(
@@ -529,6 +551,7 @@ async def extract_many_async(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
             rich=False,
+            cite=cite,
         ),
     )
 
@@ -548,6 +571,7 @@ def iter_extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> AsyncIterator[tuple[int, T]]: ...
 
 
@@ -566,6 +590,7 @@ def iter_extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> AsyncIterator[tuple[int, T | Exception]]: ...
 
 
@@ -584,6 +609,7 @@ def iter_extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> AsyncIterator[tuple[int, T | Exception]]: ...
 
 
@@ -601,6 +627,7 @@ def iter_extract_many_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> AsyncIterator[tuple[int, T | Exception]]:
     """Stream ``(input_index, result)`` pairs in completion order.
 
@@ -635,6 +662,7 @@ def iter_extract_many_async(
                 retry_backoff=retry_backoff,
                 retry_max_backoff=retry_max_backoff,
                 rich=False,
+                cite=cite,
             ),
         ),
     )
@@ -655,6 +683,7 @@ def extract_many_with_results(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[ExtractionResult[T]]: ...
 
 
@@ -673,6 +702,7 @@ def extract_many_with_results(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[ExtractionResult[T] | Exception]: ...
 
 
@@ -691,6 +721,7 @@ def extract_many_with_results(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[ExtractionResult[T] | Exception]: ...
 
 
@@ -708,6 +739,7 @@ def extract_many_with_results(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list:
     """Run a batch and return per-item :class:`ExtractionResult` diagnostics.
 
@@ -737,6 +769,7 @@ def extract_many_with_results(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
             rich=True,
+            cite=cite,
         ),
         name="extract_many_with_results",
     )
@@ -757,6 +790,7 @@ async def extract_many_with_results_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[ExtractionResult[T]]: ...
 
 
@@ -775,6 +809,7 @@ async def extract_many_with_results_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[ExtractionResult[T] | Exception]: ...
 
 
@@ -793,6 +828,7 @@ async def extract_many_with_results_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list[ExtractionResult[T] | Exception]: ...
 
 
@@ -810,6 +846,7 @@ async def extract_many_with_results_async(
     max_retries: int = 0,
     retry_backoff: float = 1.0,
     retry_max_backoff: float = _DEFAULT_RETRY_MAX_BACKOFF,
+    cite: bool = False,
 ) -> list:
     """Async sibling of :func:`extract_many_with_results`."""
     return await _gather_extractions(
@@ -827,5 +864,6 @@ async def extract_many_with_results_async(
             retry_backoff=retry_backoff,
             retry_max_backoff=retry_max_backoff,
             rich=True,
+            cite=cite,
         ),
     )

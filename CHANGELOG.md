@@ -8,6 +8,19 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Added
+- Opt-in per-field provenance: `cite=True` on extract APIs, sessions, batch, and
+  swarms asks the model for source spans without changing `extract()`'s return
+  type. New public `Citation` (`field`, `quote`, `page`, optional normalized
+  `bbox`) attaches to `ExtractionResult.citations`. `Citation.as_field_citation()`
+  maps onto ExtractBench `FieldCitation`. Boxes are kept only when the model
+  supplies a page-normalized COCO span; they are never invented. Default
+  `cite=False` leaves prompts and return types unchanged.
+- `scripts/extractbench.py` now emits real `field_citations` (citations on by
+  default; `--no-cite` to disable) so page-level grounding can score when the
+  model returns a page, and word-level grounding can score when it also returns
+  a normalized box.
+
 ### Changed
 - CI wall-clock time roughly halved. Change detection moved out of a gating job
   into the `.github/actions/detect-jobs` composite action that each job runs for
@@ -270,7 +283,8 @@ timing when that is known.
 ## [0.1.1] - 2025-09-10
 - Merge pull request #12 from Mellow-Artificial-Intelligence/new-release.
 
-[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/Mellow-Artificial-Intelligence/openextract/compare/v0.7.0...v0.8.0

@@ -9,11 +9,11 @@ title: ExtractBench
 runs [LlamaIndex ExtractBench](https://github.com/run-llama/ExtractBench) through
 openextract. Pass any `pydantic-ai` model identifier; the script registers an
 openextract pipeline, downloads the dataset if needed, runs inference, and
-scores with ExtractBench's official unified value F1.
+scores with ExtractBench's official unified value F1 and grounding metrics.
 
-This is a **quality** benchmark (schema-guided extraction accuracy). It is
-separate from [`scripts/bench.py`](benchmarking.md), which only measures local
-CPU overhead with the model call mocked out.
+This is a **quality** benchmark (schema-guided extraction accuracy and
+source grounding). It is separate from [`scripts/bench.py`](benchmarking.md),
+which only measures local CPU overhead with the model call mocked out.
 
 ## Quick start
 
@@ -72,9 +72,29 @@ uv run python scripts/extractbench.py --model openai:gpt-5 --skip-inference
 if your provider quota allows. `--max-input-bytes` defaults to 500 MiB so long
 scans are not rejected by openextract's 50 MiB library default.
 
-openextract does not currently return per-field bounding boxes, so ExtractBench
-**grounding** F1 will be zero. Unified **value** F1 is the score this wrapper
-is meant to produce.
+## Grounding
+
+The runner asks the model for per-field citations by default (`--cite`, disable
+with `--no-cite`) and maps them onto ExtractBench `FieldCitation`:
+
+| ExtractBench field | openextract `Citation` | When it scores |
+| --- | --- | --- |
+| `field_path` | `field` | Always, when a citation is emitted |
+| `page` | `page` | **Page-level** grounding, when the model returns a 1-indexed page |
+| `reference_text` | `quote` | Evidence text; not required to score |
+| `bbox` | `bbox` | **Word-level** grounding (IoU 0.5), only when the model supplies a normalized COCO `[x, y, width, height]` in `[0, 1]` |
+
+Boxes are never invented. A page- or quote-only citation is still emitted so
+page-level grounding can score; word-level F1 stays 0 unless the model actually
+located the span. Citations without a page cannot become `FieldCitation`
+(ExtractBench requires `page >= 1`) and are dropped at the mapping step.
+
+`--test` is 6 documents and is the right first run (cents on a hosted API). A
+full run is 370 documents / 4,869 pages and is metered API usage.
+
+Listing this pipeline on the official ExtractBench leaderboard is a later
+change in [run-llama/ExtractBench](https://github.com/run-llama/ExtractBench),
+not this repository.
 
 ## Dataset license
 
