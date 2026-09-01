@@ -21,6 +21,7 @@ import os
 import re
 import subprocess
 import sys
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -29,6 +30,7 @@ from pydantic import BaseModel, ConfigDict
 
 from openextract import (
     Citation,
+    ExtractionError,
     Extractor,
     InputTooLargeError,
     ModelError,
@@ -67,6 +69,8 @@ DEFAULT_INSTRUCTIONS = (
     "return an empty list when rows are present."
 )
 DEFAULT_MAX_INPUT_BYTES = 500 * 1024 * 1024
+DEFAULT_CALL_TIMEOUT = 240.0
+DEFAULT_WINDOW_CONCURRENCY = 4
 _REF_PREFIXES = ("#/$defs/", "#/definitions/")
 
 
@@ -202,12 +206,22 @@ def _output_type_for_schema(schema: dict[str, Any], model: str | object) -> obje
     return output_type
 
 
-def _build_schema_agent(model: str | object, schema: dict[str, Any], instructions: str):
+def _build_schema_agent(
+    model: str | object,
+    schema: dict[str, Any],
+    instructions: str,
+    *,
+    timeout: float | None = None,
+):
     from pydantic_ai import Agent
 
     output_type = _output_type_for_schema(schema, model)
     routed = _route_model(model) if isinstance(model, str) else model
     settings = _usage_model_settings(model, None) if isinstance(model, str) else None
+    if timeout is not None:
+        merged = dict(settings) if settings is not None else {}
+        merged["timeout"] = timeout
+        settings = merged
     try:
         return Agent(
             routed,
@@ -238,6 +252,8 @@ def extract_document(
     max_input_bytes: int | None = DEFAULT_MAX_INPUT_BYTES,
     additional_properties_false: bool = True,
     cite: bool = False,
+    timeout: float | None = DEFAULT_CALL_TIMEOUT,
+    window_concurrency: int = DEFAULT_WINDOW_CONCURRENCY,
 ) -> tuple[dict[str, Any], Usage]:
     """Extract one document with openextract using an ExtractBench JSON schema."""
     data, usage, _citations = extract_document_with_citations(
@@ -250,6 +266,8 @@ def extract_document(
         max_input_bytes=max_input_bytes,
         additional_properties_false=additional_properties_false,
         cite=cite,
+        timeout=timeout,
+        window_concurrency=window_concurrency,
     )
     return data, usage
 
@@ -265,6 +283,8 @@ def extract_document_with_citations(
     max_input_bytes: int | None = DEFAULT_MAX_INPUT_BYTES,
     additional_properties_false: bool = True,
     cite: bool = True,
+    timeout: float | None = DEFAULT_CALL_TIMEOUT,
+    window_concurrency: int = DEFAULT_WINDOW_CONCURRENCY,
 ) -> tuple[dict[str, Any], Usage, tuple[Citation, ...]]:
     """Extract one document and return ``(data, usage, citations)``.
 
@@ -272,41 +292,90 @@ def extract_document_with_citations(
     an ``output`` / ``citations`` envelope so the model can return per-field
     page and quote evidence. PDFs are parsed locally first and sent as
     page-indexed windows so large documents do not blow the model context.
-    Boxes come from parser spans, never from the model.
+    Window citations are collected before reduce so a later window's cites
+    are not dropped. Boxes come from parser spans, never from the model.
     """
     schema = prepare_schema(json_schema, additional_properties_false=additional_properties_false)
     run_instructions = with_citation_instructions(instructions) if cite else instructions
     if cite:
         schema = json_schema_with_citations(schema)
     run_source, run_media_type, parsed = _parse_then_extract_source(source, media_type)
-    agent = _build_schema_agent(model, schema, run_instructions)
     policy = RetryPolicy(max_retries=max_retries)
     windows = parse_windows(parsed) if parsed is not None and parsed.has_text() else ()
-    with Extractor(
-        ExtractedDocument,
-        agent=agent,
-        retry_policy=policy,
-        max_input_bytes=max_input_bytes,
-    ) as extractor:
-        if len(windows) > 1:
-            parts: list[ExtractedDocument] = []
-            usages: list[Usage] = []
-            for window in windows:
-                part, part_usage = extractor.extract_with_usage(
-                    window.as_prompt_text().encode("utf-8"),
-                    media_type="text/plain",
-                )
-                parts.append(part)
-                usages.append(part_usage)
-            output = reduce_outputs(parts)
-            usage = _sum_usage(usages)
-        else:
+    if len(windows) > 1:
+        payloads, usage = _extract_parse_windows(
+            windows,
+            model,
+            schema,
+            run_instructions,
+            policy=policy,
+            max_input_bytes=max_input_bytes,
+            timeout=timeout,
+            window_concurrency=window_concurrency,
+        )
+        data, citations = _merge_window_payloads(payloads, cite=cite)
+    else:
+        agent = _build_schema_agent(model, schema, run_instructions, timeout=timeout)
+        with Extractor(
+            ExtractedDocument,
+            agent=agent,
+            retry_policy=policy,
+            max_input_bytes=max_input_bytes,
+        ) as extractor:
             output, usage = extractor.extract_with_usage(run_source, media_type=run_media_type)
-    dumped = as_extracted_dict(output)
-    data, citations = _unwrap_cited_document(dumped, cite=cite)
+        data, citations = _unwrap_cited_document(as_extracted_dict(output), cite=cite)
     if cite:
         citations = ground_citations(citations, parsed, data)
     return data, usage, citations
+
+
+def _extract_parse_windows(
+    windows: tuple,
+    model: str | object,
+    schema: dict[str, Any],
+    instructions: str,
+    *,
+    policy: RetryPolicy,
+    max_input_bytes: int | None,
+    timeout: float | None,
+    window_concurrency: int,
+) -> tuple[list[dict[str, Any]], Usage]:
+    """Extract each parse window and sum usage. Citations are unwrapped later."""
+    sources = [window.as_prompt_text().encode("utf-8") for window in windows]
+    workers = max(1, min(window_concurrency, len(sources)))
+
+    def _run(source: bytes) -> tuple[ExtractedDocument, Usage]:
+        agent = _build_schema_agent(model, schema, instructions, timeout=timeout)
+        with Extractor(
+            ExtractedDocument,
+            agent=agent,
+            retry_policy=policy,
+            max_input_bytes=max_input_bytes,
+        ) as extractor:
+            return extractor.extract_with_usage(source, media_type="text/plain")
+
+    if workers == 1:
+        pairs = [_run(source) for source in sources]
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            pairs = list(pool.map(_run, sources))
+    return [as_extracted_dict(part) for part, _usage in pairs], _sum_usage(
+        usage for _part, usage in pairs
+    )
+
+
+def _merge_window_payloads(
+    payloads: list[dict[str, Any]], *, cite: bool
+) -> tuple[dict[str, Any], tuple[Citation, ...]]:
+    """Reduce window extractions and keep every window's citations."""
+    data_parts: list[ExtractedDocument] = []
+    citations: list[Citation] = []
+    for payload in payloads:
+        data, cites = _unwrap_cited_document(payload, cite=cite)
+        data_parts.append(ExtractedDocument.model_validate(data))
+        citations.extend(cites)
+    merged = as_extracted_dict(reduce_outputs(data_parts)) if data_parts else {}
+    return merged, tuple(citations)
 
 
 def _parse_then_extract_source(
@@ -423,6 +492,8 @@ def register_openextract_pipeline(
     input_price_per_1m: float = 0.0,
     output_price_per_1m: float = 0.0,
     cite: bool = True,
+    timeout: float | None = DEFAULT_CALL_TIMEOUT,
+    window_concurrency: int = DEFAULT_WINDOW_CONCURRENCY,
 ) -> str:
     """Register the openextract ExtractBench provider and pipeline; return its name."""
     from extract_bench.inference.pipelines import get_pipeline, register_pipeline
@@ -455,6 +526,8 @@ def register_openextract_pipeline(
         "input_price_per_1m": input_price_per_1m,
         "output_price_per_1m": output_price_per_1m,
         "cite": cite,
+        "timeout": timeout,
+        "window_concurrency": window_concurrency,
     }
 
     if "openextract" not in _PROVIDER_REGISTRY:
@@ -490,6 +563,10 @@ def register_openextract_pipeline(
                             cfg.get("additional_properties_false", True)
                         ),
                         cite=bool(cfg.get("cite", True)),
+                        timeout=cfg.get("timeout", DEFAULT_CALL_TIMEOUT),
+                        window_concurrency=int(
+                            cfg.get("window_concurrency", DEFAULT_WINDOW_CONCURRENCY)
+                        ),
                     )
                 except ProviderNotInstalledError as exc:
                     raise ProviderConfigError(str(exc)) from exc
@@ -498,6 +575,8 @@ def register_openextract_pipeline(
                         raise ProviderTransientError(str(exc)) from exc
                     raise ProviderPermanentError(str(exc)) from exc
                 except (SchemaValidationError, InputTooLargeError, TypeError) as exc:
+                    raise ProviderPermanentError(str(exc)) from exc
+                except ExtractionError as exc:
                     raise ProviderPermanentError(str(exc)) from exc
 
                 completed_at = datetime.now()
@@ -594,6 +673,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--max-concurrent", type=int, default=4, help="parallel documents (default: 4)"
     )
     parser.add_argument("--max-retries", type=int, default=2, help="transient ModelError retries")
+    parser.add_argument(
+        "--timeout",
+        type=float,
+        default=DEFAULT_CALL_TIMEOUT,
+        help=f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)})",
+    )
+    parser.add_argument(
+        "--window-concurrency",
+        type=int,
+        default=DEFAULT_WINDOW_CONCURRENCY,
+        help="parallel parse windows per document (default: 4)",
+    )
     parser.add_argument(
         "--max-input-bytes",
         type=int,
@@ -700,6 +791,8 @@ def main(argv: list[str] | None = None) -> int:
         input_price_per_1m=args.input_price_per_1m,
         output_price_per_1m=args.output_price_per_1m,
         cite=args.cite,
+        timeout=args.timeout,
+        window_concurrency=args.window_concurrency,
     )
     print(f"Pipeline: {name}")
     print(f"Model:    {model}")

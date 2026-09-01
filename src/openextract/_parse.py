@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from collections.abc import Iterator
 from dataclasses import dataclass
 from difflib import SequenceMatcher
@@ -14,8 +15,11 @@ from ._types import Citation
 _PDF_TYPES = frozenset({"application/pdf", "application/x-pdf"})
 _PAGE_HEADER = "--- Page {page} ---"
 _FUZZY_RATIO = 0.85
-# ~20k tokens of document text, leaving room for schema, instructions, and output.
-DEFAULT_PARSE_WINDOW_CHARS = 80_000
+# ~3k tokens of document text. GLM-class context still needs room for a large
+# ExtractBench schema, citation envelope, and output. Oversized pages are split.
+DEFAULT_PARSE_WINDOW_CHARS = 12_000
+# pypdfium2 / PDFium is not safe across threads in one process.
+_PDFIUM_LOCK = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -93,17 +97,20 @@ def parse_windows(
 ) -> tuple[ParsedDocument, ...]:
     """Split ``parsed`` into page-contiguous windows under ``max_chars``.
 
-    A single page larger than the budget is still its own window so parser
-    boxes keep the full page text. Empty documents yield the original parse.
+    A page larger than the budget is sliced so each model call stays inside
+    GLM-class context. Slices keep the original page number and parser spans;
+    boxes are still resolved against the full parse, never invented. Empty
+    documents yield the original parse.
     """
     budget = DEFAULT_PARSE_WINDOW_CHARS if max_chars is None else max_chars
     pages = parsed.pages
     if not pages or _pages_prompt_len(pages) <= budget:
         return (parsed,)
+    slices = tuple(slice_page for page in pages for slice_page in _split_page(page, budget))
     windows: list[ParsedDocument] = []
     current: list[ParsedPage] = []
     current_len = 0
-    for page in pages:
+    for page in slices:
         block_len = len(_page_block(page))
         extra = block_len if not current else block_len + 2
         if current and current_len + extra > budget:
@@ -115,6 +122,37 @@ def parse_windows(
         current_len += extra
     windows.append(ParsedDocument(pages=tuple(current)))
     return tuple(windows)
+
+
+def _split_page(page: ParsedPage, budget: int) -> tuple[ParsedPage, ...]:
+    """Slice one page so each ``--- Page N ---`` block fits ``budget``."""
+    block_len = len(_page_block(page))
+    if block_len <= budget:
+        return (page,)
+    header_len = len(_PAGE_HEADER.format(page=page.page)) + 1
+    body_budget = max(1, budget - header_len)
+    text = page.text
+    chunks: list[ParsedPage] = []
+    start = 0
+    while start < len(text):
+        end = min(len(text), start + body_budget)
+        if end < len(text):
+            break_at = text.rfind("\n", start, end)
+            if break_at <= start:
+                break_at = text.rfind(" ", start, end)
+            if break_at > start:
+                end = break_at + 1
+        chunks.append(
+            ParsedPage(
+                page=page.page,
+                text=text[start:end],
+                width=page.width,
+                height=page.height,
+                spans=page.spans,
+            )
+        )
+        start = end
+    return tuple(chunks) or (page,)
 
 
 def parsed_window_inputs(
@@ -188,19 +226,20 @@ def _parse_pdf(data: bytes) -> ParsedDocument | None:
         import pypdfium2 as pdfium
     except ImportError:
         return None
-    try:
-        pdf = pdfium.PdfDocument(data)
-    except Exception:
-        return None
-    try:
-        pages = tuple(_parse_pdf_page(pdf, index) for index in range(len(pdf)))
-    except Exception:
-        return None
-    finally:
-        close = getattr(pdf, "close", None)
-        if callable(close):
-            close()
-    return ParsedDocument(pages=pages) if pages else None
+    with _PDFIUM_LOCK:
+        try:
+            pdf = pdfium.PdfDocument(data)
+        except Exception:
+            return None
+        try:
+            pages = tuple(_parse_pdf_page(pdf, index) for index in range(len(pdf)))
+        except Exception:
+            return None
+        finally:
+            close = getattr(pdf, "close", None)
+            if callable(close):
+                close()
+        return ParsedDocument(pages=pages) if pages else None
 
 
 def _parse_pdf_page(pdf: Any, index: int) -> ParsedPage:

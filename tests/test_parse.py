@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -26,6 +27,7 @@ from openextract._parse import (
     _pages_prompt_len,
     _parse_pdf_page,
     _pdf_box_to_coco,
+    _split_page,
     _union_coco,
     _union_pdf_boxes,
     _walk_fields,
@@ -383,12 +385,15 @@ def test_parse_windows_splits_and_caps_large_multipage():
     assert _pages_prompt_len(()) == 0
     windows = parse_windows(parsed, max_chars=80)
     assert len(windows) >= 2
-    assert all(
-        _pages_prompt_len(window.pages) <= 80 or len(window.pages) == 1 for window in windows
-    )
+    assert all(_pages_prompt_len(window.pages) <= 80 for window in windows)
     assert [page.page for window in windows for page in window.pages] == [1, 2, 3, 4]
     oversized = ParsedDocument(pages=(_page("y" * 200, page=1),))
-    assert parse_windows(oversized, max_chars=10) == (oversized,)
+    sliced = parse_windows(oversized, max_chars=10)
+    assert len(sliced) >= 2
+    assert all(_pages_prompt_len(window.pages) <= 10 or len(window.pages) == 1 for window in sliced)
+    assert all(page.page == 1 for window in sliced for page in window.pages)
+    empty = _page("", page=1)
+    assert _split_page(empty, 1) == (empty,)
     fallback = ["keep-me"]
     assert parsed_window_inputs(None, fallback) == [fallback]
     assert parsed_window_inputs(None, fallback)[0] is fallback
@@ -418,6 +423,45 @@ def test_chunk_span_still_gets_parser_box():
     assert bbox is not None
     grounded = ground_citations((Citation("vendor", "Acme Corp", page=2),), parsed)
     assert grounded[0].bbox is not None
+
+
+def test_oversized_page_split_keeps_parser_box():
+    parsed = ParsedDocument(
+        pages=(
+            _page(
+                "noise " * 40 + "Acme Corp " + "tail " * 40,
+                ParsedSpan("Acme", 1, (0.1, 0.2, 0.2, 0.05)),
+                ParsedSpan("Corp", 1, (0.3, 0.2, 0.2, 0.05)),
+                page=1,
+            ),
+        )
+    )
+    windows = parse_windows(parsed, max_chars=40)
+    assert len(windows) >= 2
+    assert any("Acme Corp" in window.as_prompt_text() for window in windows)
+    page, bbox = find_span(parsed, "Acme Corp")
+    assert page == 1
+    assert bbox is not None
+
+
+def test_concurrent_pdf_parse_does_not_crash():
+    data = synthetic_pdf("Hello concurrent parse")
+    errors: list[BaseException] = []
+    results: list[ParsedDocument | None] = []
+
+    def _worker() -> None:
+        try:
+            results.append(try_parse_document(data, "application/pdf"))
+        except BaseException as exc:  # noqa: BLE001 - crash is the failure mode
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_worker) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert errors == []
+    assert all(parsed is not None and parsed.has_text() for parsed in results)
 
 
 def test_extract_chunks_large_parse_via_extract_once(monkeypatch, mocker):

@@ -233,6 +233,23 @@ def test_extract_document_chunks_large_parse_and_keeps_boxes(monkeypatch, tmp_pa
     assert all(size < 500 for size in calls)
     assert citations[0].page == 2
     assert citations[0].bbox is not None
+    sequential, sequential_usage, sequential_cites = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(
+            custom_output_args={
+                "output": {"vendor": "Acme Corp"},
+                "citations": [{"field": "vendor", "quote": "Acme Corp", "page": 2}],
+            }
+        ),
+        max_retries=0,
+        cite=True,
+        window_concurrency=1,
+        timeout=None,
+    )
+    assert sequential == data
+    assert sequential_usage.input_tokens >= 0
+    assert sequential_cites[0].page == 2
 
 
 def test_unwrap_cited_document_flat_fallback():
@@ -244,10 +261,34 @@ def test_unwrap_cited_document_flat_fallback():
     assert citations[0].page == 1
 
 
+def test_merge_window_payloads_keeps_later_citations():
+    data, citations = extractbench._merge_window_payloads(
+        [
+            {"output": {"vendor": None}, "citations": []},
+            {
+                "output": {"vendor": "Acme Corp"},
+                "citations": [{"field": "vendor", "quote": "Acme Corp", "page": 2}],
+            },
+        ],
+        cite=True,
+    )
+    assert data["vendor"] == "Acme Corp"
+    assert citations[0].page == 2
+    assert citations[0].quote == "Acme Corp"
+    empty, empty_cites = extractbench._merge_window_payloads([], cite=True)
+    assert empty == {}
+    assert empty_cites == ()
+
+
 def test_parse_args_cite_defaults_on():
     args = extractbench.parse_args(["--model", "openai:gpt-5", "--test"])
     assert args.cite is True
     assert extractbench.parse_args(["--model", "openai:gpt-5", "--no-cite"]).cite is False
+    timed = extractbench.parse_args(
+        ["--model", "openai:gpt-5", "--timeout", "90", "--window-concurrency", "2"]
+    )
+    assert timed.timeout == 90
+    assert timed.window_concurrency == 2
 
 
 def test_extract_document_with_test_model():

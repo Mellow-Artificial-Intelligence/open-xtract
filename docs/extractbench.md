@@ -86,10 +86,12 @@ with `--no-cite`) and maps them onto ExtractBench `FieldCitation`:
 
 The runner **parses PDFs locally** (pypdfium2, `openextract[pdf]` / `openextract[all]`)
 and feeds page-indexed text (`--- Page N ---`) to the model before extraction.
-Long documents are split into page windows under a character budget, extracted
-per window, and merged — the whole PDF is not dumped as one prompt. That is the
-default path so page and word F1 can move on a 6-document `--test` smoke without
-blowing the model context. Boxes are never invented and are never taken from the
+Long documents (and oversized pages) are split into windows under a 12k-character
+budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
+and merged — the whole PDF is not dumped as one prompt. Each model call uses
+`--timeout` (default 240s) so a doomed window fails fast instead of burning
+ExtractBench's 1800s per-file limit three times. Citations are collected from
+every window before reduce. Boxes are never invented and are never taken from the
 model: if a parser span matches the quote (exact, then simple fuzzy), a
 normalized COCO `[x, y, width, height]` in `[0, 1]` is attached; if nothing
 matches, `bbox` is omitted. Citations without a page cannot become
@@ -98,7 +100,8 @@ mapping step.
 
 `--no-cite` still runs parse-then-extract but does not ask for or emit
 `field_citations`. Token `usage` and `cost_usd` come from the provider usage
-object captured by `extract_with_usage`.
+object captured by `extract_with_usage` (OpenRouter native usage is requested
+via `extra_body` as well as `openrouter_usage`).
 
 `--test` is 6 documents and is the right first run (cents on a hosted API). A
 full run is 370 documents / 4,869 pages and is metered API usage.

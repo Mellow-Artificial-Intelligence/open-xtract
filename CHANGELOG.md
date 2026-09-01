@@ -9,15 +9,19 @@ timing when that is known.
 ## [Unreleased]
 
 ### Changed
-- Parse-then-extract now chunks page-indexed PDF text by a character budget
-  instead of dumping the whole document into one prompt. Each window is
-  extracted and merged with the existing reduce strategy. A single window still
-  uses the one-shot `_extract_once` path so existing retry tests keep working.
-  ExtractBench uses the same windowed path; `--cite` stays on by default.
-  Bounding boxes remain parser-backed only.
-- Usage capture skips default-zero `input_tokens` so OpenRouter
-  `request_tokens` / `prompt_tokens` (including nested `details`) populate
-  `extract_with_usage` instead of reporting `0` tokens / `$0`.
+- Parse-then-extract windows page-indexed PDF text under a 12k-character
+  budget (was 80k) and splits a single oversized page so each model call fits
+  GLM-class context. ExtractBench extracts windows in a bounded thread pool
+  (`--window-concurrency`, default 4) with a per-call timeout (`--timeout`,
+  default 240s) and collects citations from every window before reduce, so
+  Bianco-class docs keep page cites. Token-limit errors are permanent and are
+  not retried. Bounding boxes remain parser-backed only.
+- PDF parse takes a process-wide lock. pypdfium2 is not thread-safe; concurrent
+  ExtractBench workers no longer crash native PDFium.
+- Usage capture asks OpenRouter for native usage via both `openrouter_usage`
+  and `extra_body.usage`, then reads `prompt_tokens` / `native_tokens_*` from
+  `result.usage`, nested `details`, `response`, and `all_messages`. Default-zero
+  pydantic-ai `input_tokens` is still skipped. Counts are never invented.
 
 ## [0.12.0] - 2026-08-31
 
