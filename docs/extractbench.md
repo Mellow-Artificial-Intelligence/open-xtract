@@ -90,15 +90,18 @@ Long documents (and oversized pages) are split into windows under a 12k-characte
 / 1-page budget, extracted with bounded concurrency (`--window-concurrency`, default 4),
 and merged — the whole PDF is not dumped as one prompt. `--timeout` (default 240s)
 is per window; the document wall budget is
-`timeout × (ceil(windows / concurrency) + 1)` so GLM variance of tens of
-seconds (pueblo ~706s vs a sharp 720s) does not kill a finishing extract.
-ExtractBench's per-file timeout is raised to at least that budget for a long
-document (never a hard 1800s below the pool wait) and per-file timeout retries
-are off, so Veralto / long are not run 3×1800s. A pool timeout does not wait
+`timeout × (ceil(windows / concurrency) + 2)` so GLM variance (pueblo
+past 960s) does not kill a finishing extract. When the pool budget
+hits, finished windows and any in-flight that complete quickly are
+merged into a result instead of discarded. ExtractBench's per-file
+timeout is raised to at least that budget for a long document (never a
+hard 1800s below the pool wait) and per-file timeout retries are off,
+so Veralto / long are not run 3×1800s. A pool timeout does not wait
 for cancelled workers (that hang is how long reached the 96-window file cap
-with no result.json). Window calls are a single
-attempt; request timeouts and token-limit errors are not retried at file
-level. Scanned / empty-text PDFs are rendered to compact grayscale page images
+with no result.json). Hung windows are a single attempt; empty-tool-call /
+output-retry failures are retried at the window (`output_retries=3` plus
+one extra attempt). Request timeouts and token-limit errors are not
+retried at file level. Scanned / empty-text PDFs are rendered to compact grayscale page images
 (long edge ≤ 768px) locally and are
 never uploaded for provider document-parse. Citations are collected from
 every window before reduce. When a window
@@ -117,6 +120,10 @@ via `extra_body` as well as `openrouter_usage`).
 
 `--test` is 6 documents and is the right first run (cents on a hosted API). A
 full run is 370 documents / 4,869 pages and is metered API usage.
+
+Local GLM-5.3-flash `--test` scores are in the
+[ExtractBench smoke log](extractbench-smokes.md). The 370-document run
+has not been run.
 
 Listing this pipeline on the official ExtractBench leaderboard is a later
 change in [run-llama/ExtractBench](https://github.com/run-llama/ExtractBench),

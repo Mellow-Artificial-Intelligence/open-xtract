@@ -50,6 +50,7 @@ from openextract._config import (
     _url_fetch_timeout,
 )
 from openextract._errors import (
+    _is_output_retry_error,
     _is_transient_model_exception,
     _map_exception,
     _model_retry_after,
@@ -1312,6 +1313,28 @@ class TestExtract:
         )
         assert isinstance(mapped, ModelError)
         assert mapped.retryable is False
+
+    def test_output_retry_exhausted_is_retryable_model_error(self):
+        from pydantic_ai.exceptions import UnexpectedModelBehavior
+
+        mapped = _map_exception(UnexpectedModelBehavior("Exceeded maximum output retries (1)"))
+        assert isinstance(mapped, ModelError)
+        assert mapped.retryable is True
+        assert "output retry" in str(mapped).lower()
+
+    def test_empty_tool_call_message_is_output_retry_error(self):
+        exc = RuntimeError("Please return text or include your response in a tool call.")
+        assert _is_output_retry_error(exc)
+        assert isinstance(_map_exception(exc), ModelError)
+        wrapped = ExtractionError("Extraction failed: please retry")
+        wrapped.__cause__ = RuntimeError("Exceeded maximum output retries (1)")
+        assert _is_output_retry_error(wrapped)
+
+        class ToolRetryError(Exception):
+            pass
+
+        assert _is_output_retry_error(ToolRetryError("empty call"))
+        assert not _is_output_retry_error(RuntimeError("kaboom"))
 
     def test_model_error_constructor_remains_backwards_compatible(self):
         error = ModelError("flaky")
