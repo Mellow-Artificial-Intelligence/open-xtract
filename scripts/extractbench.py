@@ -49,6 +49,7 @@ from openextract._citations import (
     json_schema_with_citations,
     with_citation_instructions,
 )
+from openextract._errors import _is_output_retry_error
 from openextract._media import _get_media_type
 from openextract._parse import ground_citations, maybe_parsed_inputs, parse_windows
 from openextract._types import _sum_usage
@@ -78,9 +79,15 @@ DEFAULT_WINDOW_CONCURRENCY = 4
 # cap must be ≥ pool budget. 96 windows covers the 6-doc long split with headroom.
 EXTRACTBENCH_FILE_TIMEOUT_FLOOR = 1800.0
 DEFAULT_FILE_TIMEOUT_WINDOWS = 96
-# One extra batch so GLM variance (pueblo 706s vs 720s; W14 298s vs 240s)
-# does not kill a run that is already finishing.
-WINDOW_POOL_SLACK_BATCHES = 1
+# Two extra batches: +1 still killed pueblo at 960s under GLM variance.
+WINDOW_POOL_SLACK_BATCHES = 2
+# After the pool budget, wait briefly for in-flight windows before discarding.
+WINDOW_POOL_LEFTOVER_GRACE = 15.0
+# pydantic-ai default output_retries=1 is the Veralto "exceeded maximum
+# output retries (1)" / empty-tool-call kill. Raise it on window extract.
+WINDOW_OUTPUT_RETRIES = 3
+# Extra Extractor attempt when pydantic-ai still raises after output retries.
+WINDOW_OUTPUT_ATTEMPTS = 2
 _REF_PREFIXES = ("#/$defs/", "#/definitions/")
 
 
@@ -238,6 +245,7 @@ def _build_schema_agent(
             output_type=output_type,
             instructions=instructions,
             model_settings=settings,
+            output_retries=WINDOW_OUTPUT_RETRIES,
         )
     except ImportError as exc:
         if isinstance(model, str):
@@ -344,8 +352,8 @@ def window_pool_timeout(n_windows: int, concurrency: int, timeout: float | None)
 
     ``--timeout`` is per window. Collecting every future with that same value
     kills a 10-page doc at 240s even when each page would finish. Scale by
-    ``ceil(windows / concurrency) + 1`` so pueblo's ~706–800s 11-window run is
-    not killed at exactly 720s when GLM is a few tens of seconds slow.
+    ``ceil(windows / concurrency) + 2`` so pueblo's 11-window run is not
+    killed at 960s when GLM variance exceeds one extra batch.
     """
     if timeout is None:
         return None
@@ -422,27 +430,29 @@ def _extract_parse_windows(
 ) -> tuple[list[dict[str, Any]], Usage]:
     """Extract each parse window and sum usage. Citations are unwrapped later.
 
-    Each window is a single attempt. File-level ExtractBench retries still apply
-    to transient errors; a hung window must not burn the 1800s per-file budget
-    three times (pueblo / long on the 6-doc smoke). The pool wait is the
-    per-window timeout times concurrent batches, plus one batch of slack, not
-    one 240s wrap around the whole document. Do not ``shutdown(wait=True)``
-    after a pool timeout: that is how long sat until the 96-window file cap
-    with no result.json.
+    Hung windows are not retried and must not burn the 1800s per-file budget
+    three times (pueblo / long). Empty-tool-call / output-retry failures are
+    retried at the window, not the file. The pool wait is the per-window
+    timeout times concurrent batches, plus two batches of slack. On timeout,
+    finished windows (and any in-flight that complete quickly) are merged
+    instead of discarded. Do not ``shutdown(wait=True)`` after a pool timeout.
     """
     sources = [_window_source(window) for window in windows]
     workers = max(1, min(window_concurrency, len(sources)))
     once = RetryPolicy(max_retries=0)
 
     def _run(source: bytes, media_type: str) -> tuple[ExtractedDocument, Usage]:
-        agent = _build_schema_agent(model, schema, instructions, timeout=timeout)
-        with Extractor(
-            ExtractedDocument,
-            agent=agent,
-            retry_policy=once,
-            max_input_bytes=max_input_bytes,
-        ) as extractor:
-            return extractor.extract_with_usage(source, media_type=media_type)
+        def _once() -> tuple[ExtractedDocument, Usage]:
+            agent = _build_schema_agent(model, schema, instructions, timeout=timeout)
+            with Extractor(
+                ExtractedDocument,
+                agent=agent,
+                retry_policy=once,
+                max_input_bytes=max_input_bytes,
+            ) as extractor:
+                return extractor.extract_with_usage(source, media_type=media_type)
+
+        return _run_window_with_output_retries(_once)
 
     budget = window_pool_timeout(len(sources), workers, timeout)
     if budget is None:
@@ -454,25 +464,75 @@ def _extract_parse_windows(
     )
 
 
+def window_pool_leftover_grace(budget: float) -> float:
+    """Seconds to wait for in-flight windows after the pool budget expires."""
+    if budget <= 0:
+        return 0.0
+    return min(WINDOW_POOL_LEFTOVER_GRACE, budget * 0.05)
+
+
+def _run_window_with_output_retries(
+    run: Callable[[], tuple[ExtractedDocument, Usage]],
+    *,
+    attempts: int = WINDOW_OUTPUT_ATTEMPTS,
+) -> tuple[ExtractedDocument, Usage]:
+    """Retry a window when pydantic-ai exhausts its output-retry budget."""
+    last: ExtractionError | None = None
+    for attempt in range(attempts):
+        try:
+            return run()
+        except ExtractionError as exc:
+            last = exc
+            if attempt + 1 >= attempts or not _is_output_retry_error(exc):
+                raise
+    raise last  # pragma: no cover
+
+
+def _finished_window_pairs(
+    futures: list,
+) -> list[tuple[ExtractedDocument, Usage]]:
+    """Collect successful window results; skip cancelled and failed futures."""
+    pairs: list[tuple[ExtractedDocument, Usage]] = []
+    for future in futures:
+        if not future.done() or future.cancelled():
+            continue
+        try:
+            pairs.append(future.result())
+        except Exception:
+            continue
+    return pairs
+
+
 def _run_window_pool(
     run: Callable[..., tuple[ExtractedDocument, Usage]],
     sources: list[tuple[bytes, str]],
     workers: int,
     budget: float,
 ) -> list[tuple[ExtractedDocument, Usage]]:
-    """Run windows concurrently and return as soon as the budget expires."""
+    """Run windows concurrently; merge leftovers when the budget expires."""
     pool = ThreadPoolExecutor(max_workers=workers)
     try:
         futures = [pool.submit(run, source, media_type) for source, media_type in sources]
         _done, pending = wait(futures, timeout=budget)
         if pending:
-            for future in futures:
+            _extra, pending = wait(pending, timeout=window_pool_leftover_grace(budget))
+        pairs = _finished_window_pairs(futures)
+        if pending:
+            for future in pending:
                 future.cancel()
+        if pairs:
+            return pairs
+        if pending:
             raise ModelError(
                 f"Parse window timed out after {budget}s",
                 retryable=False,
             )
-        return [future.result() for future in futures]
+        for future in futures:
+            future.result()
+        raise ModelError(
+            f"Parse window timed out after {budget}s",
+            retryable=False,
+        )
     finally:
         pool.shutdown(wait=False, cancel_futures=True)
 
@@ -480,10 +540,13 @@ def _run_window_pool(
 def _extractbench_retryable(exc: ModelError) -> bool:
     """True when ExtractBench should retry the whole file.
 
-    Token-limit and request timeouts are permanent. Retrying them is how
-    pueblo/long spent 1800s three times on the same doomed prompt.
+    Token-limit, request timeouts, and window output-retry failures are
+    permanent at file level. Retrying them is how pueblo/long spent 1800s
+    three times, and how Veralto would re-run 41 pages after one empty call.
     """
-    return exc.retryable and "timeout" not in str(exc).lower()
+    if not exc.retryable or _is_output_retry_error(exc):
+        return False
+    return "timeout" not in str(exc).lower()
 
 
 def _merge_window_payloads(
@@ -814,7 +877,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=DEFAULT_CALL_TIMEOUT,
         help=(
             f"per-window model timeout in seconds (default: {int(DEFAULT_CALL_TIMEOUT)}); "
-            "document wall is timeout × (ceil(windows / concurrency) + 1); "
+            "document wall is timeout × (ceil(windows / concurrency) + 2); "
             "ExtractBench per-file timeout is max(1800, that budget for a long doc)"
         ),
     )

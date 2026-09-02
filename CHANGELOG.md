@@ -13,11 +13,14 @@ timing when that is known.
   long-doc window count, and timeout retries are
   disabled. Veralto (41) and long (66) are not killed at 1800s × 3.
 - ExtractBench window-pool wait is
-  ``timeout × (ceil(windows / concurrency) + 1)``, not a sharp
-  ``timeout × batches`` wrap. Pueblo's ~706s 11-window run is not killed at
-  720s; a pool timeout returns immediately instead of waiting on cancelled
-  workers until the 96-window file cap (long / no result.json).
-  Window attempts are still not retried.
+  ``timeout × (ceil(windows / concurrency) + 2)``, not
+  ``timeout × (batches + 1)``. Pueblo's 11-window run is not killed at
+  960s. A pool timeout merges finished windows (and in-flight ones that
+  complete quickly) instead of discarding them, then returns immediately
+  instead of waiting on cancelled workers. Hung windows are still not
+  retried; empty-tool-call / output-retry failures are retried at the
+  window (pydantic-ai ``output_retries=3``, plus one extra attempt) so
+  Veralto is not killed by a 1-retry cap.
 - Empty-text / scanned PDFs (Bianco) are rendered to compact grayscale page
   images (long edge ≤ 768px) locally and never uploaded for OpenRouter
   document-parse (400 rate-limit). Boxes stay parser-backed; none are

@@ -59,6 +59,11 @@ _TOKEN_LIMIT_MARKERS = (
     "prompt is too long",
     "exceeded before any response",
 )
+_OUTPUT_RETRY_TYPES = frozenset({"UnexpectedModelBehavior", "ToolRetryError"})
+_OUTPUT_RETRY_MARKERS = (
+    "output retries",
+    "return text or include your response in a tool call",
+)
 
 # Exact (module, class) signatures for provider/model error bases we classify
 # as ``ModelError``. The classifier checks the exception's existing MRO instead
@@ -234,6 +239,19 @@ def _is_token_limit_error(exc: BaseException) -> bool:
     return any(marker in message for marker in _TOKEN_LIMIT_MARKERS)
 
 
+def _is_output_retry_error(exc: BaseException) -> bool:
+    """True for empty-tool-call / exhausted pydantic-ai output retries."""
+    for current in (exc, exc.__cause__, exc.__context__):
+        if current is None:
+            continue
+        if type(current).__name__ in _OUTPUT_RETRY_TYPES:
+            return True
+        message = str(current).lower()
+        if any(marker in message for marker in _OUTPUT_RETRY_MARKERS):
+            return True
+    return False
+
+
 def _map_exception(exc: BaseException) -> ExtractionError:
     """Translate a low-level exception into the appropriate ExtractionError subclass."""
     if isinstance(exc, httpx.HTTPStatusError):
@@ -248,6 +266,13 @@ def _map_exception(exc: BaseException) -> ExtractionError:
             provider=_model_provider(exc),
             status_code=_model_status_code(exc),
             retryable=False,
+        )
+    if _is_output_retry_error(exc):
+        return ModelError(
+            f"Model output retry exhausted: {exc}",
+            provider=_model_provider(exc),
+            status_code=_model_status_code(exc),
+            retryable=True,
         )
     if _is_model_exception(exc):
         status_code = _model_status_code(exc)

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 from pydantic_ai.models.test import TestModel
 
-from openextract import Citation, ModelError, SchemaValidationError
+from openextract import Citation, ExtractionError, ModelError, SchemaValidationError, Usage
 
 SCRIPTS = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPTS) not in sys.path:
@@ -326,34 +326,46 @@ def test_extractbench_does_not_retry_timeouts():
     assert extractbench._extractbench_retryable(ModelError("rate limited", retryable=True))
     assert not extractbench._extractbench_retryable(ModelError("request timeout", retryable=True))
     assert not extractbench._extractbench_retryable(ModelError("token limit", retryable=False))
+    assert not extractbench._extractbench_retryable(
+        ModelError("Model output retry exhausted: Exceeded maximum output retries (1)")
+    )
 
 
 def test_window_pool_timeout_scales_with_batches():
-    assert extractbench.window_pool_timeout(10, 4, 240.0) == 960.0
-    assert extractbench.window_pool_timeout(11, 4, 240.0) == 960.0
-    assert extractbench.window_pool_timeout(41, 4, 240.0) == 2880.0
-    assert extractbench.window_pool_timeout(66, 4, 240.0) == 4320.0
-    assert extractbench.window_pool_timeout(1, 4, 240.0) == 480.0
+    assert extractbench.window_pool_timeout(10, 4, 240.0) == 1200.0
+    assert extractbench.window_pool_timeout(11, 4, 240.0) == 1200.0
+    assert extractbench.window_pool_timeout(41, 4, 240.0) == 3120.0
+    assert extractbench.window_pool_timeout(66, 4, 240.0) == 4560.0
+    assert extractbench.window_pool_timeout(1, 4, 240.0) == 720.0
     assert extractbench.window_pool_timeout(0, 4, 240.0) == 240.0
     assert extractbench.window_pool_timeout(8, 4, None) is None
 
 
 def test_window_pool_timeout_has_slack_for_pueblo():
-    """Pueblo finished in 705.8s then died at a sharp 720s; 800s must fit."""
+    """Pueblo finished in 705.8s, then died at 720s and 960s; +1 batch was not enough."""
     pueblo = extractbench.window_pool_timeout(11, 4, 240.0)
     assert pueblo is not None
-    assert pueblo >= 800.0
-    assert pueblo > 240.0 * 3
+    assert pueblo > 960.0
+    assert pueblo == 240.0 * (3 + extractbench.WINDOW_POOL_SLACK_BATCHES)
+
+
+def test_window_pool_leftover_grace_scales_with_budget():
+    assert extractbench.window_pool_leftover_grace(0.0) == 0.0
+    assert extractbench.window_pool_leftover_grace(-1.0) == 0.0
+    assert extractbench.window_pool_leftover_grace(0.15) == 0.15 * 0.05
+    assert (
+        extractbench.window_pool_leftover_grace(1200.0) == extractbench.WINDOW_POOL_LEFTOVER_GRACE
+    )
 
 
 def test_extractbench_file_timeout_covers_pool_and_keeps_floor():
     assert extractbench.extractbench_file_timeout(1, 4, 240.0) == 1800.0
     assert extractbench.extractbench_file_timeout(10, 4, 240.0) == 1800.0
-    assert extractbench.extractbench_file_timeout(41, 4, 240.0) == 2880.0
-    assert extractbench.extractbench_file_timeout(66, 4, 240.0) == 4320.0
+    assert extractbench.extractbench_file_timeout(41, 4, 240.0) == 3120.0
+    assert extractbench.extractbench_file_timeout(66, 4, 240.0) == 4560.0
     assert (
         extractbench.extractbench_file_timeout(extractbench.DEFAULT_FILE_TIMEOUT_WINDOWS, 4, 240.0)
-        == 6000.0
+        == 6240.0
     )
     assert extractbench.extractbench_file_timeout(66, 4, None) is None
 
@@ -552,6 +564,166 @@ def test_window_pool_timeout_does_not_wait_on_cancelled_workers(monkeypatch, tmp
             window_concurrency=2,
         )
     assert time.monotonic() - started < 1.0
+
+
+def test_window_pool_timeout_merges_finished_windows(monkeypatch, tmp_path):
+    import time
+
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["AAAA page one", "BBBB page two", "CCCC page three"])
+    path = tmp_path / "pueblo.pdf"
+    path.write_bytes(pdf)
+
+    def _mixed(self, source, *, media_type=None):
+        text = source.decode("utf-8", errors="ignore") if isinstance(source, bytes) else ""
+        if "AAAA" in text:
+            return extractbench.ExtractedDocument.model_validate(
+                {"output": {"vendor": "Pueblo"}, "citations": []}
+            ), Usage(1, 1, 2)
+        time.sleep(2.0)
+        raise AssertionError("hung window should be discarded")
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _mixed)
+    started = time.monotonic()
+    data, usage, _citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+        timeout=0.05,
+        window_concurrency=2,
+    )
+    assert time.monotonic() - started < 1.0
+    assert data["vendor"] == "Pueblo"
+    assert usage == Usage(1, 1, 2)
+
+
+def test_window_output_retry_is_retried_at_window(monkeypatch, tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["AAAA page one", "BBBB page two"])
+    path = tmp_path / "veralto.pdf"
+    path.write_bytes(pdf)
+    calls = {"n": 0}
+    original = extractbench.Extractor.extract_with_usage
+
+    def _flaky(self, source, *, media_type=None):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise ExtractionError("Exceeded maximum output retries (1)")
+        return original(self, source, media_type=media_type)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _flaky)
+    data, _usage, _citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"vendor": "Veralto"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+        timeout=2.0,
+        window_concurrency=1,
+    )
+    assert data["vendor"] == "Veralto"
+    assert calls["n"] >= 2
+
+
+def test_window_output_retry_does_not_kill_other_windows(monkeypatch, tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    pdf = synthetic_pdf(pages=["AAAA page one", "BBBB page two"])
+    path = tmp_path / "veralto.pdf"
+    path.write_bytes(pdf)
+    calls = {"n": 0}
+
+    def _one_bad(self, source, *, media_type=None):
+        calls["n"] += 1
+        text = source.decode("utf-8", errors="ignore") if isinstance(source, bytes) else ""
+        if "AAAA" in text:
+            raise ExtractionError("Exceeded maximum output retries (1)")
+        return extractbench.ExtractedDocument.model_validate(
+            {"output": {"vendor": "Veralto"}, "citations": []}
+        ), Usage(2, 1, 3)
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _one_bad)
+    data, usage, _citations = extractbench.extract_document_with_citations(
+        path,
+        schema,
+        TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+        max_retries=0,
+        cite=True,
+        timeout=2.0,
+        window_concurrency=2,
+    )
+    assert data["vendor"] == "Veralto"
+    assert usage == Usage(2, 1, 3)
+    assert calls["n"] >= 3
+
+
+def test_build_schema_agent_raises_output_retries():
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    agent = extractbench._build_schema_agent(
+        TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+        extractbench.json_schema_with_citations(extractbench.prepare_schema(schema)),
+        "extract",
+    )
+    assert agent._max_output_retries == extractbench.WINDOW_OUTPUT_RETRIES
+    assert extractbench.WINDOW_OUTPUT_RETRIES > 1
+
+
+def test_window_output_retry_raises_when_nothing_succeeds(monkeypatch, tmp_path):
+    from tests.pdf_fixture import synthetic_pdf
+
+    schema = {
+        "type": "object",
+        "properties": {"vendor": {"type": "string"}},
+        "required": ["vendor"],
+    }
+    path = tmp_path / "empty.pdf"
+    path.write_bytes(synthetic_pdf(pages=["AAAA page one", "BBBB page two"]))
+
+    def _always_fail(self, source, *, media_type=None):
+        raise ExtractionError("Exceeded maximum output retries (1)")
+
+    monkeypatch.setattr(extractbench.Extractor, "extract_with_usage", _always_fail)
+    with pytest.raises(ExtractionError, match="output retries"):
+        extractbench.extract_document_with_citations(
+            path,
+            schema,
+            TestModel(custom_output_args={"output": {"vendor": "Acme"}, "citations": []}),
+            max_retries=0,
+            cite=True,
+            timeout=2.0,
+            window_concurrency=2,
+        )
+
+
+def test_run_window_with_output_retries_reraises_other_errors():
+    def _boom():
+        raise ModelError("request timeout", retryable=True)
+
+    with pytest.raises(ModelError, match="timeout"):
+        extractbench._run_window_with_output_retries(_boom, attempts=2)
 
 
 def test_merge_window_payloads_keeps_later_citations():
