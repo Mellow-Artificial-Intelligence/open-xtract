@@ -121,6 +121,10 @@ via `extra_body` as well as `openrouter_usage`).
 `--test` is 6 documents and is the right first run (cents on a hosted API). A
 full run is 370 documents / 4,869 pages and is metered API usage.
 
+Local GLM-5.3-flash `--test` scores are in the
+[ExtractBench smoke log](extractbench-smokes.md). The 370-document run
+has not been run.
+
 Listing this pipeline on the official ExtractBench leaderboard is a later
 change in [run-llama/ExtractBench](https://github.com/run-llama/ExtractBench),
 not this repository.
