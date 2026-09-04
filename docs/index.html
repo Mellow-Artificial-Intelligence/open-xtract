@@ -281,10 +281,10 @@ title: openextract
           <div class="flex items-baseline justify-between mb-8 sm:mb-10 flex-wrap gap-3">
             <div>
               <p class="font-mono text-[11px] text-black/40 uppercase tracking-wider mb-2">What&rsquo;s new</p>
-              <h2 class="text-2xl sm:text-3xl font-bold text-black/90">In v0.12.0</h2>
-              <p class="text-sm text-black/40 mt-2">The latest PyPI release: <span class="font-mono">v0.12.0</span>.</p>
+              <h2 class="text-2xl sm:text-3xl font-bold text-black/90">In v0.13.0</h2>
+              <p class="text-sm text-black/40 mt-2">The latest PyPI release: <span class="font-mono">v0.13.0</span>.</p>
             </div>
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0120---2026-08-31" class="font-mono text-xs text-black/40 hover:text-black/90 transition-colors inline-flex items-center gap-1.5">
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0130---2026-09-04" class="font-mono text-xs text-black/40 hover:text-black/90 transition-colors inline-flex items-center gap-1.5">
               Full changelog <i data-lucide="arrow-up-right" class="w-3 h-3"></i>
             </a>
           </div>
@@ -293,59 +293,59 @@ title: openextract
             <div class="p-6 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="quote" class="w-4 h-4 text-black/40"></i>
+                  <i data-lucide="file-search" class="w-4 h-4 text-black/40"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">Citations</span>
+                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">PDF parse</span>
               </div>
-              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Opt-in field citations</h3>
+              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Parse-then-extract</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                <code class="font-mono text-black/90 text-xs">cite=True</code> asks the model for per-field source spans. <code class="font-mono text-black/90 text-xs">extract()</code> still returns the schema instance; citations land on <code class="font-mono text-black/90 text-xs">ExtractionResult.citations</code>.
+                <code class="font-mono text-black/90 text-xs">openextract[pdf]</code> parses PDFs locally so citation boxes stay parser-backed. The model never invents spans.
               </p>
               <div class="flex flex-wrap gap-1.5">
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">cite=True</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">Citation</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">openextract[pdf]</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">pypdfium2</span>
               </div>
             </div>
 
             <div class="p-6 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="target" class="w-4 h-4 text-black/40"></i>
+                  <i data-lucide="rows-3" class="w-4 h-4 text-black/40"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">ExtractBench</span>
+                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">Windows</span>
               </div>
-              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Grounding that can score</h3>
+              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Windowed long-PDF extract</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                The ExtractBench runner parses PDFs locally, emits real <code class="font-mono text-black/90 text-xs">field_citations</code> (on by default; <code class="font-mono text-black/90 text-xs">--no-cite</code> to disable), and attaches parser-backed boxes so page- and word-level grounding can score.
+                Long PDFs split under a 12k-character / 1-page budget so each model call fits GLM-class context. Citations are collected from every window before reduce.
               </p>
               <div class="flex flex-wrap gap-1.5">
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">field_citations</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">--no-cite</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">12k chars</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">1 page</span>
               </div>
             </div>
 
             <div class="p-6 border border-black/10 bg-white">
               <div class="flex items-center gap-3 mb-3">
                 <div class="w-9 h-9 border border-black/10 flex items-center justify-center">
-                  <i data-lucide="gauge" class="w-4 h-4 text-black/40"></i>
+                  <i data-lucide="scan" class="w-4 h-4 text-black/40"></i>
                 </div>
-                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">CI</span>
+                <span class="font-mono text-[10px] text-black/40 uppercase tracking-wider">Scanned PDFs</span>
               </div>
-              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Faster CI</h3>
+              <h3 class="font-mono text-base font-medium text-black/90 mb-2">Local grayscale render</h3>
               <p class="text-sm text-black/60 leading-relaxed mb-4">
-                Lint, test, and package start immediately. Tests run under <code class="font-mono text-black/90 text-xs">pytest -n auto</code>, and coverage is enforced in the same process.
+                Empty-text / scanned PDFs render to compact grayscale page images locally and are never uploaded for OpenRouter document-parse.
               </p>
               <div class="flex flex-wrap gap-1.5">
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">detect-jobs</span>
-                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">pytest-xdist</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">grayscale</span>
+                <span class="font-mono text-[11px] text-black/90 border border-black/10 px-2 py-1">local render</span>
               </div>
             </div>
           </div>
 
           <p class="font-mono text-xs text-black/40">
-            Also in v0.12.0: docs PR builds no longer queue behind the <code>pages</code> concurrency group.
-            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0110---2026-08-20" class="hover:text-black/90 transition-colors">v0.11.0</a>
-            shipped swarms, importable agents, extraction styles, and a batch-ready CLI.
+            Also in v0.13.0: more reliable OpenRouter usage capture, ExtractBench window-pool slack and leftover-window merge on pool timeout.
+            <a href="https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/CHANGELOG.md#0120---2026-08-31" class="hover:text-black/90 transition-colors">v0.12.0</a>
+            shipped opt-in field citations.
           </p>
         </div>
       </section>
