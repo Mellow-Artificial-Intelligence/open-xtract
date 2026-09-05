@@ -8,8 +8,8 @@ title: ExtractBench smoke log
 Local 6-document `--test` runs of
 [`scripts/extractbench.py`](https://github.com/Mellow-Artificial-Intelligence/openextract/blob/main/scripts/extractbench.py)
 on OpenRouter `z-ai/glm-5.3-flash`. Citations on. The full 370-document
-benchmark was not run. PyPI is still `0.12.0`; runner changes are in
-CHANGELOG Unreleased.
+benchmark was not run. PyPI / package is `0.13.0`; runner/parse-then-extract
+changes are in CHANGELOG `[0.13.0]`.
 
 How to run: [ExtractBench](extractbench.md).
 
