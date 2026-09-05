@@ -70,7 +70,8 @@ jobs:
           git checkout -B "$BRANCH"
           git add pyproject.toml uv.lock
           git commit -m "$TITLE"
-          git push --force-with-lease origin "$BRANCH"
+          # Checkout has only main, so lease has no expected remote tip; this branch is workflow-owned.
+          git push --force origin "$BRANCH"
           if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
             gh pr edit "$BRANCH" --title "$TITLE" --body "Daily rolling 24h supply-chain embargo bump. Refuses any package version published after \`${NEW_CUTOFF}\`."
           else
