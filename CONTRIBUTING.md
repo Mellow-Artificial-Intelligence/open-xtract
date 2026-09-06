@@ -106,7 +106,8 @@ uv run python scripts/extractbench.py --model openai:gpt-5 --test
 
 The first run bootstraps ExtractBench into `.extractbench/`. This is opt-in,
 makes live model calls, and is not part of default CI. See
-[docs/extractbench.md](docs/extractbench.md).
+[docs/extractbench.md](docs/extractbench.md) for commands and the latest local
+smoke status.
 
 ## Live provider smoke tests (maintainers)
 

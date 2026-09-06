@@ -8,6 +8,10 @@ timing when that is known.
 
 ## [Unreleased]
 
+### Removed
+- ExtractBench per-SHA smoke lab log (`docs/extractbench-smokes.md`). Latest
+  6-doc smoke status now lives in `docs/extractbench.md`.
+
 ## [0.13.0] - 2026-09-04
 
 ### Changed

@@ -121,13 +121,17 @@ via `extra_body` as well as `openrouter_usage`).
 `--test` is 6 documents and is the right first run (cents on a hosted API). A
 full run is 370 documents / 4,869 pages and is metered API usage.
 
-Local GLM-5.3-flash `--test` scores are in the
-[ExtractBench smoke log](extractbench-smokes.md). The 370-document run
-has not been run.
+## Latest smoke
 
-Listing this pipeline on the official ExtractBench leaderboard is a later
-change in [run-llama/ExtractBench](https://github.com/run-llama/ExtractBench),
-not this repository.
+Local 6-document `--test` on OpenRouter `z-ai/glm-5.3-flash` (citations on,
+package `0.13.0`) finished 6/6 inference. Successful-only page F1 was 0.24,
+below the maintainer gate (6/6 finish **and** successful-only page F1 > 0.37).
+The full 370-document run has not been run. Listing this pipeline on the
+official ExtractBench leaderboard is a later change in
+[run-llama/ExtractBench](https://github.com/run-llama/ExtractBench), not this
+repository.
+
+How to run: [Quick start](#quick-start).
 
 ## Dataset license
 

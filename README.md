@@ -738,8 +738,8 @@ with any model:
 uv run python scripts/extractbench.py --model openai:gpt-5 --test
 ```
 
-See [docs/extractbench.md](docs/extractbench.md). Local 6-doc GLM-5.3-flash
-scores: [docs/extractbench-smokes.md](docs/extractbench-smokes.md).
+See [docs/extractbench.md](docs/extractbench.md) for how to run it and the
+latest local 6-doc smoke status.
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the full contributor guide.
 
