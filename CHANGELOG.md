@@ -12,6 +12,10 @@ timing when that is known.
 - ExtractBench per-SHA smoke lab log (`docs/extractbench-smokes.md`). Latest
   6-doc smoke status now lives in `docs/extractbench.md`.
 
+### Security
+- Bump locked `pyasn1` from 0.6.3 to 0.6.4 to address CVE-2026-59884
+  (unbounded BER tag parsing / DoS). (#217)
+
 ## [0.13.0] - 2026-09-04
 
 ### Changed
